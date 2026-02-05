@@ -1,20 +1,73 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 
 /*
  * ============================================
  * BERKELEY INTERNATIONAL EXPENSE MANAGEMENT SYSTEM
- * Version: 1.2
+ * Version: 1.3 - With Supabase Database
  * ============================================
  * 
- * CHANGES IN v1.2:
- * - Preview shows full expense claim form layout before submitting
- * - Credit card statement is MANDATORY for foreign currency (blocks submission)
- * - Fixed claims visibility for finance/admin
- * - Everyone can submit their own expenses
- * 
- * TO ADD/EDIT EMPLOYEES:
- * Scroll down to the EMPLOYEES section and edit the list.
+ * SUPABASE CONNECTION - UPDATE THESE IF NEEDED
  */
+const SUPABASE_URL = 'https://wlhoyjsicvkncfjbexoi.supabase.co';
+const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IndsaG95anNpY3ZrbmNmamJleG9pIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzAyNzIyMzcsImV4cCI6MjA4NTg0ODIzN30.AB-W5DjcmCl6fnWiQ2reD0rgDIJiMCGymc994fSJplw';
+
+// Simple Supabase client
+const supabase = {
+  from: (table) => ({
+    select: async (columns = '*') => {
+      const res = await fetch(`${SUPABASE_URL}/rest/v1/${table}?select=${columns}`, {
+        headers: {
+          'apikey': SUPABASE_ANON_KEY,
+          'Authorization': `Bearer ${SUPABASE_ANON_KEY}`
+        }
+      });
+      const data = await res.json();
+      return { data, error: res.ok ? null : data };
+    },
+    insert: async (rows) => {
+      const res = await fetch(`${SUPABASE_URL}/rest/v1/${table}`, {
+        method: 'POST',
+        headers: {
+          'apikey': SUPABASE_ANON_KEY,
+          'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
+          'Content-Type': 'application/json',
+          'Prefer': 'return=representation'
+        },
+        body: JSON.stringify(rows)
+      });
+      const data = await res.json();
+      return { data, error: res.ok ? null : data };
+    },
+    update: async (updates) => ({
+      eq: async (column, value) => {
+        const res = await fetch(`${SUPABASE_URL}/rest/v1/${table}?${column}=eq.${value}`, {
+          method: 'PATCH',
+          headers: {
+            'apikey': SUPABASE_ANON_KEY,
+            'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
+            'Content-Type': 'application/json',
+            'Prefer': 'return=representation'
+          },
+          body: JSON.stringify(updates)
+        });
+        const data = await res.json();
+        return { data, error: res.ok ? null : data };
+      }
+    }),
+    delete: async () => ({
+      eq: async (column, value) => {
+        const res = await fetch(`${SUPABASE_URL}/rest/v1/${table}?${column}=eq.${value}`, {
+          method: 'DELETE',
+          headers: {
+            'apikey': SUPABASE_ANON_KEY,
+            'Authorization': `Bearer ${SUPABASE_ANON_KEY}`
+          }
+        });
+        return { error: res.ok ? null : 'Delete failed' };
+      }
+    })
+  })
+};
 
 // ============================================
 // EMPLOYEES - EDIT THIS LIST TO ADD/REMOVE PEOPLE
@@ -58,7 +111,7 @@ const EMPLOYEES = [
 ];
 
 // ============================================
-// SYSTEM CONFIGURATION - DO NOT EDIT UNLESS YOU KNOW WHAT YOU'RE DOING
+// CONFIGURATION
 // ============================================
 const EXPENSE_CATEGORIES = {
   A: { name: 'Petrol Expenditure', subcategories: ['Full Petrol Allowance / Fuel Card', 'Business Mileage'], icon: '⛽', requiresAttendees: false },
@@ -92,11 +145,21 @@ const formatDate = (dateStr) => {
   const date = new Date(dateStr);
   return date.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
 };
+const formatShortDate = (dateStr) => {
+  if (!dateStr) return '';
+  const date = new Date(dateStr);
+  return date.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: '2-digit' });
+};
 const isOlderThan2Months = (dateStr) => {
   const expenseDate = new Date(dateStr);
   const twoMonthsAgo = new Date();
   twoMonthsAgo.setMonth(twoMonthsAgo.getMonth() - 2);
   return expenseDate < twoMonthsAgo;
+};
+const getMonthYear = (dateStr) => {
+  if (!dateStr) return '';
+  const date = new Date(dateStr);
+  return date.toLocaleDateString('en-GB', { month: 'short', year: '2-digit' });
 };
 
 // ============================================
@@ -106,12 +169,37 @@ export default function BerkeleyExpenseSystem() {
   const [currentUser, setCurrentUser] = useState(null);
   const [expenses, setExpenses] = useState([]);
   const [claims, setClaims] = useState([]);
+  const [loading, setLoading] = useState(false);
   const [showAddExpense, setShowAddExpense] = useState(false);
   const [showPreview, setShowPreview] = useState(false);
   const [showStatementUpload, setShowStatementUpload] = useState(false);
   const [creditCardStatement, setCreditCardStatement] = useState(null);
   const [selectedClaim, setSelectedClaim] = useState(null);
   const [activeTab, setActiveTab] = useState('my_expenses');
+  const [previewPage, setPreviewPage] = useState(0);
+
+  // Load claims from database
+  const loadClaims = async () => {
+    setLoading(true);
+    try {
+      const { data, error } = await supabase.from('claims').select('*');
+      if (error) {
+        console.error('Error loading claims:', error);
+      } else {
+        setClaims(data || []);
+      }
+    } catch (err) {
+      console.error('Failed to load claims:', err);
+    }
+    setLoading(false);
+  };
+
+  // Load claims on mount and when user changes
+  useEffect(() => {
+    if (currentUser) {
+      loadClaims();
+    }
+  }, [currentUser]);
 
   // Derived values
   const getUserOffice = (user) => OFFICES.find(o => o.code === user?.office);
@@ -119,7 +207,6 @@ export default function BerkeleyExpenseSystem() {
   const pendingExpenses = expenses.filter(e => e.status === 'draft');
   const totalPendingAmount = pendingExpenses.reduce((sum, e) => sum + parseFloat(e.amount || 0), 0);
   
-  // Check for foreign currency
   const isForeignCurrency = (currency) => {
     if (!currentUser) return false;
     const userCurrency = currentUser.reimburseCurrency || getUserOffice(currentUser)?.currency;
@@ -129,28 +216,23 @@ export default function BerkeleyExpenseSystem() {
   const hasForeignCurrency = foreignCurrencyExpenses.length > 0;
   const hasOldExpenses = pendingExpenses.some(e => e.isOld);
 
-  // Get next reference number
   const getNextRef = (category) => {
     const catExpenses = pendingExpenses.filter(e => e.category === category);
     return `${category}${catExpenses.length + 1}`;
   };
 
-  // Get claims visible to current user based on role
   const getVisibleClaims = () => {
     if (!currentUser) return [];
     if (currentUser.role === 'finance') {
-      // Finance sees ALL claims
       return claims;
     } else if (currentUser.role === 'admin') {
-      // Admin sees their own + their office's claims
       const userOfficeCode = currentUser.office;
       return claims.filter(c => {
-        const claimEmployee = EMPLOYEES.find(e => e.id === c.employeeId);
-        return c.employeeId === currentUser.id || claimEmployee?.office === userOfficeCode;
+        const claimEmployee = EMPLOYEES.find(e => e.id === c.user_id);
+        return c.user_id === currentUser.id || claimEmployee?.office === userOfficeCode;
       });
     } else {
-      // Employee sees only their own
-      return claims.filter(c => c.employeeId === currentUser.id);
+      return claims.filter(c => c.user_id === currentUser.id);
     }
   };
 
@@ -195,7 +277,7 @@ export default function BerkeleyExpenseSystem() {
           </div>
 
           <p className="text-center text-xs text-slate-400 mt-8">
-            Berkeley International Expense Management System v1.2
+            Berkeley International Expense Management System v1.3
           </p>
         </div>
       </div>
@@ -309,7 +391,7 @@ export default function BerkeleyExpenseSystem() {
                 {isForeignCurrency(formData.currency) && (
                   <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 text-sm text-amber-800 flex items-start gap-2">
                     <span>💳</span>
-                    <span><strong>Foreign currency</strong> - You MUST upload your credit card statement before submitting your claim.</span>
+                    <span><strong>Foreign currency</strong> - You MUST upload your credit card statement before submitting.</span>
                   </div>
                 )}
 
@@ -380,7 +462,7 @@ export default function BerkeleyExpenseSystem() {
   };
 
   // ============================================
-  // PREVIEW CLAIM MODAL - Shows full expense form layout
+  // PREVIEW CLAIM MODAL - Excel Style Multi-Page
   // ============================================
   const PreviewClaimModal = () => {
     const groupedExpenses = pendingExpenses.reduce((acc, exp) => {
@@ -390,157 +472,517 @@ export default function BerkeleyExpenseSystem() {
     }, {});
 
     const canSubmit = !hasForeignCurrency || (hasForeignCurrency && creditCardStatement);
+    
+    // Calculate category totals
+    const categoryTotals = {};
+    Object.entries(EXPENSE_CATEGORIES).forEach(([key]) => {
+      categoryTotals[key] = (groupedExpenses[key] || []).reduce((sum, e) => sum + e.amount, 0);
+    });
+
+    // Get claim month
+    const claimMonth = pendingExpenses.length > 0 ? getMonthYear(pendingExpenses[0].date) : getMonthYear(new Date().toISOString());
+
+    // Pages: 0=Summary, 1=Travel Detail, 2=Entertaining Detail, 3=Receipts
+    const pages = ['Summary', 'Travel Expense Detail', 'Entertaining & Welfare Detail', 'Attached Receipts'];
+
+    // Travel expenses (C, D)
+    const travelExpenses = [...(groupedExpenses['C'] || []), ...(groupedExpenses['D'] || [])];
+    // Entertaining expenses (E, F)
+    const entertainingExpenses = [...(groupedExpenses['E'] || []), ...(groupedExpenses['F'] || [])];
 
     return (
       <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-        <div className="bg-white rounded-2xl max-w-3xl w-full max-h-[90vh] overflow-hidden shadow-2xl">
-          <div className="bg-gradient-to-r from-green-600 to-emerald-600 text-white p-5 flex justify-between items-center">
+        <div className="bg-white rounded-2xl max-w-4xl w-full max-h-[95vh] overflow-hidden shadow-2xl flex flex-col">
+          {/* Header */}
+          <div className="bg-gradient-to-r from-blue-900 to-indigo-900 text-white p-4 flex justify-between items-center shrink-0">
             <div>
-              <h2 className="text-lg font-bold">📋 Preview Expense Claim Form</h2>
-              <p className="text-green-100 text-sm">Review everything before submitting</p>
+              <h2 className="text-lg font-bold">📋 Expense Claim Form Preview</h2>
+              <p className="text-blue-200 text-sm">Page {previewPage + 1} of {pages.length}: {pages[previewPage]}</p>
             </div>
-            <button onClick={() => setShowPreview(false)} className="w-8 h-8 rounded-full bg-white/20 hover:bg-white/30 flex items-center justify-center">✕</button>
+            <button onClick={() => { setShowPreview(false); setPreviewPage(0); }} className="w-8 h-8 rounded-full bg-white/20 hover:bg-white/30 flex items-center justify-center">✕</button>
           </div>
 
-          <div className="p-6 overflow-y-auto max-h-[calc(90vh-200px)]">
-            {/* Form Header - Like the Excel template */}
-            <div className="border-2 border-slate-300 rounded-xl p-4 mb-6 bg-slate-50">
-              <div className="text-center mb-4">
-                <h3 className="text-xl font-bold text-slate-800">BERKELEY INTERNATIONAL</h3>
-                <p className="text-slate-600">EXPENSE CLAIM FORM</p>
-              </div>
-              <div className="grid grid-cols-2 gap-4 text-sm">
-                <div className="flex">
-                  <span className="text-slate-500 w-24">Name:</span>
-                  <span className="font-semibold">{currentUser.name}</span>
-                </div>
-                <div className="flex">
-                  <span className="text-slate-500 w-24">Office:</span>
-                  <span className="font-semibold">{userOffice?.name}</span>
-                </div>
-                <div className="flex">
-                  <span className="text-slate-500 w-24">Date:</span>
-                  <span className="font-semibold">{formatDate(new Date().toISOString())}</span>
-                </div>
-                <div className="flex">
-                  <span className="text-slate-500 w-24">Currency:</span>
-                  <span className="font-semibold">{userOffice?.currency}</span>
-                </div>
-              </div>
-            </div>
+          {/* Page Navigation */}
+          <div className="bg-slate-100 px-4 py-2 flex gap-2 overflow-x-auto shrink-0">
+            {pages.map((page, idx) => (
+              <button
+                key={idx}
+                onClick={() => setPreviewPage(idx)}
+                className={`px-4 py-2 rounded-lg text-sm font-medium whitespace-nowrap transition-all ${
+                  previewPage === idx 
+                    ? 'bg-blue-600 text-white shadow' 
+                    : 'bg-white text-slate-600 hover:bg-slate-200'
+                }`}
+              >
+                {page}
+              </button>
+            ))}
+          </div>
 
-            {/* Category Sections - Like Excel tabs */}
-            {Object.entries(groupedExpenses).sort(([a], [b]) => a.localeCompare(b)).map(([cat, exps]) => {
-              const catTotal = exps.reduce((sum, e) => sum + e.amount, 0);
-              return (
-                <div key={cat} className="mb-6 border border-slate-200 rounded-xl overflow-hidden">
-                  <div className="bg-blue-50 px-4 py-3 flex justify-between items-center border-b border-slate-200">
-                    <h3 className="font-bold text-slate-800">{EXPENSE_CATEGORIES[cat].icon} {cat}. {EXPENSE_CATEGORIES[cat].name}</h3>
-                    <span className="font-bold text-blue-700">{formatCurrency(catTotal, userOffice?.currency)}</span>
+          {/* Page Content */}
+          <div className="flex-1 overflow-y-auto p-6">
+            
+            {/* PAGE 0: Summary (Main Expense Claim Form) */}
+            {previewPage === 0 && (
+              <div className="max-w-3xl mx-auto">
+                {/* Header */}
+                <div className="border-2 border-slate-400 mb-4">
+                  <div className="flex">
+                    <div className="w-24 bg-slate-100 p-2 flex items-center justify-center border-r border-slate-400">
+                      <div className="w-16 h-16 bg-blue-900 rounded-lg flex items-center justify-center text-white text-2xl font-bold">B</div>
+                    </div>
+                    <div className="flex-1 text-center py-4">
+                      <h1 className="text-xl font-bold">Motor & Expense Claim Form</h1>
+                      <p className="text-sm text-slate-600">Berkeley London Residential Ltd</p>
+                    </div>
+                    <div className="w-48 border-l border-slate-400">
+                      <div className="border-b border-slate-400 p-2 text-xs">
+                        <span className="text-slate-500">Account Code</span>
+                        <span className="float-right text-slate-500">Document Number</span>
+                      </div>
+                      <div className="p-2 text-center text-sm font-medium italic text-slate-400">Accounts Use Only</div>
+                    </div>
                   </div>
-                  <div className="overflow-x-auto">
+                </div>
+
+                {/* Employee Info */}
+                <div className="border-2 border-slate-400 mb-4">
+                  <div className="grid grid-cols-2">
+                    <div className="border-r border-b border-slate-400 p-3 flex">
+                      <span className="text-slate-600 w-20">Name</span>
+                      <span className="font-semibold text-blue-700">{currentUser.name}</span>
+                    </div>
+                    <div className="border-b border-slate-400 p-3 flex">
+                      <span className="text-slate-600 w-20">Month</span>
+                      <span className="font-semibold">{claimMonth}</span>
+                    </div>
+                    <div className="border-r border-slate-400 p-3 flex">
+                      <span className="text-slate-600 w-20">Office</span>
+                      <span className="font-semibold">{userOffice?.name}</span>
+                    </div>
+                    <div className="p-3 flex">
+                      <span className="text-slate-600 w-20">Currency</span>
+                      <span className="font-semibold">{userOffice?.currency}</span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Expenses Claim Table */}
+                <div className="border-2 border-slate-400 mb-4">
+                  <div className="bg-slate-200 p-2 font-bold text-center border-b border-slate-400">Expenses claim</div>
+                  
+                  {/* Motor Vehicle Expenditure */}
+                  <div className="border-b border-slate-400">
+                    <div className="bg-slate-100 p-2 font-semibold border-b border-slate-300">Motor Vehicle Expenditure</div>
                     <table className="w-full text-sm">
-                      <thead className="bg-slate-100">
-                        <tr>
-                          <th className="text-left py-2 px-3 font-semibold text-slate-600 w-16">Ref</th>
-                          <th className="text-left py-2 px-3 font-semibold text-slate-600 w-24">Date</th>
-                          <th className="text-left py-2 px-3 font-semibold text-slate-600">Merchant</th>
-                          <th className="text-left py-2 px-3 font-semibold text-slate-600">Description</th>
-                          <th className="text-right py-2 px-3 font-semibold text-slate-600 w-28">Amount</th>
-                          <th className="text-center py-2 px-3 font-semibold text-slate-600 w-20">Receipt</th>
+                      <tbody>
+                        <tr className="border-b border-slate-200">
+                          <td className="p-2 w-8">A.</td>
+                          <td className="p-2 text-blue-700 underline">Petrol Expenditure</td>
+                          <td className="p-2">Full Petrol Allowance / Fuel Card Holders</td>
+                          <td className="p-2 text-right w-28">{formatCurrency(categoryTotals['A'] || 0, userOffice?.currency)}</td>
+                        </tr>
+                        <tr className="border-b border-slate-200">
+                          <td className="p-2"></td>
+                          <td className="p-2"></td>
+                          <td className="p-2">Business Mileage Return (As Attached)</td>
+                          <td className="p-2 text-right">{formatCurrency(0, userOffice?.currency)}</td>
+                        </tr>
+                        <tr className="border-b border-slate-200">
+                          <td className="p-2">B.</td>
+                          <td className="p-2 text-blue-700 underline">Parking</td>
+                          <td className="p-2">Off-Street Parking</td>
+                          <td className="p-2 text-right">{formatCurrency(categoryTotals['B'] || 0, userOffice?.currency)}</td>
+                        </tr>
+                        <tr className="border-b border-slate-200">
+                          <td className="p-2">C.</td>
+                          <td className="p-2 text-blue-700 underline">Travel Expenses</td>
+                          <td className="p-2">Public Transport (Trains, Tubes, Buses etc.)</td>
+                          <td className="p-2 text-right">{formatCurrency((groupedExpenses['C'] || []).filter(e => e.subcategory === 'Public Transport').reduce((s, e) => s + e.amount, 0), userOffice?.currency)}</td>
+                        </tr>
+                        <tr className="border-b border-slate-200">
+                          <td className="p-2"></td>
+                          <td className="p-2"></td>
+                          <td className="p-2">Taxis</td>
+                          <td className="p-2 text-right font-medium">{formatCurrency((groupedExpenses['C'] || []).filter(e => e.subcategory === 'Taxis').reduce((s, e) => s + e.amount, 0), userOffice?.currency)}</td>
+                        </tr>
+                        <tr className="border-b border-slate-200">
+                          <td className="p-2"></td>
+                          <td className="p-2"></td>
+                          <td className="p-2">Tolls</td>
+                          <td className="p-2 text-right">{formatCurrency((groupedExpenses['C'] || []).filter(e => e.subcategory === 'Tolls').reduce((s, e) => s + e.amount, 0), userOffice?.currency)}</td>
+                        </tr>
+                        <tr className="border-b border-slate-200">
+                          <td className="p-2"></td>
+                          <td className="p-2"></td>
+                          <td className="p-2">Subsistence (meals while away from office)</td>
+                          <td className="p-2 text-right">{formatCurrency((groupedExpenses['C'] || []).filter(e => e.subcategory === 'Subsistence').reduce((s, e) => s + e.amount, 0), userOffice?.currency)}</td>
+                        </tr>
+                        <tr className="border-b border-slate-300">
+                          <td className="p-2">D</td>
+                          <td className="p-2 text-blue-700 underline">Vehicle Repairs</td>
+                          <td className="p-2">Repairs / Parts</td>
+                          <td className="p-2 text-right">{formatCurrency(categoryTotals['D'] || 0, userOffice?.currency)}</td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
+
+                  {/* Business Expenditure */}
+                  <div>
+                    <div className="bg-slate-100 p-2 font-semibold border-b border-slate-300">Business Expenditure</div>
+                    <table className="w-full text-sm">
+                      <tbody>
+                        <tr className="border-b border-slate-200">
+                          <td className="p-2 w-8">E</td>
+                          <td className="p-2 text-blue-700 underline">Entertaining</td>
+                          <td className="p-2">Customers (Staff & Customers)</td>
+                          <td className="p-2 text-right w-28 font-medium">{formatCurrency((groupedExpenses['E'] || []).filter(e => e.subcategory?.includes('Customer')).reduce((s, e) => s + e.amount, 0), userOffice?.currency)}</td>
+                        </tr>
+                        <tr className="border-b border-slate-200">
+                          <td className="p-2"></td>
+                          <td className="p-2"></td>
+                          <td className="p-2">Employees (Must be only Staff present)</td>
+                          <td className="p-2 text-right">{formatCurrency((groupedExpenses['E'] || []).filter(e => e.subcategory?.includes('Employee')).reduce((s, e) => s + e.amount, 0), userOffice?.currency)}</td>
+                        </tr>
+                        <tr className="border-b border-slate-200">
+                          <td className="p-2">F</td>
+                          <td className="p-2 text-blue-700 underline">Welfare</td>
+                          <td className="p-2">Hotel Accommodation</td>
+                          <td className="p-2 text-right">{formatCurrency((groupedExpenses['F'] || []).filter(e => e.subcategory?.includes('Hotel')).reduce((s, e) => s + e.amount, 0), userOffice?.currency)}</td>
+                        </tr>
+                        <tr className="border-b border-slate-200">
+                          <td className="p-2"></td>
+                          <td className="p-2"></td>
+                          <td className="p-2">Gifts to Employees / Corporate Gifts</td>
+                          <td className="p-2 text-right">{formatCurrency((groupedExpenses['F'] || []).filter(e => !e.subcategory?.includes('Hotel')).reduce((s, e) => s + e.amount, 0), userOffice?.currency)}</td>
+                        </tr>
+                        <tr className="border-b border-slate-200">
+                          <td className="p-2">G</td>
+                          <td className="p-2 text-blue-700 underline">Subscriptions</td>
+                          <td className="p-2">Professional / Non-Professional / Newspapers</td>
+                          <td className="p-2 text-right">{formatCurrency(categoryTotals['G'] || 0, userOffice?.currency)}</td>
+                        </tr>
+                        <tr className="border-b border-slate-200">
+                          <td className="p-2">H</td>
+                          <td className="p-2 text-blue-700 underline">Computer Costs</td>
+                          <td className="p-2">All items</td>
+                          <td className="p-2 text-right">{formatCurrency(categoryTotals['H'] || 0, userOffice?.currency)}</td>
+                        </tr>
+                        <tr className="border-b border-slate-200">
+                          <td className="p-2">I</td>
+                          <td className="p-2 text-blue-700 underline">WIP</td>
+                          <td className="p-2">All items</td>
+                          <td className="p-2 text-right">{formatCurrency(categoryTotals['I'] || 0, userOffice?.currency)}</td>
+                        </tr>
+                        <tr className="border-b border-slate-200">
+                          <td className="p-2">I</td>
+                          <td className="p-2 text-blue-700 underline">Other</td>
+                          <td className="p-2">Miscellaneous Vatable Items</td>
+                          <td className="p-2 text-right">{formatCurrency(0, userOffice?.currency)}</td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
+
+                  {/* Total */}
+                  <div className="border-t-2 border-slate-400 bg-blue-50 p-3 flex justify-between items-center">
+                    <span className="font-bold text-lg">Total expenses claimed</span>
+                    <span className="font-bold text-xl text-blue-700">{formatCurrency(totalPendingAmount, userOffice?.currency)}</span>
+                  </div>
+                </div>
+
+                {/* Signature Section */}
+                <div className="border-2 border-slate-400 p-4">
+                  <div className="grid grid-cols-2 gap-8">
+                    <div>
+                      <p className="text-sm text-slate-600 mb-2">Signature of Claimant</p>
+                      <div className="border-b border-slate-400 h-12 flex items-end pb-1">
+                        <span className="text-blue-700 italic font-medium">{currentUser.name}</span>
+                      </div>
+                    </div>
+                    <div>
+                      <p className="text-sm text-slate-600 mb-2">Date</p>
+                      <div className="border-b border-slate-400 h-12 flex items-end pb-1">
+                        <span className="font-medium">{formatDate(new Date().toISOString())}</span>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="mt-4">
+                    <p className="text-sm text-slate-600 mb-2">Authorised</p>
+                    <div className="border-b border-slate-400 h-12 flex items-end pb-1">
+                      <span className="text-slate-400 italic">Pending approval</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* PAGE 1: Travel Expense Detail */}
+            {previewPage === 1 && (
+              <div className="max-w-4xl mx-auto">
+                <div className="border-2 border-slate-400">
+                  <div className="bg-blue-900 text-white p-3 text-center font-bold text-lg">
+                    Travel Expense Detail
+                  </div>
+                  <div className="p-3 bg-slate-50 border-b border-slate-400 flex justify-between">
+                    <span>Name: <strong>{currentUser.name}</strong></span>
+                    <span className="text-blue-700 text-sm italic">Please do not include any travel expenses associated with Employee Entertaining (See Staff Entertaining)</span>
+                  </div>
+                  
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-xs">
+                      <thead>
+                        <tr className="bg-slate-200">
+                          <th className="border border-slate-300 p-2 w-16">Receipt No</th>
+                          <th className="border border-slate-300 p-2">VAT</th>
+                          <th className="border border-slate-300 p-2" colSpan="2">B. Parking</th>
+                          <th className="border border-slate-300 p-2" colSpan="5">C. Travel Expenses</th>
+                          <th className="border border-slate-300 p-2" colSpan="2">D. Motor Vehicles</th>
+                          <th className="border border-slate-300 p-2 w-48">Full Description</th>
+                        </tr>
+                        <tr className="bg-slate-100 text-xs">
+                          <th className="border border-slate-300 p-1"></th>
+                          <th className="border border-slate-300 p-1"></th>
+                          <th className="border border-slate-300 p-1">Parking</th>
+                          <th className="border border-slate-300 p-1">Public Transport</th>
+                          <th className="border border-slate-300 p-1">Taxis</th>
+                          <th className="border border-slate-300 p-1">Tolls</th>
+                          <th className="border border-slate-300 p-1">Cong Chg</th>
+                          <th className="border border-slate-300 p-1">Subsistence</th>
+                          <th className="border border-slate-300 p-1">Repairs</th>
+                          <th className="border border-slate-300 p-1">Parts</th>
+                          <th className="border border-slate-300 p-1"></th>
                         </tr>
                       </thead>
                       <tbody>
-                        {exps.map((exp, idx) => (
-                          <tr key={exp.id} className={idx % 2 === 0 ? 'bg-white' : 'bg-slate-50'}>
-                            <td className="py-2 px-3">
-                              <span className="bg-blue-100 text-blue-700 text-xs font-bold px-2 py-1 rounded">{exp.ref}</span>
-                            </td>
-                            <td className="py-2 px-3 text-slate-600">{formatDate(exp.date)}</td>
-                            <td className="py-2 px-3 font-medium text-slate-800">{exp.merchant}</td>
-                            <td className="py-2 px-3 text-slate-600">
-                              {exp.description}
-                              {exp.attendees && <div className="text-xs text-slate-400 mt-1">👥 {exp.attendees}</div>}
-                            </td>
-                            <td className="py-2 px-3 text-right font-medium">
-                              {formatCurrency(exp.amount, exp.currency)}
-                              {exp.isForeignCurrency && <span className="ml-1 text-amber-600 text-xs">FCY</span>}
-                            </td>
-                            <td className="py-2 px-3 text-center">
-                              <span className="text-green-600">✓ {exp.ref}</span>
+                        {travelExpenses.length === 0 ? (
+                          <tr>
+                            <td colSpan="12" className="border border-slate-300 p-8 text-center text-slate-400">
+                              No travel expenses
                             </td>
                           </tr>
-                        ))}
+                        ) : (
+                          travelExpenses.map((exp, idx) => (
+                            <tr key={exp.id} className={idx % 2 === 0 ? 'bg-white' : 'bg-slate-50'}>
+                              <td className="border border-slate-300 p-2 text-center font-bold text-blue-700">{exp.ref}</td>
+                              <td className="border border-slate-300 p-2 text-center">*</td>
+                              <td className="border border-slate-300 p-2 text-right">{exp.category === 'B' ? exp.amount.toFixed(2) : ''}</td>
+                              <td className="border border-slate-300 p-2 text-right">{exp.subcategory === 'Public Transport' ? exp.amount.toFixed(2) : ''}</td>
+                              <td className="border border-slate-300 p-2 text-right font-medium">{exp.subcategory === 'Taxis' ? exp.amount.toFixed(2) : ''}</td>
+                              <td className="border border-slate-300 p-2 text-right">{exp.subcategory === 'Tolls' ? exp.amount.toFixed(2) : ''}</td>
+                              <td className="border border-slate-300 p-2 text-right">{exp.subcategory === 'Congestion Charging' ? exp.amount.toFixed(2) : ''}</td>
+                              <td className="border border-slate-300 p-2 text-right">{exp.subcategory === 'Subsistence' ? exp.amount.toFixed(2) : ''}</td>
+                              <td className="border border-slate-300 p-2 text-right">{exp.subcategory === 'Repairs' ? exp.amount.toFixed(2) : ''}</td>
+                              <td className="border border-slate-300 p-2 text-right">{exp.subcategory === 'Parts' ? exp.amount.toFixed(2) : ''}</td>
+                              <td className="border border-slate-300 p-2 text-xs">{exp.ref} {exp.description}</td>
+                            </tr>
+                          ))
+                        )}
+                        {/* Totals row */}
+                        <tr className="bg-blue-100 font-bold">
+                          <td className="border border-slate-300 p-2" colSpan="2">Totals</td>
+                          <td className="border border-slate-300 p-2 text-right">{(categoryTotals['B'] || 0).toFixed(2)}</td>
+                          <td className="border border-slate-300 p-2 text-right">{(groupedExpenses['C'] || []).filter(e => e.subcategory === 'Public Transport').reduce((s, e) => s + e.amount, 0).toFixed(2)}</td>
+                          <td className="border border-slate-300 p-2 text-right">{(groupedExpenses['C'] || []).filter(e => e.subcategory === 'Taxis').reduce((s, e) => s + e.amount, 0).toFixed(2)}</td>
+                          <td className="border border-slate-300 p-2 text-right">{(groupedExpenses['C'] || []).filter(e => e.subcategory === 'Tolls').reduce((s, e) => s + e.amount, 0).toFixed(2)}</td>
+                          <td className="border border-slate-300 p-2 text-right">{(groupedExpenses['C'] || []).filter(e => e.subcategory === 'Congestion Charging').reduce((s, e) => s + e.amount, 0).toFixed(2)}</td>
+                          <td className="border border-slate-300 p-2 text-right">{(groupedExpenses['C'] || []).filter(e => e.subcategory === 'Subsistence').reduce((s, e) => s + e.amount, 0).toFixed(2)}</td>
+                          <td className="border border-slate-300 p-2 text-right">{(groupedExpenses['D'] || []).filter(e => e.subcategory === 'Repairs').reduce((s, e) => s + e.amount, 0).toFixed(2)}</td>
+                          <td className="border border-slate-300 p-2 text-right">{(groupedExpenses['D'] || []).filter(e => e.subcategory === 'Parts').reduce((s, e) => s + e.amount, 0).toFixed(2)}</td>
+                          <td className="border border-slate-300 p-2 text-right text-blue-700">
+                            {userOffice?.currency} {(categoryTotals['C'] + categoryTotals['D'] + categoryTotals['B']).toFixed(2)}
+                          </td>
+                        </tr>
                       </tbody>
                     </table>
                   </div>
                 </div>
-              );
-            })}
-
-            {/* Summary */}
-            <div className="border-2 border-slate-300 rounded-xl p-4 bg-slate-50">
-              <div className="flex justify-between items-center text-lg">
-                <span className="font-bold text-slate-800">TOTAL CLAIM AMOUNT:</span>
-                <span className="font-bold text-2xl text-blue-700">{formatCurrency(totalPendingAmount, userOffice?.currency)}</span>
-              </div>
-              <div className="mt-2 text-sm text-slate-500">
-                {pendingExpenses.length} receipt(s) attached, labelled {pendingExpenses.map(e => e.ref).join(', ')}
-              </div>
-            </div>
-
-            {/* Warnings */}
-            {hasOldExpenses && (
-              <div className="mt-4 bg-red-50 border border-red-200 rounded-xl p-4">
-                <p className="text-red-800 font-semibold">⚠️ Contains Expenses Older Than 2 Months</p>
-                <p className="text-red-700 text-sm mt-1">This claim requires Cathy's approval.</p>
               </div>
             )}
 
-            {/* Credit Card Statement Section */}
-            {hasForeignCurrency && (
-              <div className={`mt-4 rounded-xl p-4 ${creditCardStatement ? 'bg-green-50 border border-green-200' : 'bg-red-50 border border-red-200'}`}>
-                {creditCardStatement ? (
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <p className="text-green-800 font-semibold">✅ Credit Card Statement Attached</p>
-                      <p className="text-green-700 text-sm mt-1">{creditCardStatement.name}</p>
-                    </div>
-                    <button onClick={() => setCreditCardStatement(null)} className="text-green-600 hover:text-green-800 text-sm underline">Remove</button>
+            {/* PAGE 2: Entertaining & Welfare Detail */}
+            {previewPage === 2 && (
+              <div className="max-w-4xl mx-auto">
+                <div className="border-2 border-slate-400">
+                  <div className="bg-blue-900 text-white p-3 text-center font-bold text-lg">
+                    Entertaining and Welfare Detail
                   </div>
-                ) : (
-                  <div>
-                    <p className="text-red-800 font-semibold">❌ Credit Card Statement REQUIRED</p>
-                    <p className="text-red-700 text-sm mt-1">You have foreign currency expenses. You must upload your credit card statement before submitting.</p>
-                    <p className="text-red-700 text-sm mt-2">
-                      Foreign currency items: {foreignCurrencyExpenses.map(e => `${e.ref} (${e.currency})`).join(', ')}
+                  <div className="p-3 bg-amber-50 border-b border-slate-400">
+                    <p className="text-amber-800 font-semibold">⚠️ PLEASE ENSURE A FULL LIST OF GUESTS ENTERTAINED ARE SUPPLIED WITH EACH RECEIPT STATING WHO THEY ARE EMPLOYED BY.</p>
+                  </div>
+                  <div className="p-3 bg-slate-50 border-b border-slate-400">
+                    <span>Name: <strong>{currentUser.name}</strong></span>
+                  </div>
+                  
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-xs">
+                      <thead>
+                        <tr className="bg-slate-200">
+                          <th className="border border-slate-300 p-2 w-16">Receipt No</th>
+                          <th className="border border-slate-300 p-2" colSpan="3">E. Employee Entertaining</th>
+                          <th className="border border-slate-300 p-2" colSpan="3">E. Business / Client Entertaining</th>
+                          <th className="border border-slate-300 p-2" colSpan="3">F. Welfare</th>
+                          <th className="border border-slate-300 p-2 w-56">Full Description</th>
+                        </tr>
+                        <tr className="bg-slate-100 text-xs">
+                          <th className="border border-slate-300 p-1"></th>
+                          <th className="border border-slate-300 p-1">Meals/Drinks</th>
+                          <th className="border border-slate-300 p-1">Accomodation</th>
+                          <th className="border border-slate-300 p-1">Other</th>
+                          <th className="border border-slate-300 p-1">Meals/Drinks</th>
+                          <th className="border border-slate-300 p-1">Accomodation</th>
+                          <th className="border border-slate-300 p-1">Other</th>
+                          <th className="border border-slate-300 p-1">Hotels</th>
+                          <th className="border border-slate-300 p-1">Employee Gifts</th>
+                          <th className="border border-slate-300 p-1">Corporate Gifts</th>
+                          <th className="border border-slate-300 p-1"></th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {entertainingExpenses.length === 0 ? (
+                          <tr>
+                            <td colSpan="11" className="border border-slate-300 p-8 text-center text-slate-400">
+                              No entertaining or welfare expenses
+                            </td>
+                          </tr>
+                        ) : (
+                          entertainingExpenses.map((exp, idx) => {
+                            const isEmployeeEntertaining = exp.category === 'E' && exp.subcategory?.includes('Employee');
+                            const isBusinessEntertaining = exp.category === 'E' && exp.subcategory?.includes('Customer');
+                            const isWelfare = exp.category === 'F';
+                            
+                            return (
+                              <tr key={exp.id} className={idx % 2 === 0 ? 'bg-white' : 'bg-slate-50'}>
+                                <td className="border border-slate-300 p-2 text-center font-bold text-blue-700">{exp.ref}</td>
+                                <td className="border border-slate-300 p-2 text-right">{isEmployeeEntertaining ? exp.amount.toFixed(2) : ''}</td>
+                                <td className="border border-slate-300 p-2 text-right"></td>
+                                <td className="border border-slate-300 p-2 text-right"></td>
+                                <td className="border border-slate-300 p-2 text-right font-medium">{isBusinessEntertaining ? exp.amount.toFixed(2) : ''}</td>
+                                <td className="border border-slate-300 p-2 text-right"></td>
+                                <td className="border border-slate-300 p-2 text-right"></td>
+                                <td className="border border-slate-300 p-2 text-right">{isWelfare && exp.subcategory?.includes('Hotel') ? exp.amount.toFixed(2) : ''}</td>
+                                <td className="border border-slate-300 p-2 text-right">{isWelfare && exp.subcategory?.includes('Gifts to Employees') ? exp.amount.toFixed(2) : ''}</td>
+                                <td className="border border-slate-300 p-2 text-right">{isWelfare && exp.subcategory?.includes('Corporate') ? exp.amount.toFixed(2) : ''}</td>
+                                <td className="border border-slate-300 p-2 text-xs">
+                                  {exp.ref} {exp.merchant} {exp.attendees ? `- ${exp.attendees}` : ''}
+                                </td>
+                              </tr>
+                            );
+                          })
+                        )}
+                        {/* Totals row */}
+                        <tr className="bg-blue-100 font-bold">
+                          <td className="border border-slate-300 p-2">Totals</td>
+                          <td className="border border-slate-300 p-2 text-right" colSpan="3">
+                            {(groupedExpenses['E'] || []).filter(e => e.subcategory?.includes('Employee')).reduce((s, e) => s + e.amount, 0).toFixed(2)}
+                          </td>
+                          <td className="border border-slate-300 p-2 text-right" colSpan="3">
+                            {(groupedExpenses['E'] || []).filter(e => e.subcategory?.includes('Customer')).reduce((s, e) => s + e.amount, 0).toFixed(2)}
+                          </td>
+                          <td className="border border-slate-300 p-2 text-right" colSpan="3">
+                            {(categoryTotals['F'] || 0).toFixed(2)}
+                          </td>
+                          <td className="border border-slate-300 p-2 text-right text-blue-700">
+                            {userOffice?.currency} {(categoryTotals['E'] + categoryTotals['F']).toFixed(2)}
+                          </td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* PAGE 3: Attached Receipts */}
+            {previewPage === 3 && (
+              <div className="max-w-4xl mx-auto">
+                <div className="border-2 border-slate-400 mb-4">
+                  <div className="bg-blue-900 text-white p-3 text-center font-bold text-lg">
+                    Attached Receipts
+                  </div>
+                  <div className="p-4">
+                    <p className="text-sm text-slate-600 mb-4">
+                      The following {pendingExpenses.length} receipts are attached to this claim, labeled with reference numbers:
                     </p>
-                    <button 
-                      onClick={() => { setShowPreview(false); setShowStatementUpload(true); }}
-                      className="mt-3 bg-amber-500 hover:bg-amber-600 text-white px-4 py-2 rounded-lg font-semibold"
-                    >
-                      📎 Upload Statement Now
-                    </button>
+                    
+                    <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+                      {pendingExpenses.map(exp => (
+                        <div key={exp.id} className="border-2 border-slate-300 rounded-lg overflow-hidden">
+                          <div className="bg-blue-100 p-2 flex justify-between items-center">
+                            <span className="font-bold text-blue-700 text-lg">{exp.ref}</span>
+                            <span className="text-xs text-slate-600">{formatShortDate(exp.date)}</span>
+                          </div>
+                          {exp.receiptPreview ? (
+                            <img src={exp.receiptPreview} alt={exp.ref} className="w-full h-32 object-cover" />
+                          ) : (
+                            <div className="w-full h-32 bg-slate-100 flex items-center justify-center">
+                              <span className="text-4xl">📄</span>
+                            </div>
+                          )}
+                          <div className="p-2 bg-slate-50">
+                            <p className="font-medium text-sm truncate">{exp.merchant}</p>
+                            <p className="text-xs text-slate-500 truncate">{exp.description}</p>
+                            <p className="font-bold text-blue-700 mt-1">{formatCurrency(exp.amount, exp.currency)}</p>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+
+                    {hasForeignCurrency && (
+                      <div className={`mt-6 rounded-xl p-4 ${creditCardStatement ? 'bg-green-50 border border-green-200' : 'bg-red-50 border-2 border-red-300'}`}>
+                        {creditCardStatement ? (
+                          <div className="flex items-center justify-between">
+                            <div>
+                              <p className="text-green-800 font-semibold">✅ Credit Card Statement Attached</p>
+                              <p className="text-green-700 text-sm mt-1">{creditCardStatement.name}</p>
+                            </div>
+                            <button onClick={() => setCreditCardStatement(null)} className="text-green-600 hover:text-green-800 text-sm underline">Remove</button>
+                          </div>
+                        ) : (
+                          <div>
+                            <p className="text-red-800 font-bold">❌ CREDIT CARD STATEMENT REQUIRED</p>
+                            <p className="text-red-700 text-sm mt-2">
+                              Foreign currency expenses: {foreignCurrencyExpenses.map(e => e.ref).join(', ')}
+                            </p>
+                            <button 
+                              onClick={() => { setShowPreview(false); setShowStatementUpload(true); }}
+                              className="mt-3 bg-amber-500 hover:bg-amber-600 text-white px-4 py-2 rounded-lg font-semibold"
+                            >
+                              📎 Upload Statement
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </div>
-                )}
+                </div>
               </div>
             )}
           </div>
 
-          <div className="p-4 border-t border-slate-100 bg-slate-50 flex gap-3">
-            <button onClick={() => setShowPreview(false)} className="flex-1 py-3 rounded-xl border-2 border-slate-300 font-semibold text-slate-600 hover:bg-slate-100">
+          {/* Footer */}
+          <div className="p-4 border-t border-slate-200 bg-slate-50 flex gap-3 shrink-0">
+            <button 
+              onClick={() => { setShowPreview(false); setPreviewPage(0); }} 
+              className="flex-1 py-3 rounded-xl border-2 border-slate-300 font-semibold text-slate-600 hover:bg-slate-100"
+            >
               ← Back to Edit
             </button>
             <button 
-              onClick={() => { handleSubmitClaim(); setShowPreview(false); }} 
-              disabled={!canSubmit}
-              className={`flex-[2] py-3 rounded-xl font-semibold shadow-lg ${
-                canSubmit 
-                  ? 'bg-gradient-to-r from-green-600 to-emerald-600 text-white hover:shadow-xl' 
+              onClick={async () => { 
+                await handleSubmitClaim(); 
+                setShowPreview(false); 
+                setPreviewPage(0);
+              }} 
+              disabled={!canSubmit || loading}
+              className={`flex-[2] py-3 rounded-xl font-semibold shadow-lg transition-all ${
+                canSubmit && !loading
+                  ? 'bg-gradient-to-r from-green-600 to-emerald-600 text-white hover:shadow-xl cursor-pointer' 
                   : 'bg-slate-300 text-slate-500 cursor-not-allowed'
               }`}
             >
-              {canSubmit ? 'Submit Claim ✓' : '⚠️ Upload Statement First'}
+              {loading ? '⏳ Submitting...' : canSubmit ? 'Submit Claim ✓' : '⚠️ Upload Statement First'}
             </button>
           </div>
         </div>
@@ -549,7 +991,7 @@ export default function BerkeleyExpenseSystem() {
   };
 
   // ============================================
-  // CREDIT CARD STATEMENT UPLOAD MODAL
+  // CREDIT CARD STATEMENT UPLOAD
   // ============================================
   const StatementUploadModal = () => {
     const [file, setFile] = useState(null);
@@ -609,37 +1051,48 @@ export default function BerkeleyExpenseSystem() {
   };
 
   // ============================================
-  // SUBMIT CLAIM FUNCTION
+  // SUBMIT CLAIM - Save to Database
   // ============================================
-  const handleSubmitClaim = () => {
-    const claimNumber = claims.length + 1;
-    const newClaim = {
-      id: Date.now(),
-      odId: `EXP-2026-${String(claimNumber).padStart(3, '0')}`,
-      employeeName: currentUser.name,
-      employeeId: currentUser.id,
-      office: userOffice?.name,
-      officeCode: currentUser.office,
-      currency: userOffice?.currency,
-      total: totalPendingAmount,
-      items: pendingExpenses.length,
-      status: 'pending_review',
-      submittedAt: new Date().toISOString().split('T')[0],
-      flags: hasOldExpenses ? ['Contains expenses older than 2 months'] : [],
-      expenses: [...pendingExpenses],
-      creditCardStatement: creditCardStatement?.name || null
-    };
-    
-    setClaims(prev => [newClaim, ...prev]);
-    setExpenses([]);
-    setCreditCardStatement(null);
+  const handleSubmitClaim = async () => {
+    setLoading(true);
+    try {
+      const claimNumber = `EXP-2026-${String(claims.length + 1).padStart(3, '0')}`;
+      const newClaim = {
+        claim_number: claimNumber,
+        user_id: currentUser.id,
+        user_name: currentUser.name,
+        office: userOffice?.name,
+        currency: userOffice?.currency,
+        total_amount: totalPendingAmount,
+        item_count: pendingExpenses.length,
+        status: 'pending_review',
+        credit_card_statement: creditCardStatement?.name || null,
+        expenses: pendingExpenses
+      };
+      
+      const { data, error } = await supabase.from('claims').insert([newClaim]);
+      
+      if (error) {
+        console.error('Error submitting claim:', error);
+        alert('❌ Failed to submit claim. Please try again.');
+      } else {
+        setExpenses([]);
+        setCreditCardStatement(null);
+        await loadClaims();
+        alert('✅ Expense claim submitted successfully!');
+      }
+    } catch (err) {
+      console.error('Submit error:', err);
+      alert('❌ Failed to submit claim. Please try again.');
+    }
+    setLoading(false);
   };
 
   // ============================================
   // MY EXPENSES TAB
   // ============================================
   const MyExpensesTab = () => {
-    const myClaims = claims.filter(c => c.employeeId === currentUser.id);
+    const myClaims = claims.filter(c => c.user_id === currentUser.id);
 
     const groupedExpenses = pendingExpenses.reduce((acc, exp) => {
       if (!acc[exp.category]) acc[exp.category] = [];
@@ -740,7 +1193,9 @@ export default function BerkeleyExpenseSystem() {
         {/* My Submitted Claims */}
         <div className="bg-white rounded-2xl shadow-lg p-6">
           <h3 className="font-bold text-slate-800 mb-4">📁 My Submitted Claims</h3>
-          {myClaims.length === 0 ? (
+          {loading ? (
+            <p className="text-center text-slate-400 py-8">Loading...</p>
+          ) : myClaims.length === 0 ? (
             <p className="text-center text-slate-400 py-8">No submitted claims yet</p>
           ) : (
             <div className="space-y-2">
@@ -748,7 +1203,7 @@ export default function BerkeleyExpenseSystem() {
                 <div key={claim.id} className="flex items-center justify-between p-4 rounded-xl bg-slate-50 border border-slate-200">
                   <div>
                     <div className="flex items-center gap-2">
-                      <span className="font-semibold text-slate-800">{claim.odId}</span>
+                      <span className="font-semibold text-slate-800">{claim.claim_number}</span>
                       <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${
                         claim.status === 'approved' ? 'bg-green-100 text-green-700' :
                         claim.status === 'rejected' ? 'bg-red-100 text-red-700' :
@@ -757,9 +1212,9 @@ export default function BerkeleyExpenseSystem() {
                         {claim.status === 'pending_review' ? 'Pending Review' : claim.status}
                       </span>
                     </div>
-                    <p className="text-sm text-slate-500">{claim.items} items • {claim.submittedAt}</p>
+                    <p className="text-sm text-slate-500">{claim.item_count} items • {formatDate(claim.submitted_at)}</p>
                   </div>
-                  <div className="font-bold text-slate-800">{formatCurrency(claim.total, claim.currency)}</div>
+                  <div className="font-bold text-slate-800">{formatCurrency(claim.total_amount, claim.currency)}</div>
                 </div>
               ))}
             </div>
@@ -770,20 +1225,40 @@ export default function BerkeleyExpenseSystem() {
   };
 
   // ============================================
-  // REVIEW CLAIMS TAB (Admin/Finance only)
+  // REVIEW CLAIMS TAB
   // ============================================
   const ReviewClaimsTab = () => {
     const visibleClaims = getVisibleClaims();
     const pendingClaims = visibleClaims.filter(c => c.status === 'pending_review');
 
-    const handleApprove = (claimId) => {
-      setClaims(prev => prev.map(c => c.id === claimId ? { ...c, status: 'approved', reviewedBy: currentUser.name } : c));
+    const handleApprove = async (claimId) => {
+      setLoading(true);
+      const { error } = await supabase.from('claims').update({ 
+        status: 'approved', 
+        reviewed_by: currentUser.name,
+        reviewed_at: new Date().toISOString()
+      }).eq('id', claimId);
+      
+      if (!error) {
+        await loadClaims();
+      }
       setSelectedClaim(null);
+      setLoading(false);
     };
 
-    const handleReject = (claimId) => {
-      setClaims(prev => prev.map(c => c.id === claimId ? { ...c, status: 'rejected', reviewedBy: currentUser.name } : c));
+    const handleReject = async (claimId) => {
+      setLoading(true);
+      const { error } = await supabase.from('claims').update({ 
+        status: 'rejected', 
+        reviewed_by: currentUser.name,
+        reviewed_at: new Date().toISOString()
+      }).eq('id', claimId);
+      
+      if (!error) {
+        await loadClaims();
+      }
       setSelectedClaim(null);
+      setLoading(false);
     };
 
     return (
@@ -804,11 +1279,16 @@ export default function BerkeleyExpenseSystem() {
           </div>
         </div>
 
-        {/* Claims to Review */}
+        {/* Pending Claims */}
         <div className="bg-white rounded-2xl shadow-lg p-6">
           <h3 className="font-bold text-slate-800 mb-4">📊 Claims to Review</h3>
 
-          {pendingClaims.length === 0 ? (
+          {loading ? (
+            <div className="text-center py-12">
+              <div className="text-4xl mb-4 animate-spin">⏳</div>
+              <p className="text-slate-500">Loading claims...</p>
+            </div>
+          ) : pendingClaims.length === 0 ? (
             <div className="text-center py-12">
               <div className="text-6xl mb-4">✅</div>
               <p className="text-slate-500">No pending claims to review</p>
@@ -819,20 +1299,13 @@ export default function BerkeleyExpenseSystem() {
                 <div key={claim.id} onClick={() => setSelectedClaim(claim)} className="flex items-center justify-between p-4 rounded-xl bg-slate-50 border border-slate-200 hover:border-blue-300 cursor-pointer transition-all">
                   <div className="flex-1">
                     <div className="flex items-center gap-2">
-                      <span className="font-semibold text-slate-800">{claim.employeeName}</span>
+                      <span className="font-semibold text-slate-800">{claim.user_name}</span>
                       <span className="bg-amber-100 text-amber-700 text-xs px-2 py-0.5 rounded-full">Pending</span>
                     </div>
-                    <p className="text-sm text-slate-500">{claim.office} • {claim.items} items • {claim.submittedAt}</p>
-                    {claim.flags.length > 0 && (
-                      <div className="mt-2">
-                        {claim.flags.map((flag, i) => (
-                          <span key={i} className="text-xs bg-red-100 text-red-700 px-2 py-1 rounded mr-2">⚠️ {flag}</span>
-                        ))}
-                      </div>
-                    )}
+                    <p className="text-sm text-slate-500">{claim.office} • {claim.item_count} items • {formatDate(claim.submitted_at)}</p>
                   </div>
                   <div className="text-right ml-4">
-                    <div className="font-bold text-slate-800">{formatCurrency(claim.total, claim.currency)}</div>
+                    <div className="font-bold text-slate-800">{formatCurrency(claim.total_amount, claim.currency)}</div>
                   </div>
                 </div>
               ))}
@@ -840,24 +1313,24 @@ export default function BerkeleyExpenseSystem() {
           )}
         </div>
 
-        {/* All Claims History */}
+        {/* All Claims */}
         <div className="bg-white rounded-2xl shadow-lg p-6">
           <h3 className="font-bold text-slate-800 mb-4">📁 All Claims</h3>
           <div className="space-y-2">
             {visibleClaims.filter(c => c.status !== 'pending_review').map(claim => (
-              <div key={claim.id} className="flex items-center justify-between p-4 rounded-xl bg-slate-50 border border-slate-200">
+              <div key={claim.id} onClick={() => setSelectedClaim(claim)} className="flex items-center justify-between p-4 rounded-xl bg-slate-50 border border-slate-200 hover:border-blue-300 cursor-pointer">
                 <div>
                   <div className="flex items-center gap-2">
-                    <span className="font-semibold text-slate-800">{claim.employeeName}</span>
+                    <span className="font-semibold text-slate-800">{claim.user_name}</span>
                     <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${
                       claim.status === 'approved' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'
                     }`}>
                       {claim.status}
                     </span>
                   </div>
-                  <p className="text-sm text-slate-500">{claim.office} • {claim.items} items</p>
+                  <p className="text-sm text-slate-500">{claim.office} • {claim.item_count} items</p>
                 </div>
-                <div className="font-bold text-slate-800">{formatCurrency(claim.total, claim.currency)}</div>
+                <div className="font-bold text-slate-800">{formatCurrency(claim.total_amount, claim.currency)}</div>
               </div>
             ))}
           </div>
@@ -866,12 +1339,12 @@ export default function BerkeleyExpenseSystem() {
         {/* Claim Detail Modal */}
         {selectedClaim && (
           <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-50" onClick={() => setSelectedClaim(null)}>
-            <div className="bg-white rounded-2xl max-w-lg w-full max-h-[90vh] overflow-auto shadow-2xl" onClick={e => e.stopPropagation()}>
+            <div className="bg-white rounded-2xl max-w-2xl w-full max-h-[90vh] overflow-auto shadow-2xl" onClick={e => e.stopPropagation()}>
               <div className="p-6 border-b border-slate-100">
                 <div className="flex justify-between items-start">
                   <div>
-                    <h2 className="text-xl font-bold text-slate-800">{selectedClaim.employeeName}</h2>
-                    <p className="text-sm text-slate-500">{selectedClaim.odId} • {selectedClaim.office}</p>
+                    <h2 className="text-xl font-bold text-slate-800">{selectedClaim.user_name}</h2>
+                    <p className="text-sm text-slate-500">{selectedClaim.claim_number} • {selectedClaim.office}</p>
                   </div>
                   <button onClick={() => setSelectedClaim(null)} className="text-slate-400 hover:text-slate-600 text-2xl">×</button>
                 </div>
@@ -881,43 +1354,33 @@ export default function BerkeleyExpenseSystem() {
                 <div className="grid grid-cols-2 gap-4">
                   <div className="bg-slate-50 rounded-xl p-4">
                     <div className="text-sm text-slate-500">Total Amount</div>
-                    <div className="text-2xl font-bold text-slate-800">{formatCurrency(selectedClaim.total, selectedClaim.currency)}</div>
+                    <div className="text-2xl font-bold text-slate-800">{formatCurrency(selectedClaim.total_amount, selectedClaim.currency)}</div>
                   </div>
                   <div className="bg-slate-50 rounded-xl p-4">
                     <div className="text-sm text-slate-500">Items</div>
-                    <div className="text-2xl font-bold text-slate-800">{selectedClaim.items}</div>
+                    <div className="text-2xl font-bold text-slate-800">{selectedClaim.item_count}</div>
                   </div>
                 </div>
 
-                {selectedClaim.flags.length > 0 && (
-                  <div className="bg-red-50 border border-red-200 rounded-xl p-4">
-                    <strong className="text-red-800">⚠️ Review Flags</strong>
-                    <ul className="mt-2 space-y-1">
-                      {selectedClaim.flags.map((flag, i) => (
-                        <li key={i} className="text-sm text-red-700">• {flag}</li>
-                      ))}
-                    </ul>
-                  </div>
-                )}
-
-                {selectedClaim.creditCardStatement && (
+                {selectedClaim.credit_card_statement && (
                   <div className="bg-blue-50 border border-blue-200 rounded-xl p-4">
                     <strong className="text-blue-800">💳 Credit Card Statement</strong>
-                    <p className="text-sm text-blue-700 mt-1">{selectedClaim.creditCardStatement}</p>
+                    <p className="text-sm text-blue-700 mt-1">{selectedClaim.credit_card_statement}</p>
                   </div>
                 )}
 
-                {/* Show line items */}
+                {/* Show expenses */}
                 {selectedClaim.expenses && selectedClaim.expenses.length > 0 && (
                   <div className="border border-slate-200 rounded-xl overflow-hidden">
                     <div className="bg-slate-100 px-4 py-2 font-semibold text-sm text-slate-600">Line Items</div>
-                    <div className="divide-y divide-slate-100">
-                      {selectedClaim.expenses.map(exp => (
-                        <div key={exp.id} className="px-4 py-3 flex justify-between items-center">
+                    <div className="divide-y divide-slate-100 max-h-64 overflow-y-auto">
+                      {selectedClaim.expenses.map((exp, idx) => (
+                        <div key={idx} className="px-4 py-3 flex justify-between items-center">
                           <div>
                             <span className="bg-blue-100 text-blue-700 text-xs font-bold px-2 py-0.5 rounded mr-2">{exp.ref}</span>
                             <span className="font-medium text-slate-800">{exp.merchant}</span>
                             <p className="text-xs text-slate-500 mt-1">{exp.description}</p>
+                            {exp.attendees && <p className="text-xs text-slate-400">👥 {exp.attendees}</p>}
                           </div>
                           <span className="font-semibold">{formatCurrency(exp.amount, exp.currency)}</span>
                         </div>
@@ -929,8 +1392,12 @@ export default function BerkeleyExpenseSystem() {
 
               {selectedClaim.status === 'pending_review' && (
                 <div className="p-4 border-t border-slate-100 bg-slate-50 flex gap-3">
-                  <button onClick={() => handleReject(selectedClaim.id)} className="flex-1 py-3 rounded-xl bg-red-500 text-white font-semibold hover:bg-red-600">Reject</button>
-                  <button onClick={() => handleApprove(selectedClaim.id)} className="flex-[2] py-3 rounded-xl bg-gradient-to-r from-green-600 to-emerald-600 text-white font-semibold shadow-lg">Approve ✓</button>
+                  <button onClick={() => handleReject(selectedClaim.id)} disabled={loading} className="flex-1 py-3 rounded-xl bg-red-500 text-white font-semibold hover:bg-red-600 disabled:opacity-50">
+                    {loading ? '...' : 'Reject'}
+                  </button>
+                  <button onClick={() => handleApprove(selectedClaim.id)} disabled={loading} className="flex-[2] py-3 rounded-xl bg-gradient-to-r from-green-600 to-emerald-600 text-white font-semibold shadow-lg disabled:opacity-50">
+                    {loading ? '...' : 'Approve ✓'}
+                  </button>
                 </div>
               )}
             </div>
@@ -967,7 +1434,7 @@ export default function BerkeleyExpenseSystem() {
         </div>
       </header>
 
-      {/* Tabs (for admin/finance) */}
+      {/* Tabs */}
       {canReview && (
         <div className="bg-white border-b border-slate-200 sticky top-14 z-30">
           <div className="max-w-3xl mx-auto flex">
