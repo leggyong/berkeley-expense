@@ -3,7 +3,7 @@ import React, { useState, useEffect } from 'react';
 /*
  * ============================================
  * BERKELEY INTERNATIONAL EXPENSE MANAGEMENT SYSTEM
- * Version: 1.4 - With Excel Download
+ * Version: 1.5 - With PDF Download & Receipt Images
  * ============================================
  * 
  * SUPABASE CONNECTION
@@ -163,22 +163,26 @@ const getMonthYear = (dateStr) => {
 };
 
 // ============================================
-// EXCEL EXPORT FUNCTION
+// PDF GENERATION FUNCTION
 // ============================================
-const generateExcelFile = async (claim, userName, officeName) => {
-  // Dynamically load SheetJS
-  const XLSX = await import('https://cdn.sheetjs.com/xlsx-0.20.1/package/xlsx.mjs');
+const generatePDF = async (expenseList, userName, officeName, claimNumber, submittedDate, creditCardStatementName) => {
+  // Dynamically load jsPDF
+  const { jsPDF } = await import('https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js');
   
-  const expenses = claim.expenses || [];
+  const doc = new jsPDF('p', 'mm', 'a4');
+  const pageWidth = 210;
+  const pageHeight = 297;
+  const margin = 15;
+  const contentWidth = pageWidth - (margin * 2);
   
   // Group expenses by category
-  const groupedExpenses = expenses.reduce((acc, exp) => {
+  const groupedExpenses = expenseList.reduce((acc, exp) => {
     if (!acc[exp.category]) acc[exp.category] = [];
     acc[exp.category].push(exp);
     return acc;
   }, {});
 
-  // Calculate totals by subcategory
+  // Calculate totals
   const getSubcategoryTotal = (cat, subcat) => {
     return (groupedExpenses[cat] || [])
       .filter(e => e.subcategory === subcat)
@@ -189,160 +193,371 @@ const generateExcelFile = async (claim, userName, officeName) => {
     return (groupedExpenses[cat] || []).reduce((sum, e) => sum + e.amount, 0);
   };
 
-  // ===== SHEET 1: Summary =====
-  const summaryData = [
-    ['', '', 'Motor & Expense Claim Form', '', '', 'Account Code', 'Document Number'],
-    ['', '', 'Berkeley London Residential Ltd', '', '', 'Accounts Use Only', ''],
-    [''],
-    ['Name', userName, '', 'Month', getMonthYear(expenses[0]?.date || new Date().toISOString())],
-    ['Office', officeName, '', '', ''],
-    [''],
-    ['Expenses claim', '', '', '', '', '', 'Total'],
-    [''],
-    ['', 'Motor Vehicle Expenditure'],
-    ['A.', 'Petrol Expenditure', 'Full Petrol Allowance / Fuel Card Holders', '', '', '', getCategoryTotal('A')],
-    ['', '', 'Business Mileage Return (As Attached)', '', '', '', 0],
-    ['B.', 'Parking', 'Off-Street Parking', '', '', '', getCategoryTotal('B')],
-    ['C.', 'Travel Expenses', 'Public Transport (Trains, Tubes, Buses etc.)', '', '', '', getSubcategoryTotal('C', 'Public Transport')],
-    ['', '', 'Taxis', '', '', '', getSubcategoryTotal('C', 'Taxis')],
-    ['', '', 'Tolls', '', '', '', getSubcategoryTotal('C', 'Tolls')],
-    ['', '', 'Congestion Charging', '', '', '', getSubcategoryTotal('C', 'Congestion Charging')],
-    ['', '', 'Subsistence (meals while away from office)', '', '', '', getSubcategoryTotal('C', 'Subsistence')],
-    ['D.', 'Vehicle Repairs', 'Repairs', '', '', '', getSubcategoryTotal('D', 'Repairs')],
-    ['', '', 'Parts', '', '', '', getSubcategoryTotal('D', 'Parts')],
-    [''],
-    ['', 'Business Expenditure'],
-    ['E.', 'Entertaining', 'Customers (Staff & Customers)', '', '', '', getSubcategoryTotal('E', 'Customers (Staff & Customers)')],
-    ['', '', 'Employees (Must be only Staff present)', '', '', '', getSubcategoryTotal('E', 'Employees Only')],
-    ['F.', 'Welfare', 'Hotel Accommodation', '', '', '', getSubcategoryTotal('F', 'Hotel Accommodation')],
-    ['', '', 'Gifts to Employees', '', '', '', getSubcategoryTotal('F', 'Gifts to Employees')],
-    ['', '', 'Corporate Gifts', '', '', '', getSubcategoryTotal('F', 'Corporate Gifts')],
-    ['G.', 'Subscriptions', 'Professional / Non-Professional / Newspapers', '', '', '', getCategoryTotal('G')],
-    ['H.', 'Computer Costs', 'All items', '', '', '', getCategoryTotal('H')],
-    ['I.', 'WIP', 'All items', '', '', '', getCategoryTotal('I')],
-    ['I.', 'Other', 'Miscellaneous Vatable Items', '', '', '', 0],
-    [''],
-    ['', '', '', '', 'Total expenses claimed', '', claim.total_amount],
-    [''],
-    ['Signature of Claimant', '', '', '', 'Date', formatDate(claim.submitted_at)],
-    ['Authorised', '', '', '', '', ''],
-  ];
+  const totalAmount = expenseList.reduce((sum, e) => sum + e.amount, 0);
+  const currencies = [...new Set(expenseList.map(e => e.currency))];
+  const claimMonth = expenseList.length > 0 ? getMonthYear(expenseList[0].date) : '';
 
-  // ===== SHEET 2: Travel Expense Detail =====
+  // ===== PAGE 1: Summary =====
+  let y = margin;
+  
+  // Header with logo placeholder
+  doc.setFillColor(26, 35, 126); // Dark blue
+  doc.rect(margin, y, contentWidth, 25, 'F');
+  doc.setTextColor(255, 255, 255);
+  doc.setFontSize(18);
+  doc.setFont('helvetica', 'bold');
+  doc.text('B', margin + 8, y + 16);
+  doc.setFontSize(14);
+  doc.text('Motor & Expense Claim Form', margin + 25, y + 12);
+  doc.setFontSize(10);
+  doc.setFont('helvetica', 'normal');
+  doc.text('Berkeley London Residential Ltd', margin + 25, y + 20);
+  y += 30;
+
+  // Employee Info Box
+  doc.setTextColor(0, 0, 0);
+  doc.setDrawColor(150, 150, 150);
+  doc.rect(margin, y, contentWidth, 25);
+  doc.line(margin + contentWidth/2, y, margin + contentWidth/2, y + 25);
+  doc.line(margin, y + 12.5, margin + contentWidth, y + 12.5);
+  
+  doc.setFontSize(10);
+  doc.text('Name:', margin + 3, y + 8);
+  doc.setFont('helvetica', 'bold');
+  doc.setTextColor(0, 51, 153);
+  doc.text(userName, margin + 25, y + 8);
+  
+  doc.setTextColor(0, 0, 0);
+  doc.setFont('helvetica', 'normal');
+  doc.text('Office:', margin + 3, y + 20);
+  doc.setFont('helvetica', 'bold');
+  doc.text(officeName, margin + 25, y + 20);
+  
+  doc.setFont('helvetica', 'normal');
+  doc.text('Month:', margin + contentWidth/2 + 3, y + 8);
+  doc.setFont('helvetica', 'bold');
+  doc.text(claimMonth, margin + contentWidth/2 + 25, y + 8);
+  
+  doc.setFont('helvetica', 'normal');
+  doc.text('Claim #:', margin + contentWidth/2 + 3, y + 20);
+  doc.setFont('helvetica', 'bold');
+  doc.text(claimNumber || 'DRAFT', margin + contentWidth/2 + 25, y + 20);
+  
+  y += 30;
+
+  // Expenses Table Header
+  doc.setFillColor(200, 200, 200);
+  doc.rect(margin, y, contentWidth, 8, 'F');
+  doc.setFont('helvetica', 'bold');
+  doc.setTextColor(0, 0, 0);
+  doc.setFontSize(10);
+  doc.text('Expenses Claim', margin + contentWidth/2 - 15, y + 5.5);
+  y += 8;
+
+  // Motor Vehicle Expenditure Section
+  doc.setFillColor(230, 230, 230);
+  doc.rect(margin, y, contentWidth, 7, 'F');
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(9);
+  doc.text('Motor Vehicle Expenditure', margin + 3, y + 5);
+  y += 7;
+
+  const drawExpenseRow = (code, category, subcategory, amount, isSubRow = false) => {
+    doc.setDrawColor(200, 200, 200);
+    doc.rect(margin, y, contentWidth, 6);
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(8);
+    doc.setTextColor(0, 0, 0);
+    
+    if (!isSubRow) {
+      doc.text(code, margin + 2, y + 4);
+      doc.setTextColor(0, 51, 153);
+      doc.text(category, margin + 12, y + 4);
+    }
+    doc.setTextColor(0, 0, 0);
+    doc.text(subcategory, margin + 55, y + 4);
+    doc.text(amount.toFixed(2), margin + contentWidth - 25, y + 4, { align: 'right' });
+    y += 6;
+  };
+
+  drawExpenseRow('A.', 'Petrol Expenditure', 'Full Petrol Allowance / Fuel Card', getCategoryTotal('A'));
+  drawExpenseRow('', '', 'Business Mileage Return', 0, true);
+  drawExpenseRow('B.', 'Parking', 'Off-Street Parking', getCategoryTotal('B'));
+  drawExpenseRow('C.', 'Travel Expenses', 'Public Transport', getSubcategoryTotal('C', 'Public Transport'));
+  drawExpenseRow('', '', 'Taxis', getSubcategoryTotal('C', 'Taxis'), true);
+  drawExpenseRow('', '', 'Tolls', getSubcategoryTotal('C', 'Tolls'), true);
+  drawExpenseRow('', '', 'Congestion Charging', getSubcategoryTotal('C', 'Congestion Charging'), true);
+  drawExpenseRow('', '', 'Subsistence', getSubcategoryTotal('C', 'Subsistence'), true);
+  drawExpenseRow('D.', 'Vehicle Repairs', 'Repairs', getSubcategoryTotal('D', 'Repairs'));
+  drawExpenseRow('', '', 'Parts', getSubcategoryTotal('D', 'Parts'), true);
+
+  // Business Expenditure Section
+  doc.setFillColor(230, 230, 230);
+  doc.rect(margin, y, contentWidth, 7, 'F');
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(9);
+  doc.text('Business Expenditure', margin + 3, y + 5);
+  y += 7;
+
+  drawExpenseRow('E.', 'Entertaining', 'Customers (Staff & Customers)', getSubcategoryTotal('E', 'Customers (Staff & Customers)'));
+  drawExpenseRow('', '', 'Employees Only', getSubcategoryTotal('E', 'Employees Only'), true);
+  drawExpenseRow('F.', 'Welfare', 'Hotel Accommodation', getSubcategoryTotal('F', 'Hotel Accommodation'));
+  drawExpenseRow('', '', 'Gifts to Employees', getSubcategoryTotal('F', 'Gifts to Employees'), true);
+  drawExpenseRow('', '', 'Corporate Gifts', getSubcategoryTotal('F', 'Corporate Gifts'), true);
+  drawExpenseRow('G.', 'Subscriptions', 'Professional / Non-Professional', getCategoryTotal('G'));
+  drawExpenseRow('H.', 'Computer Costs', 'All items', getCategoryTotal('H'));
+  drawExpenseRow('I.', 'WIP / Other', 'All items', getCategoryTotal('I'));
+
+  // Total Row
+  doc.setFillColor(220, 235, 250);
+  doc.rect(margin, y, contentWidth, 10, 'F');
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(11);
+  doc.text('Total expenses claimed', margin + 3, y + 7);
+  doc.setTextColor(0, 51, 153);
+  doc.text(`${currencies[0] || 'AED'} ${totalAmount.toFixed(2)}`, margin + contentWidth - 25, y + 7, { align: 'right' });
+  y += 15;
+
+  // Signature Section
+  doc.setTextColor(0, 0, 0);
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(9);
+  doc.text('Signature of Claimant:', margin, y + 5);
+  doc.setFont('helvetica', 'italic');
+  doc.setTextColor(0, 51, 153);
+  doc.text(userName, margin + 40, y + 5);
+  doc.setTextColor(0, 0, 0);
+  doc.setFont('helvetica', 'normal');
+  doc.text('Date:', margin + 100, y + 5);
+  doc.text(submittedDate || formatDate(new Date().toISOString()), margin + 115, y + 5);
+  
+  y += 12;
+  doc.text('Authorised:', margin, y + 5);
+  doc.setDrawColor(150, 150, 150);
+  doc.line(margin + 25, y + 6, margin + 80, y + 6);
+
+  // ===== PAGE 2: Travel Expense Detail =====
+  doc.addPage();
+  y = margin;
+
+  doc.setFillColor(26, 35, 126);
+  doc.rect(margin, y, contentWidth, 12, 'F');
+  doc.setTextColor(255, 255, 255);
+  doc.setFontSize(12);
+  doc.setFont('helvetica', 'bold');
+  doc.text('Travel Expense Detail', margin + contentWidth/2, y + 8, { align: 'center' });
+  y += 15;
+
+  doc.setTextColor(0, 0, 0);
+  doc.setFontSize(9);
+  doc.setFont('helvetica', 'normal');
+  doc.text(`Name: ${userName}`, margin, y);
+  y += 8;
+
+  // Travel table header
+  const travelCols = ['Ref', 'B.Parking', 'Pub.Trans', 'Taxis', 'Tolls', 'Cong', 'Subsist', 'Repairs', 'Parts', 'Description'];
+  const travelColWidths = [12, 18, 18, 18, 15, 15, 18, 18, 15, 45];
+  
+  doc.setFillColor(200, 200, 200);
+  doc.rect(margin, y, contentWidth, 7, 'F');
+  doc.setFontSize(7);
+  doc.setFont('helvetica', 'bold');
+  let xPos = margin;
+  travelCols.forEach((col, i) => {
+    doc.text(col, xPos + 1, y + 5);
+    xPos += travelColWidths[i];
+  });
+  y += 7;
+
+  // Travel expenses rows
   const travelExpenses = [...(groupedExpenses['B'] || []), ...(groupedExpenses['C'] || []), ...(groupedExpenses['D'] || [])];
-  const travelData = [
-    ['Travel Expense Detail'],
-    ['Name', userName, '', '', '', '', '', '', '', '', '', 'Please do not include any travel expenses associated with Employee Entertaining'],
-    [''],
-    ['Receipt No', 'VAT', 'B. Parking', 'Public Transport', 'Taxis', 'Tolls', 'Cong Chg', 'Subsistence', 'Repairs', 'Parts', 'Full Description'],
-    ...travelExpenses.map(exp => [
-      exp.ref,
-      '*',
-      exp.category === 'B' ? exp.amount : '',
-      exp.subcategory === 'Public Transport' ? exp.amount : '',
-      exp.subcategory === 'Taxis' ? exp.amount : '',
-      exp.subcategory === 'Tolls' ? exp.amount : '',
-      exp.subcategory === 'Congestion Charging' ? exp.amount : '',
-      exp.subcategory === 'Subsistence' ? exp.amount : '',
-      exp.subcategory === 'Repairs' ? exp.amount : '',
-      exp.subcategory === 'Parts' ? exp.amount : '',
-      exp.description
-    ]),
-    [''],
-    ['Totals', '', 
-      getCategoryTotal('B'),
-      getSubcategoryTotal('C', 'Public Transport'),
-      getSubcategoryTotal('C', 'Taxis'),
-      getSubcategoryTotal('C', 'Tolls'),
-      getSubcategoryTotal('C', 'Congestion Charging'),
-      getSubcategoryTotal('C', 'Subsistence'),
-      getSubcategoryTotal('D', 'Repairs'),
-      getSubcategoryTotal('D', 'Parts'),
-      `${claim.currency} ${(getCategoryTotal('B') + getCategoryTotal('C') + getCategoryTotal('D')).toFixed(2)}`
-    ]
-  ];
+  doc.setFont('helvetica', 'normal');
+  
+  travelExpenses.forEach(exp => {
+    doc.setDrawColor(200, 200, 200);
+    doc.rect(margin, y, contentWidth, 6);
+    xPos = margin;
+    doc.setFontSize(7);
+    
+    doc.setTextColor(0, 51, 153);
+    doc.setFont('helvetica', 'bold');
+    doc.text(exp.ref, xPos + 1, y + 4);
+    xPos += travelColWidths[0];
+    
+    doc.setTextColor(0, 0, 0);
+    doc.setFont('helvetica', 'normal');
+    doc.text(exp.category === 'B' ? exp.amount.toFixed(2) : '', xPos + 1, y + 4);
+    xPos += travelColWidths[1];
+    doc.text(exp.subcategory === 'Public Transport' ? exp.amount.toFixed(2) : '', xPos + 1, y + 4);
+    xPos += travelColWidths[2];
+    doc.text(exp.subcategory === 'Taxis' ? exp.amount.toFixed(2) : '', xPos + 1, y + 4);
+    xPos += travelColWidths[3];
+    doc.text(exp.subcategory === 'Tolls' ? exp.amount.toFixed(2) : '', xPos + 1, y + 4);
+    xPos += travelColWidths[4];
+    doc.text(exp.subcategory === 'Congestion Charging' ? exp.amount.toFixed(2) : '', xPos + 1, y + 4);
+    xPos += travelColWidths[5];
+    doc.text(exp.subcategory === 'Subsistence' ? exp.amount.toFixed(2) : '', xPos + 1, y + 4);
+    xPos += travelColWidths[6];
+    doc.text(exp.subcategory === 'Repairs' ? exp.amount.toFixed(2) : '', xPos + 1, y + 4);
+    xPos += travelColWidths[7];
+    doc.text(exp.subcategory === 'Parts' ? exp.amount.toFixed(2) : '', xPos + 1, y + 4);
+    xPos += travelColWidths[8];
+    doc.text(exp.description?.substring(0, 30) || '', xPos + 1, y + 4);
+    
+    y += 6;
+  });
 
-  // ===== SHEET 3: Entertaining & Welfare Detail =====
+  // ===== PAGE 3: Entertaining & Welfare Detail =====
+  doc.addPage();
+  y = margin;
+
+  doc.setFillColor(26, 35, 126);
+  doc.rect(margin, y, contentWidth, 12, 'F');
+  doc.setTextColor(255, 255, 255);
+  doc.setFontSize(12);
+  doc.setFont('helvetica', 'bold');
+  doc.text('Entertaining and Welfare Detail', margin + contentWidth/2, y + 8, { align: 'center' });
+  y += 15;
+
+  // Warning box
+  doc.setFillColor(255, 250, 230);
+  doc.setDrawColor(255, 180, 0);
+  doc.rect(margin, y, contentWidth, 10, 'FD');
+  doc.setTextColor(150, 100, 0);
+  doc.setFontSize(7);
+  doc.setFont('helvetica', 'bold');
+  doc.text('PLEASE ENSURE A FULL LIST OF GUESTS ENTERTAINED ARE SUPPLIED WITH EACH RECEIPT', margin + 3, y + 6);
+  y += 13;
+
+  doc.setTextColor(0, 0, 0);
+  doc.setFontSize(9);
+  doc.setFont('helvetica', 'normal');
+  doc.text(`Name: ${userName}`, margin, y);
+  y += 8;
+
+  // Entertaining table header
+  const entCols = ['Ref', 'Emp.Meals', 'Bus.Meals', 'Hotels', 'Emp.Gifts', 'Corp.Gifts', 'Description/Attendees'];
+  const entColWidths = [12, 20, 20, 18, 20, 20, 70];
+  
+  doc.setFillColor(200, 200, 200);
+  doc.rect(margin, y, contentWidth, 7, 'F');
+  doc.setFontSize(7);
+  doc.setFont('helvetica', 'bold');
+  xPos = margin;
+  entCols.forEach((col, i) => {
+    doc.text(col, xPos + 1, y + 5);
+    xPos += entColWidths[i];
+  });
+  y += 7;
+
+  // Entertaining expenses rows
   const entertainingExpenses = [...(groupedExpenses['E'] || []), ...(groupedExpenses['F'] || [])];
-  const entertainingData = [
-    ['Entertaining and Welfare Detail'],
-    ['PLEASE ENSURE A FULL LIST OF GUESTS ENTERTAINED ARE SUPPLIED WITH EACH RECEIPT STATING WHO THEY ARE EMPLOYED BY.'],
-    ['Name', userName],
-    [''],
-    ['Receipt No', 'E. Employee Entertaining', '', '', 'E. Business Entertaining', '', '', 'F. Welfare', '', '', 'Full Description'],
-    ['', 'Meals/Drinks', 'Accomodation', 'Other', 'Meals/Drinks', 'Accomodation', 'Other', 'Hotels', 'Employee Gifts', 'Corporate Gifts', ''],
-    ...entertainingExpenses.map(exp => {
-      const isEmployeeEntertaining = exp.category === 'E' && exp.subcategory?.includes('Employee');
-      const isBusinessEntertaining = exp.category === 'E' && exp.subcategory?.includes('Customer');
-      const isHotel = exp.category === 'F' && exp.subcategory?.includes('Hotel');
-      const isEmployeeGift = exp.category === 'F' && exp.subcategory?.includes('Gifts to Employees');
-      const isCorporateGift = exp.category === 'F' && exp.subcategory?.includes('Corporate');
-      
-      return [
-        exp.ref,
-        isEmployeeEntertaining ? exp.amount : '',
-        '',
-        '',
-        isBusinessEntertaining ? exp.amount : '',
-        '',
-        '',
-        isHotel ? exp.amount : '',
-        isEmployeeGift ? exp.amount : '',
-        isCorporateGift ? exp.amount : '',
-        `${exp.merchant}${exp.attendees ? ' - ' + exp.attendees : ''}`
-      ];
-    }),
-    [''],
-    ['Totals', 
-      getSubcategoryTotal('E', 'Employees Only'), '', '',
-      getSubcategoryTotal('E', 'Customers (Staff & Customers)'), '', '',
-      getSubcategoryTotal('F', 'Hotel Accommodation'),
-      getSubcategoryTotal('F', 'Gifts to Employees'),
-      getSubcategoryTotal('F', 'Corporate Gifts'),
-      `${claim.currency} ${(getCategoryTotal('E') + getCategoryTotal('F')).toFixed(2)}`
-    ]
-  ];
+  doc.setFont('helvetica', 'normal');
+  
+  entertainingExpenses.forEach(exp => {
+    doc.setDrawColor(200, 200, 200);
+    doc.rect(margin, y, contentWidth, 6);
+    xPos = margin;
+    doc.setFontSize(7);
+    
+    const isEmployeeEntertaining = exp.category === 'E' && exp.subcategory?.includes('Employee');
+    const isBusinessEntertaining = exp.category === 'E' && exp.subcategory?.includes('Customer');
+    const isHotel = exp.category === 'F' && exp.subcategory?.includes('Hotel');
+    const isEmployeeGift = exp.category === 'F' && exp.subcategory?.includes('Gifts to Employees');
+    const isCorporateGift = exp.category === 'F' && exp.subcategory?.includes('Corporate');
+    
+    doc.setTextColor(0, 51, 153);
+    doc.setFont('helvetica', 'bold');
+    doc.text(exp.ref, xPos + 1, y + 4);
+    xPos += entColWidths[0];
+    
+    doc.setTextColor(0, 0, 0);
+    doc.setFont('helvetica', 'normal');
+    doc.text(isEmployeeEntertaining ? exp.amount.toFixed(2) : '', xPos + 1, y + 4);
+    xPos += entColWidths[1];
+    doc.text(isBusinessEntertaining ? exp.amount.toFixed(2) : '', xPos + 1, y + 4);
+    xPos += entColWidths[2];
+    doc.text(isHotel ? exp.amount.toFixed(2) : '', xPos + 1, y + 4);
+    xPos += entColWidths[3];
+    doc.text(isEmployeeGift ? exp.amount.toFixed(2) : '', xPos + 1, y + 4);
+    xPos += entColWidths[4];
+    doc.text(isCorporateGift ? exp.amount.toFixed(2) : '', xPos + 1, y + 4);
+    xPos += entColWidths[5];
+    
+    const descText = `${exp.merchant}${exp.attendees ? ' - ' + exp.attendees : ''}`;
+    doc.text(descText.substring(0, 45), xPos + 1, y + 4);
+    
+    y += 6;
+  });
 
-  // ===== SHEET 4: All Receipts =====
-  const receiptsData = [
-    ['Attached Receipts'],
-    [''],
-    ['Ref', 'Date', 'Merchant', 'Category', 'Subcategory', 'Amount', 'Currency', 'Description', 'Attendees'],
-    ...expenses.map(exp => [
-      exp.ref,
-      formatShortDate(exp.date),
-      exp.merchant,
-      EXPENSE_CATEGORIES[exp.category]?.name || exp.category,
-      exp.subcategory,
-      exp.amount,
-      exp.currency,
-      exp.description,
-      exp.attendees || ''
-    ])
-  ];
+  // ===== PAGE 4+: Receipt Images =====
+  // Add each receipt image on its own page
+  for (const exp of expenseList) {
+    doc.addPage();
+    y = margin;
 
-  // Create workbook
-  const wb = XLSX.utils.book_new();
-  
-  const ws1 = XLSX.utils.aoa_to_sheet(summaryData);
-  ws1['!cols'] = [{ wch: 5 }, { wch: 18 }, { wch: 35 }, { wch: 10 }, { wch: 18 }, { wch: 12 }, { wch: 15 }];
-  XLSX.utils.book_append_sheet(wb, ws1, 'Summary');
-  
-  const ws2 = XLSX.utils.aoa_to_sheet(travelData);
-  ws2['!cols'] = [{ wch: 10 }, { wch: 5 }, { wch: 10 }, { wch: 12 }, { wch: 10 }, { wch: 8 }, { wch: 10 }, { wch: 12 }, { wch: 10 }, { wch: 8 }, { wch: 40 }];
-  XLSX.utils.book_append_sheet(wb, ws2, 'Travel Detail');
-  
-  const ws3 = XLSX.utils.aoa_to_sheet(entertainingData);
-  ws3['!cols'] = [{ wch: 10 }, { wch: 12 }, { wch: 12 }, { wch: 8 }, { wch: 12 }, { wch: 12 }, { wch: 8 }, { wch: 10 }, { wch: 12 }, { wch: 12 }, { wch: 45 }];
-  XLSX.utils.book_append_sheet(wb, ws3, 'Entertaining Detail');
-  
-  const ws4 = XLSX.utils.aoa_to_sheet(receiptsData);
-  ws4['!cols'] = [{ wch: 6 }, { wch: 12 }, { wch: 20 }, { wch: 18 }, { wch: 20 }, { wch: 10 }, { wch: 8 }, { wch: 35 }, { wch: 30 }];
-  XLSX.utils.book_append_sheet(wb, ws4, 'All Receipts');
+    // Header for receipt page
+    doc.setFillColor(26, 35, 126);
+    doc.rect(margin, y, contentWidth, 20, 'F');
+    doc.setTextColor(255, 255, 255);
+    doc.setFontSize(24);
+    doc.setFont('helvetica', 'bold');
+    doc.text(exp.ref, margin + 10, y + 14);
+    doc.setFontSize(10);
+    doc.setFont('helvetica', 'normal');
+    doc.text(`${exp.merchant} | ${formatCurrency(exp.amount, exp.currency)} | ${formatShortDate(exp.date)}`, margin + 35, y + 10);
+    doc.text(exp.description || '', margin + 35, y + 16);
+    y += 25;
 
-  // Generate and download
-  const fileName = `${claim.claim_number}_${userName.replace(/\s+/g, '_')}_${formatDate(claim.submitted_at).replace(/\s+/g, '')}.xlsx`;
-  XLSX.writeFile(wb, fileName);
+    // Try to add the receipt image
+    if (exp.receiptPreview) {
+      try {
+        // Calculate image dimensions to fit the page
+        const maxWidth = contentWidth;
+        const maxHeight = pageHeight - y - margin - 10;
+        
+        // Add the image
+        doc.addImage(exp.receiptPreview, 'JPEG', margin, y, maxWidth, maxHeight, undefined, 'FAST');
+      } catch (err) {
+        // If image fails, show placeholder
+        doc.setFillColor(240, 240, 240);
+        doc.rect(margin, y, contentWidth, 100, 'F');
+        doc.setTextColor(150, 150, 150);
+        doc.setFontSize(14);
+        doc.text('Receipt image not available', margin + contentWidth/2, y + 50, { align: 'center' });
+      }
+    } else {
+      // No image - show placeholder
+      doc.setFillColor(240, 240, 240);
+      doc.rect(margin, y, contentWidth, 100, 'F');
+      doc.setTextColor(150, 150, 150);
+      doc.setFontSize(14);
+      doc.text('Receipt image not available', margin + contentWidth/2, y + 50, { align: 'center' });
+    }
+  }
+
+  // If there's a credit card statement, add a note page
+  if (creditCardStatementName) {
+    doc.addPage();
+    y = margin;
+    
+    doc.setFillColor(255, 180, 0);
+    doc.rect(margin, y, contentWidth, 15, 'F');
+    doc.setTextColor(0, 0, 0);
+    doc.setFontSize(12);
+    doc.setFont('helvetica', 'bold');
+    doc.text('Credit Card Statement', margin + contentWidth/2, y + 10, { align: 'center' });
+    y += 20;
+    
+    doc.setFontSize(10);
+    doc.setFont('helvetica', 'normal');
+    doc.text(`Attached file: ${creditCardStatementName}`, margin, y);
+    doc.text('(Statement uploaded separately)', margin, y + 8);
+  }
+
+  // Save the PDF
+  const fileName = `${claimNumber || 'ExpenseClaim'}_${userName.replace(/\s+/g, '_')}_${formatDate(submittedDate || new Date().toISOString()).replace(/\s+/g, '')}.pdf`;
+  doc.save(fileName);
 };
 
 // ============================================
@@ -353,6 +568,7 @@ export default function BerkeleyExpenseSystem() {
   const [expenses, setExpenses] = useState([]);
   const [claims, setClaims] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [downloading, setDownloading] = useState(false);
   const [showAddExpense, setShowAddExpense] = useState(false);
   const [showPreview, setShowPreview] = useState(false);
   const [showStatementUpload, setShowStatementUpload] = useState(false);
@@ -377,7 +593,6 @@ export default function BerkeleyExpenseSystem() {
     setLoading(false);
   };
 
-  // Load claims on mount and when user changes
   useEffect(() => {
     if (currentUser) {
       loadClaims();
@@ -389,7 +604,6 @@ export default function BerkeleyExpenseSystem() {
   const userOffice = getUserOffice(currentUser);
   const pendingExpenses = expenses.filter(e => e.status === 'draft');
   
-  // Group pending expenses by currency for proper display
   const expensesByCurrency = pendingExpenses.reduce((acc, e) => {
     if (!acc[e.currency]) acc[e.currency] = { total: 0, count: 0 };
     acc[e.currency].total += parseFloat(e.amount || 0);
@@ -424,6 +638,48 @@ export default function BerkeleyExpenseSystem() {
     } else {
       return claims.filter(c => c.user_id === currentUser.id);
     }
+  };
+
+  // ============================================
+  // DOWNLOAD PDF HANDLER
+  // ============================================
+  const handleDownloadPDF = async (claim) => {
+    setDownloading(true);
+    try {
+      const employee = EMPLOYEES.find(e => e.id === claim.user_id);
+      const office = OFFICES.find(o => employee && o.code === employee.office);
+      await generatePDF(
+        claim.expenses || [],
+        claim.user_name,
+        office?.name || claim.office,
+        claim.claim_number,
+        claim.submitted_at,
+        claim.credit_card_statement
+      );
+    } catch (err) {
+      console.error('Download error:', err);
+      alert('❌ Failed to download PDF. Please try again.');
+    }
+    setDownloading(false);
+  };
+
+  const handleDownloadPreviewPDF = async () => {
+    setDownloading(true);
+    try {
+      const draftClaimNumber = `DRAFT-${new Date().getTime().toString().slice(-6)}`;
+      await generatePDF(
+        pendingExpenses,
+        currentUser.name,
+        userOffice?.name,
+        draftClaimNumber,
+        new Date().toISOString(),
+        creditCardStatement?.name
+      );
+    } catch (err) {
+      console.error('Download error:', err);
+      alert('❌ Failed to download PDF. Please try again.');
+    }
+    setDownloading(false);
   };
 
   // ============================================
@@ -467,7 +723,7 @@ export default function BerkeleyExpenseSystem() {
           </div>
 
           <p className="text-center text-xs text-slate-400 mt-8">
-            Berkeley International Expense Management System v1.4
+            Berkeley International Expense Management System v1.5
           </p>
         </div>
       </div>
@@ -497,7 +753,11 @@ export default function BerkeleyExpenseSystem() {
       const file = e.target.files[0];
       if (file) {
         setReceiptFile(file);
-        setReceiptPreview(URL.createObjectURL(file));
+        const reader = new FileReader();
+        reader.onloadend = () => {
+          setReceiptPreview(reader.result);
+        };
+        reader.readAsDataURL(file);
         setStep(2);
       }
     };
@@ -652,7 +912,7 @@ export default function BerkeleyExpenseSystem() {
   };
 
   // ============================================
-  // PREVIEW CLAIM MODAL - Excel Style Multi-Page
+  // PREVIEW CLAIM MODAL
   // ============================================
   const PreviewClaimModal = () => {
     const groupedExpenses = pendingExpenses.reduce((acc, exp) => {
@@ -663,7 +923,6 @@ export default function BerkeleyExpenseSystem() {
 
     const canSubmit = !hasForeignCurrency || (hasForeignCurrency && creditCardStatement);
     
-    // Calculate category totals - maintain original currency
     const getSubcategoryTotal = (cat, subcat) => {
       return (groupedExpenses[cat] || [])
         .filter(e => e.subcategory === subcat)
@@ -674,15 +933,11 @@ export default function BerkeleyExpenseSystem() {
       return (groupedExpenses[cat] || []).reduce((sum, e) => sum + e.amount, 0);
     };
 
-    // Get claim month
     const claimMonth = pendingExpenses.length > 0 ? getMonthYear(pendingExpenses[0].date) : getMonthYear(new Date().toISOString());
 
-    // Pages: 0=Summary, 1=Travel Detail, 2=Entertaining Detail, 3=Receipts
-    const pages = ['Summary', 'Travel Expense Detail', 'Entertaining & Welfare Detail', 'Attached Receipts'];
+    const pages = ['Summary', 'Travel Detail', 'Entertaining Detail', 'Receipts'];
 
-    // Travel expenses (B, C, D)
     const travelExpenses = [...(groupedExpenses['B'] || []), ...(groupedExpenses['C'] || []), ...(groupedExpenses['D'] || [])];
-    // Entertaining expenses (E, F)
     const entertainingExpenses = [...(groupedExpenses['E'] || []), ...(groupedExpenses['F'] || [])];
 
     return (
@@ -694,7 +949,16 @@ export default function BerkeleyExpenseSystem() {
               <h2 className="text-lg font-bold">📋 Expense Claim Form Preview</h2>
               <p className="text-blue-200 text-sm">Page {previewPage + 1} of {pages.length}: {pages[previewPage]}</p>
             </div>
-            <button onClick={() => { setShowPreview(false); setPreviewPage(0); }} className="w-8 h-8 rounded-full bg-white/20 hover:bg-white/30 flex items-center justify-center">✕</button>
+            <div className="flex items-center gap-2">
+              <button 
+                onClick={handleDownloadPreviewPDF}
+                disabled={downloading}
+                className="bg-green-500 hover:bg-green-600 text-white px-4 py-2 rounded-lg font-semibold text-sm flex items-center gap-2 disabled:opacity-50"
+              >
+                {downloading ? '⏳' : '📥'} Download PDF
+              </button>
+              <button onClick={() => { setShowPreview(false); setPreviewPage(0); }} className="w-8 h-8 rounded-full bg-white/20 hover:bg-white/30 flex items-center justify-center">✕</button>
+            </div>
           </div>
 
           {/* Page Navigation */}
@@ -717,10 +981,9 @@ export default function BerkeleyExpenseSystem() {
           {/* Page Content */}
           <div className="flex-1 overflow-y-auto p-6">
             
-            {/* PAGE 0: Summary (Main Expense Claim Form) */}
+            {/* PAGE 0: Summary */}
             {previewPage === 0 && (
               <div className="max-w-3xl mx-auto">
-                {/* Header */}
                 <div className="border-2 border-slate-400 mb-4">
                   <div className="flex">
                     <div className="w-24 bg-slate-100 p-2 flex items-center justify-center border-r border-slate-400">
@@ -730,17 +993,9 @@ export default function BerkeleyExpenseSystem() {
                       <h1 className="text-xl font-bold">Motor & Expense Claim Form</h1>
                       <p className="text-sm text-slate-600">Berkeley London Residential Ltd</p>
                     </div>
-                    <div className="w-48 border-l border-slate-400">
-                      <div className="border-b border-slate-400 p-2 text-xs">
-                        <span className="text-slate-500">Account Code</span>
-                        <span className="float-right text-slate-500">Document Number</span>
-                      </div>
-                      <div className="p-2 text-center text-sm font-medium italic text-slate-400">Accounts Use Only</div>
-                    </div>
                   </div>
                 </div>
 
-                {/* Employee Info */}
                 <div className="border-2 border-slate-400 mb-4">
                   <div className="grid grid-cols-2">
                     <div className="border-r border-b border-slate-400 p-3 flex">
@@ -762,131 +1017,73 @@ export default function BerkeleyExpenseSystem() {
                   </div>
                 </div>
 
-                {/* Expenses Claim Table */}
                 <div className="border-2 border-slate-400 mb-4">
                   <div className="bg-slate-200 p-2 font-bold text-center border-b border-slate-400">Expenses claim</div>
                   
-                  {/* Motor Vehicle Expenditure */}
                   <div className="border-b border-slate-400">
                     <div className="bg-slate-100 p-2 font-semibold border-b border-slate-300">Motor Vehicle Expenditure</div>
                     <table className="w-full text-sm">
                       <tbody>
                         <tr className="border-b border-slate-200">
                           <td className="p-2 w-8">A.</td>
-                          <td className="p-2 text-blue-700 underline">Petrol Expenditure</td>
-                          <td className="p-2">Full Petrol Allowance / Fuel Card Holders</td>
+                          <td className="p-2 text-blue-700">Petrol Expenditure</td>
+                          <td className="p-2">Full Petrol Allowance / Fuel Card</td>
                           <td className="p-2 text-right w-28">{getCategoryTotal('A').toFixed(2)}</td>
                         </tr>
                         <tr className="border-b border-slate-200">
-                          <td className="p-2"></td>
-                          <td className="p-2"></td>
-                          <td className="p-2">Business Mileage Return (As Attached)</td>
-                          <td className="p-2 text-right">0.00</td>
-                        </tr>
-                        <tr className="border-b border-slate-200">
                           <td className="p-2">B.</td>
-                          <td className="p-2 text-blue-700 underline">Parking</td>
+                          <td className="p-2 text-blue-700">Parking</td>
                           <td className="p-2">Off-Street Parking</td>
                           <td className="p-2 text-right">{getCategoryTotal('B').toFixed(2)}</td>
                         </tr>
                         <tr className="border-b border-slate-200">
                           <td className="p-2">C.</td>
-                          <td className="p-2 text-blue-700 underline">Travel Expenses</td>
-                          <td className="p-2">Public Transport (Trains, Tubes, Buses etc.)</td>
-                          <td className="p-2 text-right">{getSubcategoryTotal('C', 'Public Transport').toFixed(2)}</td>
-                        </tr>
-                        <tr className="border-b border-slate-200">
-                          <td className="p-2"></td>
-                          <td className="p-2"></td>
+                          <td className="p-2 text-blue-700">Travel Expenses</td>
                           <td className="p-2">Taxis</td>
-                          <td className="p-2 text-right font-medium">{getSubcategoryTotal('C', 'Taxis').toFixed(2)}</td>
+                          <td className="p-2 text-right">{getSubcategoryTotal('C', 'Taxis').toFixed(2)}</td>
                         </tr>
                         <tr className="border-b border-slate-200">
                           <td className="p-2"></td>
                           <td className="p-2"></td>
-                          <td className="p-2">Tolls</td>
-                          <td className="p-2 text-right">{getSubcategoryTotal('C', 'Tolls').toFixed(2)}</td>
-                        </tr>
-                        <tr className="border-b border-slate-200">
-                          <td className="p-2"></td>
-                          <td className="p-2"></td>
-                          <td className="p-2">Subsistence (meals while away from office)</td>
-                          <td className="p-2 text-right">{getSubcategoryTotal('C', 'Subsistence').toFixed(2)}</td>
+                          <td className="p-2">Public Transport / Tolls / Subsistence</td>
+                          <td className="p-2 text-right">{(getSubcategoryTotal('C', 'Public Transport') + getSubcategoryTotal('C', 'Tolls') + getSubcategoryTotal('C', 'Subsistence')).toFixed(2)}</td>
                         </tr>
                         <tr className="border-b border-slate-300">
                           <td className="p-2">D.</td>
-                          <td className="p-2 text-blue-700 underline">Vehicle Repairs</td>
-                          <td className="p-2">Repairs</td>
-                          <td className="p-2 text-right">{getSubcategoryTotal('D', 'Repairs').toFixed(2)}</td>
-                        </tr>
-                        <tr className="border-b border-slate-300">
-                          <td className="p-2"></td>
-                          <td className="p-2"></td>
-                          <td className="p-2">Parts</td>
-                          <td className="p-2 text-right">{getSubcategoryTotal('D', 'Parts').toFixed(2)}</td>
+                          <td className="p-2 text-blue-700">Vehicle Repairs</td>
+                          <td className="p-2">Repairs / Parts</td>
+                          <td className="p-2 text-right">{getCategoryTotal('D').toFixed(2)}</td>
                         </tr>
                       </tbody>
                     </table>
                   </div>
 
-                  {/* Business Expenditure */}
                   <div>
                     <div className="bg-slate-100 p-2 font-semibold border-b border-slate-300">Business Expenditure</div>
                     <table className="w-full text-sm">
                       <tbody>
                         <tr className="border-b border-slate-200">
                           <td className="p-2 w-8">E.</td>
-                          <td className="p-2 text-blue-700 underline">Entertaining</td>
-                          <td className="p-2">Customers (Staff & Customers)</td>
-                          <td className="p-2 text-right w-28 font-medium">{getSubcategoryTotal('E', 'Customers (Staff & Customers)').toFixed(2)}</td>
-                        </tr>
-                        <tr className="border-b border-slate-200">
-                          <td className="p-2"></td>
-                          <td className="p-2"></td>
-                          <td className="p-2">Employees (Must be only Staff present)</td>
-                          <td className="p-2 text-right">{getSubcategoryTotal('E', 'Employees Only').toFixed(2)}</td>
+                          <td className="p-2 text-blue-700">Entertaining</td>
+                          <td className="p-2">Customers / Employees</td>
+                          <td className="p-2 text-right w-28">{getCategoryTotal('E').toFixed(2)}</td>
                         </tr>
                         <tr className="border-b border-slate-200">
                           <td className="p-2">F.</td>
-                          <td className="p-2 text-blue-700 underline">Welfare</td>
-                          <td className="p-2">Hotel Accommodation</td>
-                          <td className="p-2 text-right">{getSubcategoryTotal('F', 'Hotel Accommodation').toFixed(2)}</td>
+                          <td className="p-2 text-blue-700">Welfare</td>
+                          <td className="p-2">Hotels / Gifts</td>
+                          <td className="p-2 text-right">{getCategoryTotal('F').toFixed(2)}</td>
                         </tr>
                         <tr className="border-b border-slate-200">
-                          <td className="p-2"></td>
-                          <td className="p-2"></td>
-                          <td className="p-2">Gifts to Employees / Corporate Gifts</td>
-                          <td className="p-2 text-right">{(getSubcategoryTotal('F', 'Gifts to Employees') + getSubcategoryTotal('F', 'Corporate Gifts')).toFixed(2)}</td>
-                        </tr>
-                        <tr className="border-b border-slate-200">
-                          <td className="p-2">G.</td>
-                          <td className="p-2 text-blue-700 underline">Subscriptions</td>
-                          <td className="p-2">Professional / Non-Professional / Newspapers</td>
-                          <td className="p-2 text-right">{getCategoryTotal('G').toFixed(2)}</td>
-                        </tr>
-                        <tr className="border-b border-slate-200">
-                          <td className="p-2">H.</td>
-                          <td className="p-2 text-blue-700 underline">Computer Costs</td>
-                          <td className="p-2">All items</td>
-                          <td className="p-2 text-right">{getCategoryTotal('H').toFixed(2)}</td>
-                        </tr>
-                        <tr className="border-b border-slate-200">
-                          <td className="p-2">I.</td>
-                          <td className="p-2 text-blue-700 underline">WIP</td>
-                          <td className="p-2">All items</td>
-                          <td className="p-2 text-right">{getCategoryTotal('I').toFixed(2)}</td>
-                        </tr>
-                        <tr className="border-b border-slate-200">
-                          <td className="p-2">I.</td>
-                          <td className="p-2 text-blue-700 underline">Other</td>
-                          <td className="p-2">Miscellaneous Vatable Items</td>
-                          <td className="p-2 text-right">0.00</td>
+                          <td className="p-2">G-I.</td>
+                          <td className="p-2 text-blue-700">Other</td>
+                          <td className="p-2">Subscriptions / Computer / WIP</td>
+                          <td className="p-2 text-right">{(getCategoryTotal('G') + getCategoryTotal('H') + getCategoryTotal('I')).toFixed(2)}</td>
                         </tr>
                       </tbody>
                     </table>
                   </div>
 
-                  {/* Total - Show by currency */}
                   <div className="border-t-2 border-slate-400 bg-blue-50 p-3">
                     <div className="flex justify-between items-center">
                       <span className="font-bold text-lg">Total expenses claimed</span>
@@ -900,109 +1097,43 @@ export default function BerkeleyExpenseSystem() {
                     </div>
                   </div>
                 </div>
-
-                {/* Signature Section */}
-                <div className="border-2 border-slate-400 p-4">
-                  <div className="grid grid-cols-2 gap-8">
-                    <div>
-                      <p className="text-sm text-slate-600 mb-2">Signature of Claimant</p>
-                      <div className="border-b border-slate-400 h-12 flex items-end pb-1">
-                        <span className="text-blue-700 italic font-medium">{currentUser.name}</span>
-                      </div>
-                    </div>
-                    <div>
-                      <p className="text-sm text-slate-600 mb-2">Date</p>
-                      <div className="border-b border-slate-400 h-12 flex items-end pb-1">
-                        <span className="font-medium">{formatDate(new Date().toISOString())}</span>
-                      </div>
-                    </div>
-                  </div>
-                  <div className="mt-4">
-                    <p className="text-sm text-slate-600 mb-2">Authorised</p>
-                    <div className="border-b border-slate-400 h-12 flex items-end pb-1">
-                      <span className="text-slate-400 italic">Pending approval</span>
-                    </div>
-                  </div>
-                </div>
               </div>
             )}
 
-            {/* PAGE 1: Travel Expense Detail */}
+            {/* PAGE 1: Travel Detail */}
             {previewPage === 1 && (
               <div className="max-w-4xl mx-auto">
                 <div className="border-2 border-slate-400">
-                  <div className="bg-blue-900 text-white p-3 text-center font-bold text-lg">
-                    Travel Expense Detail
-                  </div>
-                  <div className="p-3 bg-slate-50 border-b border-slate-400 flex justify-between">
-                    <span>Name: <strong>{currentUser.name}</strong></span>
-                    <span className="text-blue-700 text-sm italic">Please do not include any travel expenses associated with Employee Entertaining (See Staff Entertaining)</span>
-                  </div>
-                  
+                  <div className="bg-blue-900 text-white p-3 text-center font-bold">Travel Expense Detail</div>
                   <div className="overflow-x-auto">
                     <table className="w-full text-xs">
                       <thead>
                         <tr className="bg-slate-200">
-                          <th className="border border-slate-300 p-2 w-16">Receipt No</th>
-                          <th className="border border-slate-300 p-2">VAT</th>
-                          <th className="border border-slate-300 p-2">B. Parking</th>
-                          <th className="border border-slate-300 p-2" colSpan="5">C. Travel Expenses</th>
-                          <th className="border border-slate-300 p-2" colSpan="2">D. Motor Vehicles</th>
-                          <th className="border border-slate-300 p-2 w-48">Full Description</th>
-                        </tr>
-                        <tr className="bg-slate-100 text-xs">
-                          <th className="border border-slate-300 p-1"></th>
-                          <th className="border border-slate-300 p-1"></th>
-                          <th className="border border-slate-300 p-1">Parking</th>
-                          <th className="border border-slate-300 p-1">Public Transport</th>
-                          <th className="border border-slate-300 p-1">Taxis</th>
-                          <th className="border border-slate-300 p-1">Tolls</th>
-                          <th className="border border-slate-300 p-1">Cong Chg</th>
-                          <th className="border border-slate-300 p-1">Subsistence</th>
-                          <th className="border border-slate-300 p-1">Repairs</th>
-                          <th className="border border-slate-300 p-1">Parts</th>
-                          <th className="border border-slate-300 p-1"></th>
+                          <th className="border p-2">Ref</th>
+                          <th className="border p-2">Parking</th>
+                          <th className="border p-2">Pub.Trans</th>
+                          <th className="border p-2">Taxis</th>
+                          <th className="border p-2">Tolls</th>
+                          <th className="border p-2">Subsist.</th>
+                          <th className="border p-2">Repairs</th>
+                          <th className="border p-2">Parts</th>
+                          <th className="border p-2">Description</th>
                         </tr>
                       </thead>
                       <tbody>
-                        {travelExpenses.length === 0 ? (
-                          <tr>
-                            <td colSpan="11" className="border border-slate-300 p-8 text-center text-slate-400">
-                              No travel expenses
-                            </td>
+                        {travelExpenses.map(exp => (
+                          <tr key={exp.id}>
+                            <td className="border p-2 font-bold text-blue-700">{exp.ref}</td>
+                            <td className="border p-2 text-right">{exp.category === 'B' ? exp.amount.toFixed(2) : ''}</td>
+                            <td className="border p-2 text-right">{exp.subcategory === 'Public Transport' ? exp.amount.toFixed(2) : ''}</td>
+                            <td className="border p-2 text-right">{exp.subcategory === 'Taxis' ? exp.amount.toFixed(2) : ''}</td>
+                            <td className="border p-2 text-right">{exp.subcategory === 'Tolls' ? exp.amount.toFixed(2) : ''}</td>
+                            <td className="border p-2 text-right">{exp.subcategory === 'Subsistence' ? exp.amount.toFixed(2) : ''}</td>
+                            <td className="border p-2 text-right">{exp.subcategory === 'Repairs' ? exp.amount.toFixed(2) : ''}</td>
+                            <td className="border p-2 text-right">{exp.subcategory === 'Parts' ? exp.amount.toFixed(2) : ''}</td>
+                            <td className="border p-2">{exp.description}</td>
                           </tr>
-                        ) : (
-                          travelExpenses.map((exp, idx) => (
-                            <tr key={exp.id} className={idx % 2 === 0 ? 'bg-white' : 'bg-slate-50'}>
-                              <td className="border border-slate-300 p-2 text-center font-bold text-blue-700">{exp.ref}</td>
-                              <td className="border border-slate-300 p-2 text-center">*</td>
-                              <td className="border border-slate-300 p-2 text-right">{exp.category === 'B' ? exp.amount.toFixed(2) : ''}</td>
-                              <td className="border border-slate-300 p-2 text-right">{exp.subcategory === 'Public Transport' ? exp.amount.toFixed(2) : ''}</td>
-                              <td className="border border-slate-300 p-2 text-right font-medium">{exp.subcategory === 'Taxis' ? exp.amount.toFixed(2) : ''}</td>
-                              <td className="border border-slate-300 p-2 text-right">{exp.subcategory === 'Tolls' ? exp.amount.toFixed(2) : ''}</td>
-                              <td className="border border-slate-300 p-2 text-right">{exp.subcategory === 'Congestion Charging' ? exp.amount.toFixed(2) : ''}</td>
-                              <td className="border border-slate-300 p-2 text-right">{exp.subcategory === 'Subsistence' ? exp.amount.toFixed(2) : ''}</td>
-                              <td className="border border-slate-300 p-2 text-right">{exp.subcategory === 'Repairs' ? exp.amount.toFixed(2) : ''}</td>
-                              <td className="border border-slate-300 p-2 text-right">{exp.subcategory === 'Parts' ? exp.amount.toFixed(2) : ''}</td>
-                              <td className="border border-slate-300 p-2 text-xs">{exp.description}</td>
-                            </tr>
-                          ))
-                        )}
-                        {/* Totals row */}
-                        <tr className="bg-blue-100 font-bold">
-                          <td className="border border-slate-300 p-2" colSpan="2">Totals</td>
-                          <td className="border border-slate-300 p-2 text-right">{getCategoryTotal('B').toFixed(2)}</td>
-                          <td className="border border-slate-300 p-2 text-right">{getSubcategoryTotal('C', 'Public Transport').toFixed(2)}</td>
-                          <td className="border border-slate-300 p-2 text-right">{getSubcategoryTotal('C', 'Taxis').toFixed(2)}</td>
-                          <td className="border border-slate-300 p-2 text-right">{getSubcategoryTotal('C', 'Tolls').toFixed(2)}</td>
-                          <td className="border border-slate-300 p-2 text-right">{getSubcategoryTotal('C', 'Congestion Charging').toFixed(2)}</td>
-                          <td className="border border-slate-300 p-2 text-right">{getSubcategoryTotal('C', 'Subsistence').toFixed(2)}</td>
-                          <td className="border border-slate-300 p-2 text-right">{getSubcategoryTotal('D', 'Repairs').toFixed(2)}</td>
-                          <td className="border border-slate-300 p-2 text-right">{getSubcategoryTotal('D', 'Parts').toFixed(2)}</td>
-                          <td className="border border-slate-300 p-2 text-right text-blue-700">
-                            {(getCategoryTotal('B') + getCategoryTotal('C') + getCategoryTotal('D')).toFixed(2)}
-                          </td>
-                        </tr>
+                        ))}
                       </tbody>
                     </table>
                   </div>
@@ -1010,92 +1141,35 @@ export default function BerkeleyExpenseSystem() {
               </div>
             )}
 
-            {/* PAGE 2: Entertaining & Welfare Detail */}
+            {/* PAGE 2: Entertaining Detail */}
             {previewPage === 2 && (
               <div className="max-w-4xl mx-auto">
                 <div className="border-2 border-slate-400">
-                  <div className="bg-blue-900 text-white p-3 text-center font-bold text-lg">
-                    Entertaining and Welfare Detail
-                  </div>
-                  <div className="p-3 bg-amber-50 border-b border-slate-400">
-                    <p className="text-amber-800 font-semibold">⚠️ PLEASE ENSURE A FULL LIST OF GUESTS ENTERTAINED ARE SUPPLIED WITH EACH RECEIPT STATING WHO THEY ARE EMPLOYED BY.</p>
-                  </div>
-                  <div className="p-3 bg-slate-50 border-b border-slate-400">
-                    <span>Name: <strong>{currentUser.name}</strong></span>
-                  </div>
-                  
+                  <div className="bg-blue-900 text-white p-3 text-center font-bold">Entertaining and Welfare Detail</div>
+                  <div className="bg-amber-50 p-2 text-amber-800 text-xs font-semibold">⚠️ PLEASE ENSURE A FULL LIST OF GUESTS ARE SUPPLIED WITH EACH RECEIPT</div>
                   <div className="overflow-x-auto">
                     <table className="w-full text-xs">
                       <thead>
                         <tr className="bg-slate-200">
-                          <th className="border border-slate-300 p-2 w-16">Receipt No</th>
-                          <th className="border border-slate-300 p-2" colSpan="3">E. Employee Entertaining</th>
-                          <th className="border border-slate-300 p-2" colSpan="3">E. Business / Client Entertaining</th>
-                          <th className="border border-slate-300 p-2" colSpan="3">F. Welfare</th>
-                          <th className="border border-slate-300 p-2 w-56">Full Description</th>
-                        </tr>
-                        <tr className="bg-slate-100 text-xs">
-                          <th className="border border-slate-300 p-1"></th>
-                          <th className="border border-slate-300 p-1">Meals/Drinks</th>
-                          <th className="border border-slate-300 p-1">Accomodation</th>
-                          <th className="border border-slate-300 p-1">Other</th>
-                          <th className="border border-slate-300 p-1">Meals/Drinks</th>
-                          <th className="border border-slate-300 p-1">Accomodation</th>
-                          <th className="border border-slate-300 p-1">Other</th>
-                          <th className="border border-slate-300 p-1">Hotels</th>
-                          <th className="border border-slate-300 p-1">Employee Gifts</th>
-                          <th className="border border-slate-300 p-1">Corporate Gifts</th>
-                          <th className="border border-slate-300 p-1"></th>
+                          <th className="border p-2">Ref</th>
+                          <th className="border p-2">Emp.Meals</th>
+                          <th className="border p-2">Bus.Meals</th>
+                          <th className="border p-2">Hotels</th>
+                          <th className="border p-2">Gifts</th>
+                          <th className="border p-2">Description/Attendees</th>
                         </tr>
                       </thead>
                       <tbody>
-                        {entertainingExpenses.length === 0 ? (
-                          <tr>
-                            <td colSpan="11" className="border border-slate-300 p-8 text-center text-slate-400">
-                              No entertaining or welfare expenses
-                            </td>
+                        {entertainingExpenses.map(exp => (
+                          <tr key={exp.id}>
+                            <td className="border p-2 font-bold text-blue-700">{exp.ref}</td>
+                            <td className="border p-2 text-right">{exp.category === 'E' && exp.subcategory?.includes('Employee') ? exp.amount.toFixed(2) : ''}</td>
+                            <td className="border p-2 text-right">{exp.category === 'E' && exp.subcategory?.includes('Customer') ? exp.amount.toFixed(2) : ''}</td>
+                            <td className="border p-2 text-right">{exp.category === 'F' && exp.subcategory?.includes('Hotel') ? exp.amount.toFixed(2) : ''}</td>
+                            <td className="border p-2 text-right">{exp.category === 'F' && !exp.subcategory?.includes('Hotel') ? exp.amount.toFixed(2) : ''}</td>
+                            <td className="border p-2">{exp.merchant}{exp.attendees ? ` - ${exp.attendees}` : ''}</td>
                           </tr>
-                        ) : (
-                          entertainingExpenses.map((exp, idx) => {
-                            const isEmployeeEntertaining = exp.category === 'E' && exp.subcategory?.includes('Employee');
-                            const isBusinessEntertaining = exp.category === 'E' && exp.subcategory?.includes('Customer');
-                            const isWelfare = exp.category === 'F';
-                            
-                            return (
-                              <tr key={exp.id} className={idx % 2 === 0 ? 'bg-white' : 'bg-slate-50'}>
-                                <td className="border border-slate-300 p-2 text-center font-bold text-blue-700">{exp.ref}</td>
-                                <td className="border border-slate-300 p-2 text-right">{isEmployeeEntertaining ? exp.amount.toFixed(2) : ''}</td>
-                                <td className="border border-slate-300 p-2 text-right"></td>
-                                <td className="border border-slate-300 p-2 text-right"></td>
-                                <td className="border border-slate-300 p-2 text-right font-medium">{isBusinessEntertaining ? exp.amount.toFixed(2) : ''}</td>
-                                <td className="border border-slate-300 p-2 text-right"></td>
-                                <td className="border border-slate-300 p-2 text-right"></td>
-                                <td className="border border-slate-300 p-2 text-right">{isWelfare && exp.subcategory?.includes('Hotel') ? exp.amount.toFixed(2) : ''}</td>
-                                <td className="border border-slate-300 p-2 text-right">{isWelfare && exp.subcategory?.includes('Gifts to Employees') ? exp.amount.toFixed(2) : ''}</td>
-                                <td className="border border-slate-300 p-2 text-right">{isWelfare && exp.subcategory?.includes('Corporate') ? exp.amount.toFixed(2) : ''}</td>
-                                <td className="border border-slate-300 p-2 text-xs">
-                                  {exp.merchant}{exp.attendees ? ` - ${exp.attendees}` : ''}
-                                </td>
-                              </tr>
-                            );
-                          })
-                        )}
-                        {/* Totals row */}
-                        <tr className="bg-blue-100 font-bold">
-                          <td className="border border-slate-300 p-2">Totals</td>
-                          <td className="border border-slate-300 p-2 text-right" colSpan="3">
-                            {getSubcategoryTotal('E', 'Employees Only').toFixed(2)}
-                          </td>
-                          <td className="border border-slate-300 p-2 text-right" colSpan="3">
-                            {getSubcategoryTotal('E', 'Customers (Staff & Customers)').toFixed(2)}
-                          </td>
-                          <td className="border border-slate-300 p-2 text-right" colSpan="3">
-                            {getCategoryTotal('F').toFixed(2)}
-                          </td>
-                          <td className="border border-slate-300 p-2 text-right text-blue-700">
-                            {(getCategoryTotal('E') + getCategoryTotal('F')).toFixed(2)}
-                          </td>
-                        </tr>
+                        ))}
                       </tbody>
                     </table>
                   </div>
@@ -1103,16 +1177,14 @@ export default function BerkeleyExpenseSystem() {
               </div>
             )}
 
-            {/* PAGE 3: Attached Receipts */}
+            {/* PAGE 3: Receipt Images */}
             {previewPage === 3 && (
               <div className="max-w-4xl mx-auto">
                 <div className="border-2 border-slate-400 mb-4">
-                  <div className="bg-blue-900 text-white p-3 text-center font-bold text-lg">
-                    Attached Receipts
-                  </div>
+                  <div className="bg-blue-900 text-white p-3 text-center font-bold">Attached Receipt Images</div>
                   <div className="p-4">
                     <p className="text-sm text-slate-600 mb-4">
-                      The following {pendingExpenses.length} receipts are attached to this claim, labeled with reference numbers:
+                      {pendingExpenses.length} receipt images will be included in the PDF, each on its own page with the reference label.
                     </p>
                     
                     <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
@@ -1120,7 +1192,7 @@ export default function BerkeleyExpenseSystem() {
                         <div key={exp.id} className="border-2 border-slate-300 rounded-lg overflow-hidden">
                           <div className="bg-blue-100 p-2 flex justify-between items-center">
                             <span className="font-bold text-blue-700 text-lg">{exp.ref}</span>
-                            <span className="text-xs text-slate-600">{formatShortDate(exp.date)}</span>
+                            <span className="text-xs text-slate-600">{formatCurrency(exp.amount, exp.currency)}</span>
                           </div>
                           {exp.receiptPreview ? (
                             <img src={exp.receiptPreview} alt={exp.ref} className="w-full h-32 object-cover" />
@@ -1129,10 +1201,9 @@ export default function BerkeleyExpenseSystem() {
                               <span className="text-4xl">📄</span>
                             </div>
                           )}
-                          <div className="p-2 bg-slate-50">
-                            <p className="font-medium text-sm truncate">{exp.merchant}</p>
-                            <p className="text-xs text-slate-500 truncate">{exp.description}</p>
-                            <p className="font-bold text-blue-700 mt-1">{formatCurrency(exp.amount, exp.currency)}</p>
+                          <div className="p-2 bg-slate-50 text-xs">
+                            <p className="font-medium truncate">{exp.merchant}</p>
+                            <p className="text-slate-500 truncate">{exp.description}</p>
                           </div>
                         </div>
                       ))}
@@ -1260,14 +1331,13 @@ export default function BerkeleyExpenseSystem() {
   };
 
   // ============================================
-  // SUBMIT CLAIM - Save to Database
+  // SUBMIT CLAIM
   // ============================================
   const handleSubmitClaim = async () => {
     setLoading(true);
     try {
       const claimNumber = `EXP-2026-${String(claims.length + 1).padStart(3, '0')}`;
       
-      // Calculate total by currency
       const currencies = [...new Set(pendingExpenses.map(e => e.currency))];
       const totalAmount = pendingExpenses.reduce((sum, e) => sum + e.amount, 0);
       const primaryCurrency = currencies[0] || userOffice?.currency;
@@ -1304,20 +1374,6 @@ export default function BerkeleyExpenseSystem() {
   };
 
   // ============================================
-  // DOWNLOAD EXCEL HANDLER
-  // ============================================
-  const handleDownloadExcel = async (claim) => {
-    try {
-      const employee = EMPLOYEES.find(e => e.id === claim.user_id);
-      const office = OFFICES.find(o => employee && o.code === employee.office);
-      await generateExcelFile(claim, claim.user_name, office?.name || claim.office);
-    } catch (err) {
-      console.error('Download error:', err);
-      alert('❌ Failed to download Excel file. Please try again.');
-    }
-  };
-
-  // ============================================
   // MY EXPENSES TAB
   // ============================================
   const MyExpensesTab = () => {
@@ -1331,7 +1387,6 @@ export default function BerkeleyExpenseSystem() {
 
     return (
       <div className="space-y-4">
-        {/* Stats - Show by currency */}
         <div className="grid grid-cols-2 gap-4">
           <div className="bg-white rounded-2xl shadow-lg p-6 text-center">
             <div className="text-4xl font-bold text-slate-800">{pendingExpenses.length}</div>
@@ -1339,24 +1394,18 @@ export default function BerkeleyExpenseSystem() {
           </div>
           <div className="bg-white rounded-2xl shadow-lg p-6 text-center">
             {Object.keys(expensesByCurrency).length === 0 ? (
-              <>
-                <div className="text-3xl font-bold text-blue-600">{formatCurrency(0, userOffice?.currency)}</div>
-                <div className="text-sm text-slate-500 mt-1">Total Amount</div>
-              </>
+              <div className="text-3xl font-bold text-blue-600">{formatCurrency(0, userOffice?.currency)}</div>
             ) : (
-              <>
-                {Object.entries(expensesByCurrency).map(([currency, data]) => (
-                  <div key={currency} className="text-2xl font-bold text-blue-600">
-                    {formatCurrency(data.total, currency)}
-                  </div>
-                ))}
-                <div className="text-sm text-slate-500 mt-1">Total Amount</div>
-              </>
+              Object.entries(expensesByCurrency).map(([currency, data]) => (
+                <div key={currency} className="text-2xl font-bold text-blue-600">
+                  {formatCurrency(data.total, currency)}
+                </div>
+              ))
             )}
+            <div className="text-sm text-slate-500 mt-1">Total Amount</div>
           </div>
         </div>
 
-        {/* Warnings */}
         {hasForeignCurrency && (
           <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 flex items-start gap-3">
             <span className="text-xl">💳</span>
@@ -1367,17 +1416,6 @@ export default function BerkeleyExpenseSystem() {
           </div>
         )}
 
-        {hasOldExpenses && (
-          <div className="bg-red-50 border border-red-200 rounded-xl p-4 flex items-start gap-3">
-            <span className="text-xl">⚠️</span>
-            <div>
-              <strong className="text-red-800">Old Expenses</strong>
-              <p className="text-sm text-red-700 mt-1">Some expenses are older than 2 months and require Cathy's approval.</p>
-            </div>
-          </div>
-        )}
-
-        {/* Quick Actions */}
         <div className="bg-white rounded-2xl shadow-lg p-6">
           <h3 className="font-bold text-slate-800 mb-4">⚡ Quick Actions</h3>
           <div className="flex flex-wrap gap-3">
@@ -1392,7 +1430,6 @@ export default function BerkeleyExpenseSystem() {
           </div>
         </div>
 
-        {/* Pending Expenses */}
         <div className="bg-white rounded-2xl shadow-lg p-6">
           <h3 className="font-bold text-slate-800 mb-4">📋 Pending Expenses ({pendingExpenses.length})</h3>
 
@@ -1415,7 +1452,6 @@ export default function BerkeleyExpenseSystem() {
                             <span className="bg-blue-100 text-blue-700 text-xs font-bold px-2.5 py-1 rounded-lg">{exp.ref}</span>
                             <span className="font-semibold text-slate-800 truncate">{exp.merchant}</span>
                             {exp.isForeignCurrency && <span className="bg-amber-100 text-amber-700 text-xs px-2 py-0.5 rounded-lg">FCY</span>}
-                            {exp.isOld && <span className="bg-red-100 text-red-700 text-xs px-2 py-0.5 rounded-lg">&gt;2mo</span>}
                           </div>
                           <p className="text-sm text-slate-500 mt-1 truncate">{exp.description}</p>
                         </div>
@@ -1432,12 +1468,9 @@ export default function BerkeleyExpenseSystem() {
           )}
         </div>
 
-        {/* My Submitted Claims */}
         <div className="bg-white rounded-2xl shadow-lg p-6">
           <h3 className="font-bold text-slate-800 mb-4">📁 My Submitted Claims</h3>
-          {loading ? (
-            <p className="text-center text-slate-400 py-8">Loading...</p>
-          ) : myClaims.length === 0 ? (
+          {myClaims.length === 0 ? (
             <p className="text-center text-slate-400 py-8">No submitted claims yet</p>
           ) : (
             <div className="space-y-2">
@@ -1451,7 +1484,7 @@ export default function BerkeleyExpenseSystem() {
                         claim.status === 'rejected' ? 'bg-red-100 text-red-700' :
                         'bg-amber-100 text-amber-700'
                       }`}>
-                        {claim.status === 'pending_review' ? 'Pending Review' : claim.status}
+                        {claim.status === 'pending_review' ? 'Pending' : claim.status}
                       </span>
                     </div>
                     <p className="text-sm text-slate-500">{claim.item_count} items • {formatDate(claim.submitted_at)}</p>
@@ -1459,10 +1492,11 @@ export default function BerkeleyExpenseSystem() {
                   <div className="flex items-center gap-3">
                     <div className="font-bold text-slate-800">{formatCurrency(claim.total_amount, claim.currency)}</div>
                     <button
-                      onClick={() => handleDownloadExcel(claim)}
+                      onClick={() => handleDownloadPDF(claim)}
+                      disabled={downloading}
                       className="bg-green-100 hover:bg-green-200 text-green-700 px-3 py-2 rounded-lg text-sm font-medium transition-all flex items-center gap-1"
                     >
-                      📥 Excel
+                      📥 PDF
                     </button>
                   </div>
                 </div>
@@ -1483,41 +1517,34 @@ export default function BerkeleyExpenseSystem() {
 
     const handleApprove = async (claimId) => {
       setLoading(true);
-      const { error } = await supabase.from('claims').update({ 
+      await supabase.from('claims').update({ 
         status: 'approved', 
         reviewed_by: currentUser.name,
         reviewed_at: new Date().toISOString()
       }).eq('id', claimId);
-      
-      if (!error) {
-        await loadClaims();
-      }
+      await loadClaims();
       setSelectedClaim(null);
       setLoading(false);
     };
 
     const handleReject = async (claimId) => {
       setLoading(true);
-      const { error } = await supabase.from('claims').update({ 
+      await supabase.from('claims').update({ 
         status: 'rejected', 
         reviewed_by: currentUser.name,
         reviewed_at: new Date().toISOString()
       }).eq('id', claimId);
-      
-      if (!error) {
-        await loadClaims();
-      }
+      await loadClaims();
       setSelectedClaim(null);
       setLoading(false);
     };
 
     return (
       <div className="space-y-4">
-        {/* Stats */}
         <div className="grid grid-cols-3 gap-4">
           <div className="bg-white rounded-2xl shadow-lg p-5 text-center">
             <div className="text-3xl font-bold text-amber-500">{pendingClaims.length}</div>
-            <div className="text-xs text-slate-500 mt-1">Pending Review</div>
+            <div className="text-xs text-slate-500 mt-1">Pending</div>
           </div>
           <div className="bg-white rounded-2xl shadow-lg p-5 text-center">
             <div className="text-3xl font-bold text-green-500">{visibleClaims.filter(c => c.status === 'approved').length}</div>
@@ -1529,16 +1556,10 @@ export default function BerkeleyExpenseSystem() {
           </div>
         </div>
 
-        {/* Pending Claims */}
         <div className="bg-white rounded-2xl shadow-lg p-6">
           <h3 className="font-bold text-slate-800 mb-4">📊 Claims to Review</h3>
 
-          {loading ? (
-            <div className="text-center py-12">
-              <div className="text-4xl mb-4 animate-spin">⏳</div>
-              <p className="text-slate-500">Loading claims...</p>
-            </div>
-          ) : pendingClaims.length === 0 ? (
+          {pendingClaims.length === 0 ? (
             <div className="text-center py-12">
               <div className="text-6xl mb-4">✅</div>
               <p className="text-slate-500">No pending claims to review</p>
@@ -1552,15 +1573,16 @@ export default function BerkeleyExpenseSystem() {
                       <span className="font-semibold text-slate-800">{claim.user_name}</span>
                       <span className="bg-amber-100 text-amber-700 text-xs px-2 py-0.5 rounded-full">Pending</span>
                     </div>
-                    <p className="text-sm text-slate-500">{claim.office} • {claim.item_count} items • {formatDate(claim.submitted_at)}</p>
+                    <p className="text-sm text-slate-500">{claim.office} • {claim.item_count} items</p>
                   </div>
                   <div className="flex items-center gap-3">
                     <div className="font-bold text-slate-800">{formatCurrency(claim.total_amount, claim.currency)}</div>
                     <button
-                      onClick={(e) => { e.stopPropagation(); handleDownloadExcel(claim); }}
-                      className="bg-green-100 hover:bg-green-200 text-green-700 px-3 py-2 rounded-lg text-sm font-medium transition-all flex items-center gap-1"
+                      onClick={(e) => { e.stopPropagation(); handleDownloadPDF(claim); }}
+                      disabled={downloading}
+                      className="bg-green-100 hover:bg-green-200 text-green-700 px-3 py-2 rounded-lg text-sm font-medium"
                     >
-                      📥 Excel
+                      📥 PDF
                     </button>
                   </div>
                 </div>
@@ -1569,7 +1591,6 @@ export default function BerkeleyExpenseSystem() {
           )}
         </div>
 
-        {/* All Claims */}
         <div className="bg-white rounded-2xl shadow-lg p-6">
           <h3 className="font-bold text-slate-800 mb-4">📁 All Claims</h3>
           <div className="space-y-2">
@@ -1589,10 +1610,11 @@ export default function BerkeleyExpenseSystem() {
                 <div className="flex items-center gap-3">
                   <div className="font-bold text-slate-800">{formatCurrency(claim.total_amount, claim.currency)}</div>
                   <button
-                    onClick={() => handleDownloadExcel(claim)}
-                    className="bg-green-100 hover:bg-green-200 text-green-700 px-3 py-2 rounded-lg text-sm font-medium transition-all flex items-center gap-1"
+                    onClick={() => handleDownloadPDF(claim)}
+                    disabled={downloading}
+                    className="bg-green-100 hover:bg-green-200 text-green-700 px-3 py-2 rounded-lg text-sm font-medium"
                   >
-                    📥 Excel
+                    📥 PDF
                   </button>
                 </div>
               </div>
@@ -1626,22 +1648,14 @@ export default function BerkeleyExpenseSystem() {
                   </div>
                 </div>
 
-                {/* Download Excel Button */}
                 <button
-                  onClick={() => handleDownloadExcel(selectedClaim)}
+                  onClick={() => handleDownloadPDF(selectedClaim)}
+                  disabled={downloading}
                   className="w-full bg-gradient-to-r from-green-600 to-emerald-600 text-white py-3 rounded-xl font-semibold shadow-lg hover:shadow-xl transition-all flex items-center justify-center gap-2"
                 >
-                  📥 Download Excel File
+                  {downloading ? '⏳ Generating...' : '📥 Download PDF with Receipts'}
                 </button>
 
-                {selectedClaim.credit_card_statement && (
-                  <div className="bg-blue-50 border border-blue-200 rounded-xl p-4">
-                    <strong className="text-blue-800">💳 Credit Card Statement</strong>
-                    <p className="text-sm text-blue-700 mt-1">{selectedClaim.credit_card_statement}</p>
-                  </div>
-                )}
-
-                {/* Show expenses */}
                 {selectedClaim.expenses && selectedClaim.expenses.length > 0 && (
                   <div className="border border-slate-200 rounded-xl overflow-hidden">
                     <div className="bg-slate-100 px-4 py-2 font-semibold text-sm text-slate-600">Line Items</div>
@@ -1652,7 +1666,6 @@ export default function BerkeleyExpenseSystem() {
                             <span className="bg-blue-100 text-blue-700 text-xs font-bold px-2 py-0.5 rounded mr-2">{exp.ref}</span>
                             <span className="font-medium text-slate-800">{exp.merchant}</span>
                             <p className="text-xs text-slate-500 mt-1">{exp.description}</p>
-                            {exp.attendees && <p className="text-xs text-slate-400">👥 {exp.attendees}</p>}
                           </div>
                           <span className="font-semibold">{formatCurrency(exp.amount, exp.currency)}</span>
                         </div>
@@ -1665,10 +1678,10 @@ export default function BerkeleyExpenseSystem() {
               {selectedClaim.status === 'pending_review' && (
                 <div className="p-4 border-t border-slate-100 bg-slate-50 flex gap-3">
                   <button onClick={() => handleReject(selectedClaim.id)} disabled={loading} className="flex-1 py-3 rounded-xl bg-red-500 text-white font-semibold hover:bg-red-600 disabled:opacity-50">
-                    {loading ? '...' : 'Reject'}
+                    Reject
                   </button>
                   <button onClick={() => handleApprove(selectedClaim.id)} disabled={loading} className="flex-[2] py-3 rounded-xl bg-gradient-to-r from-green-600 to-emerald-600 text-white font-semibold shadow-lg disabled:opacity-50">
-                    {loading ? '...' : 'Approve ✓'}
+                    Approve ✓
                   </button>
                 </div>
               )}
@@ -1686,7 +1699,6 @@ export default function BerkeleyExpenseSystem() {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-100 to-slate-200">
-      {/* Header */}
       <header className="bg-gradient-to-r from-slate-900 to-slate-800 text-white px-4 py-3 shadow-lg sticky top-0 z-40">
         <div className="max-w-3xl mx-auto flex items-center justify-between">
           <div className="flex items-center gap-3">
@@ -1706,15 +1718,14 @@ export default function BerkeleyExpenseSystem() {
         </div>
       </header>
 
-      {/* Tabs */}
       {canReview && (
         <div className="bg-white border-b border-slate-200 sticky top-14 z-30">
           <div className="max-w-3xl mx-auto flex">
-            <button onClick={() => setActiveTab('my_expenses')} className={`flex-1 py-3 text-sm font-semibold border-b-2 transition-all ${activeTab === 'my_expenses' ? 'border-blue-600 text-blue-600' : 'border-transparent text-slate-500 hover:text-slate-700'}`}>
+            <button onClick={() => setActiveTab('my_expenses')} className={`flex-1 py-3 text-sm font-semibold border-b-2 transition-all ${activeTab === 'my_expenses' ? 'border-blue-600 text-blue-600' : 'border-transparent text-slate-500'}`}>
               📋 My Expenses
             </button>
-            <button onClick={() => setActiveTab('review')} className={`flex-1 py-3 text-sm font-semibold border-b-2 transition-all ${activeTab === 'review' ? 'border-blue-600 text-blue-600' : 'border-transparent text-slate-500 hover:text-slate-700'}`}>
-              👀 Review Claims
+            <button onClick={() => setActiveTab('review')} className={`flex-1 py-3 text-sm font-semibold border-b-2 transition-all ${activeTab === 'review' ? 'border-blue-600 text-blue-600' : 'border-transparent text-slate-500'}`}>
+              👀 Review
               {getVisibleClaims().filter(c => c.status === 'pending_review').length > 0 && (
                 <span className="ml-2 bg-amber-500 text-white text-xs px-2 py-0.5 rounded-full">
                   {getVisibleClaims().filter(c => c.status === 'pending_review').length}
@@ -1725,12 +1736,10 @@ export default function BerkeleyExpenseSystem() {
         </div>
       )}
 
-      {/* Main Content */}
       <main className="max-w-3xl mx-auto p-4 pb-20">
         {canReview && activeTab === 'review' ? <ReviewClaimsTab /> : <MyExpensesTab />}
       </main>
 
-      {/* Modals */}
       {showAddExpense && <AddExpenseModal />}
       {showPreview && <PreviewClaimModal />}
       {showStatementUpload && <StatementUploadModal />}
