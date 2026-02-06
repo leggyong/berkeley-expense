@@ -3,10 +3,10 @@ import React, { useState, useEffect } from 'react';
 /*
  * ============================================
  * BERKELEY INTERNATIONAL EXPENSE MANAGEMENT SYSTEM
- * Version: 1.3 - With Supabase Database
+ * Version: 1.4 - With Excel Download
  * ============================================
  * 
- * SUPABASE CONNECTION - UPDATE THESE IF NEEDED
+ * SUPABASE CONNECTION
  */
 const SUPABASE_URL = 'https://wlhoyjsicvkncfjbexoi.supabase.co';
 const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IndsaG95anNpY3ZrbmNmamJleG9pIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzAyNzIyMzcsImV4cCI6MjA4NTg0ODIzN30.AB-W5DjcmCl6fnWiQ2reD0rgDIJiMCGymc994fSJplw';
@@ -163,6 +163,189 @@ const getMonthYear = (dateStr) => {
 };
 
 // ============================================
+// EXCEL EXPORT FUNCTION
+// ============================================
+const generateExcelFile = async (claim, userName, officeName) => {
+  // Dynamically load SheetJS
+  const XLSX = await import('https://cdn.sheetjs.com/xlsx-0.20.1/package/xlsx.mjs');
+  
+  const expenses = claim.expenses || [];
+  
+  // Group expenses by category
+  const groupedExpenses = expenses.reduce((acc, exp) => {
+    if (!acc[exp.category]) acc[exp.category] = [];
+    acc[exp.category].push(exp);
+    return acc;
+  }, {});
+
+  // Calculate totals by subcategory
+  const getSubcategoryTotal = (cat, subcat) => {
+    return (groupedExpenses[cat] || [])
+      .filter(e => e.subcategory === subcat)
+      .reduce((sum, e) => sum + e.amount, 0);
+  };
+
+  const getCategoryTotal = (cat) => {
+    return (groupedExpenses[cat] || []).reduce((sum, e) => sum + e.amount, 0);
+  };
+
+  // ===== SHEET 1: Summary =====
+  const summaryData = [
+    ['', '', 'Motor & Expense Claim Form', '', '', 'Account Code', 'Document Number'],
+    ['', '', 'Berkeley London Residential Ltd', '', '', 'Accounts Use Only', ''],
+    [''],
+    ['Name', userName, '', 'Month', getMonthYear(expenses[0]?.date || new Date().toISOString())],
+    ['Office', officeName, '', '', ''],
+    [''],
+    ['Expenses claim', '', '', '', '', '', 'Total'],
+    [''],
+    ['', 'Motor Vehicle Expenditure'],
+    ['A.', 'Petrol Expenditure', 'Full Petrol Allowance / Fuel Card Holders', '', '', '', getCategoryTotal('A')],
+    ['', '', 'Business Mileage Return (As Attached)', '', '', '', 0],
+    ['B.', 'Parking', 'Off-Street Parking', '', '', '', getCategoryTotal('B')],
+    ['C.', 'Travel Expenses', 'Public Transport (Trains, Tubes, Buses etc.)', '', '', '', getSubcategoryTotal('C', 'Public Transport')],
+    ['', '', 'Taxis', '', '', '', getSubcategoryTotal('C', 'Taxis')],
+    ['', '', 'Tolls', '', '', '', getSubcategoryTotal('C', 'Tolls')],
+    ['', '', 'Congestion Charging', '', '', '', getSubcategoryTotal('C', 'Congestion Charging')],
+    ['', '', 'Subsistence (meals while away from office)', '', '', '', getSubcategoryTotal('C', 'Subsistence')],
+    ['D.', 'Vehicle Repairs', 'Repairs', '', '', '', getSubcategoryTotal('D', 'Repairs')],
+    ['', '', 'Parts', '', '', '', getSubcategoryTotal('D', 'Parts')],
+    [''],
+    ['', 'Business Expenditure'],
+    ['E.', 'Entertaining', 'Customers (Staff & Customers)', '', '', '', getSubcategoryTotal('E', 'Customers (Staff & Customers)')],
+    ['', '', 'Employees (Must be only Staff present)', '', '', '', getSubcategoryTotal('E', 'Employees Only')],
+    ['F.', 'Welfare', 'Hotel Accommodation', '', '', '', getSubcategoryTotal('F', 'Hotel Accommodation')],
+    ['', '', 'Gifts to Employees', '', '', '', getSubcategoryTotal('F', 'Gifts to Employees')],
+    ['', '', 'Corporate Gifts', '', '', '', getSubcategoryTotal('F', 'Corporate Gifts')],
+    ['G.', 'Subscriptions', 'Professional / Non-Professional / Newspapers', '', '', '', getCategoryTotal('G')],
+    ['H.', 'Computer Costs', 'All items', '', '', '', getCategoryTotal('H')],
+    ['I.', 'WIP', 'All items', '', '', '', getCategoryTotal('I')],
+    ['I.', 'Other', 'Miscellaneous Vatable Items', '', '', '', 0],
+    [''],
+    ['', '', '', '', 'Total expenses claimed', '', claim.total_amount],
+    [''],
+    ['Signature of Claimant', '', '', '', 'Date', formatDate(claim.submitted_at)],
+    ['Authorised', '', '', '', '', ''],
+  ];
+
+  // ===== SHEET 2: Travel Expense Detail =====
+  const travelExpenses = [...(groupedExpenses['B'] || []), ...(groupedExpenses['C'] || []), ...(groupedExpenses['D'] || [])];
+  const travelData = [
+    ['Travel Expense Detail'],
+    ['Name', userName, '', '', '', '', '', '', '', '', '', 'Please do not include any travel expenses associated with Employee Entertaining'],
+    [''],
+    ['Receipt No', 'VAT', 'B. Parking', 'Public Transport', 'Taxis', 'Tolls', 'Cong Chg', 'Subsistence', 'Repairs', 'Parts', 'Full Description'],
+    ...travelExpenses.map(exp => [
+      exp.ref,
+      '*',
+      exp.category === 'B' ? exp.amount : '',
+      exp.subcategory === 'Public Transport' ? exp.amount : '',
+      exp.subcategory === 'Taxis' ? exp.amount : '',
+      exp.subcategory === 'Tolls' ? exp.amount : '',
+      exp.subcategory === 'Congestion Charging' ? exp.amount : '',
+      exp.subcategory === 'Subsistence' ? exp.amount : '',
+      exp.subcategory === 'Repairs' ? exp.amount : '',
+      exp.subcategory === 'Parts' ? exp.amount : '',
+      exp.description
+    ]),
+    [''],
+    ['Totals', '', 
+      getCategoryTotal('B'),
+      getSubcategoryTotal('C', 'Public Transport'),
+      getSubcategoryTotal('C', 'Taxis'),
+      getSubcategoryTotal('C', 'Tolls'),
+      getSubcategoryTotal('C', 'Congestion Charging'),
+      getSubcategoryTotal('C', 'Subsistence'),
+      getSubcategoryTotal('D', 'Repairs'),
+      getSubcategoryTotal('D', 'Parts'),
+      `${claim.currency} ${(getCategoryTotal('B') + getCategoryTotal('C') + getCategoryTotal('D')).toFixed(2)}`
+    ]
+  ];
+
+  // ===== SHEET 3: Entertaining & Welfare Detail =====
+  const entertainingExpenses = [...(groupedExpenses['E'] || []), ...(groupedExpenses['F'] || [])];
+  const entertainingData = [
+    ['Entertaining and Welfare Detail'],
+    ['PLEASE ENSURE A FULL LIST OF GUESTS ENTERTAINED ARE SUPPLIED WITH EACH RECEIPT STATING WHO THEY ARE EMPLOYED BY.'],
+    ['Name', userName],
+    [''],
+    ['Receipt No', 'E. Employee Entertaining', '', '', 'E. Business Entertaining', '', '', 'F. Welfare', '', '', 'Full Description'],
+    ['', 'Meals/Drinks', 'Accomodation', 'Other', 'Meals/Drinks', 'Accomodation', 'Other', 'Hotels', 'Employee Gifts', 'Corporate Gifts', ''],
+    ...entertainingExpenses.map(exp => {
+      const isEmployeeEntertaining = exp.category === 'E' && exp.subcategory?.includes('Employee');
+      const isBusinessEntertaining = exp.category === 'E' && exp.subcategory?.includes('Customer');
+      const isHotel = exp.category === 'F' && exp.subcategory?.includes('Hotel');
+      const isEmployeeGift = exp.category === 'F' && exp.subcategory?.includes('Gifts to Employees');
+      const isCorporateGift = exp.category === 'F' && exp.subcategory?.includes('Corporate');
+      
+      return [
+        exp.ref,
+        isEmployeeEntertaining ? exp.amount : '',
+        '',
+        '',
+        isBusinessEntertaining ? exp.amount : '',
+        '',
+        '',
+        isHotel ? exp.amount : '',
+        isEmployeeGift ? exp.amount : '',
+        isCorporateGift ? exp.amount : '',
+        `${exp.merchant}${exp.attendees ? ' - ' + exp.attendees : ''}`
+      ];
+    }),
+    [''],
+    ['Totals', 
+      getSubcategoryTotal('E', 'Employees Only'), '', '',
+      getSubcategoryTotal('E', 'Customers (Staff & Customers)'), '', '',
+      getSubcategoryTotal('F', 'Hotel Accommodation'),
+      getSubcategoryTotal('F', 'Gifts to Employees'),
+      getSubcategoryTotal('F', 'Corporate Gifts'),
+      `${claim.currency} ${(getCategoryTotal('E') + getCategoryTotal('F')).toFixed(2)}`
+    ]
+  ];
+
+  // ===== SHEET 4: All Receipts =====
+  const receiptsData = [
+    ['Attached Receipts'],
+    [''],
+    ['Ref', 'Date', 'Merchant', 'Category', 'Subcategory', 'Amount', 'Currency', 'Description', 'Attendees'],
+    ...expenses.map(exp => [
+      exp.ref,
+      formatShortDate(exp.date),
+      exp.merchant,
+      EXPENSE_CATEGORIES[exp.category]?.name || exp.category,
+      exp.subcategory,
+      exp.amount,
+      exp.currency,
+      exp.description,
+      exp.attendees || ''
+    ])
+  ];
+
+  // Create workbook
+  const wb = XLSX.utils.book_new();
+  
+  const ws1 = XLSX.utils.aoa_to_sheet(summaryData);
+  ws1['!cols'] = [{ wch: 5 }, { wch: 18 }, { wch: 35 }, { wch: 10 }, { wch: 18 }, { wch: 12 }, { wch: 15 }];
+  XLSX.utils.book_append_sheet(wb, ws1, 'Summary');
+  
+  const ws2 = XLSX.utils.aoa_to_sheet(travelData);
+  ws2['!cols'] = [{ wch: 10 }, { wch: 5 }, { wch: 10 }, { wch: 12 }, { wch: 10 }, { wch: 8 }, { wch: 10 }, { wch: 12 }, { wch: 10 }, { wch: 8 }, { wch: 40 }];
+  XLSX.utils.book_append_sheet(wb, ws2, 'Travel Detail');
+  
+  const ws3 = XLSX.utils.aoa_to_sheet(entertainingData);
+  ws3['!cols'] = [{ wch: 10 }, { wch: 12 }, { wch: 12 }, { wch: 8 }, { wch: 12 }, { wch: 12 }, { wch: 8 }, { wch: 10 }, { wch: 12 }, { wch: 12 }, { wch: 45 }];
+  XLSX.utils.book_append_sheet(wb, ws3, 'Entertaining Detail');
+  
+  const ws4 = XLSX.utils.aoa_to_sheet(receiptsData);
+  ws4['!cols'] = [{ wch: 6 }, { wch: 12 }, { wch: 20 }, { wch: 18 }, { wch: 20 }, { wch: 10 }, { wch: 8 }, { wch: 35 }, { wch: 30 }];
+  XLSX.utils.book_append_sheet(wb, ws4, 'All Receipts');
+
+  // Generate and download
+  const fileName = `${claim.claim_number}_${userName.replace(/\s+/g, '_')}_${formatDate(claim.submitted_at).replace(/\s+/g, '')}.xlsx`;
+  XLSX.writeFile(wb, fileName);
+};
+
+// ============================================
 // MAIN APPLICATION
 // ============================================
 export default function BerkeleyExpenseSystem() {
@@ -205,7 +388,14 @@ export default function BerkeleyExpenseSystem() {
   const getUserOffice = (user) => OFFICES.find(o => o.code === user?.office);
   const userOffice = getUserOffice(currentUser);
   const pendingExpenses = expenses.filter(e => e.status === 'draft');
-  const totalPendingAmount = pendingExpenses.reduce((sum, e) => sum + parseFloat(e.amount || 0), 0);
+  
+  // Group pending expenses by currency for proper display
+  const expensesByCurrency = pendingExpenses.reduce((acc, e) => {
+    if (!acc[e.currency]) acc[e.currency] = { total: 0, count: 0 };
+    acc[e.currency].total += parseFloat(e.amount || 0);
+    acc[e.currency].count += 1;
+    return acc;
+  }, {});
   
   const isForeignCurrency = (currency) => {
     if (!currentUser) return false;
@@ -277,7 +467,7 @@ export default function BerkeleyExpenseSystem() {
           </div>
 
           <p className="text-center text-xs text-slate-400 mt-8">
-            Berkeley International Expense Management System v1.3
+            Berkeley International Expense Management System v1.4
           </p>
         </div>
       </div>
@@ -473,11 +663,16 @@ export default function BerkeleyExpenseSystem() {
 
     const canSubmit = !hasForeignCurrency || (hasForeignCurrency && creditCardStatement);
     
-    // Calculate category totals
-    const categoryTotals = {};
-    Object.entries(EXPENSE_CATEGORIES).forEach(([key]) => {
-      categoryTotals[key] = (groupedExpenses[key] || []).reduce((sum, e) => sum + e.amount, 0);
-    });
+    // Calculate category totals - maintain original currency
+    const getSubcategoryTotal = (cat, subcat) => {
+      return (groupedExpenses[cat] || [])
+        .filter(e => e.subcategory === subcat)
+        .reduce((sum, e) => sum + e.amount, 0);
+    };
+
+    const getCategoryTotal = (cat) => {
+      return (groupedExpenses[cat] || []).reduce((sum, e) => sum + e.amount, 0);
+    };
 
     // Get claim month
     const claimMonth = pendingExpenses.length > 0 ? getMonthYear(pendingExpenses[0].date) : getMonthYear(new Date().toISOString());
@@ -485,8 +680,8 @@ export default function BerkeleyExpenseSystem() {
     // Pages: 0=Summary, 1=Travel Detail, 2=Entertaining Detail, 3=Receipts
     const pages = ['Summary', 'Travel Expense Detail', 'Entertaining & Welfare Detail', 'Attached Receipts'];
 
-    // Travel expenses (C, D)
-    const travelExpenses = [...(groupedExpenses['C'] || []), ...(groupedExpenses['D'] || [])];
+    // Travel expenses (B, C, D)
+    const travelExpenses = [...(groupedExpenses['B'] || []), ...(groupedExpenses['C'] || []), ...(groupedExpenses['D'] || [])];
     // Entertaining expenses (E, F)
     const entertainingExpenses = [...(groupedExpenses['E'] || []), ...(groupedExpenses['F'] || [])];
 
@@ -562,7 +757,7 @@ export default function BerkeleyExpenseSystem() {
                     </div>
                     <div className="p-3 flex">
                       <span className="text-slate-600 w-20">Currency</span>
-                      <span className="font-semibold">{userOffice?.currency}</span>
+                      <span className="font-semibold">{Object.keys(expensesByCurrency).join(', ') || userOffice?.currency}</span>
                     </div>
                   </div>
                 </div>
@@ -580,49 +775,55 @@ export default function BerkeleyExpenseSystem() {
                           <td className="p-2 w-8">A.</td>
                           <td className="p-2 text-blue-700 underline">Petrol Expenditure</td>
                           <td className="p-2">Full Petrol Allowance / Fuel Card Holders</td>
-                          <td className="p-2 text-right w-28">{formatCurrency(categoryTotals['A'] || 0, userOffice?.currency)}</td>
+                          <td className="p-2 text-right w-28">{getCategoryTotal('A').toFixed(2)}</td>
                         </tr>
                         <tr className="border-b border-slate-200">
                           <td className="p-2"></td>
                           <td className="p-2"></td>
                           <td className="p-2">Business Mileage Return (As Attached)</td>
-                          <td className="p-2 text-right">{formatCurrency(0, userOffice?.currency)}</td>
+                          <td className="p-2 text-right">0.00</td>
                         </tr>
                         <tr className="border-b border-slate-200">
                           <td className="p-2">B.</td>
                           <td className="p-2 text-blue-700 underline">Parking</td>
                           <td className="p-2">Off-Street Parking</td>
-                          <td className="p-2 text-right">{formatCurrency(categoryTotals['B'] || 0, userOffice?.currency)}</td>
+                          <td className="p-2 text-right">{getCategoryTotal('B').toFixed(2)}</td>
                         </tr>
                         <tr className="border-b border-slate-200">
                           <td className="p-2">C.</td>
                           <td className="p-2 text-blue-700 underline">Travel Expenses</td>
                           <td className="p-2">Public Transport (Trains, Tubes, Buses etc.)</td>
-                          <td className="p-2 text-right">{formatCurrency((groupedExpenses['C'] || []).filter(e => e.subcategory === 'Public Transport').reduce((s, e) => s + e.amount, 0), userOffice?.currency)}</td>
+                          <td className="p-2 text-right">{getSubcategoryTotal('C', 'Public Transport').toFixed(2)}</td>
                         </tr>
                         <tr className="border-b border-slate-200">
                           <td className="p-2"></td>
                           <td className="p-2"></td>
                           <td className="p-2">Taxis</td>
-                          <td className="p-2 text-right font-medium">{formatCurrency((groupedExpenses['C'] || []).filter(e => e.subcategory === 'Taxis').reduce((s, e) => s + e.amount, 0), userOffice?.currency)}</td>
+                          <td className="p-2 text-right font-medium">{getSubcategoryTotal('C', 'Taxis').toFixed(2)}</td>
                         </tr>
                         <tr className="border-b border-slate-200">
                           <td className="p-2"></td>
                           <td className="p-2"></td>
                           <td className="p-2">Tolls</td>
-                          <td className="p-2 text-right">{formatCurrency((groupedExpenses['C'] || []).filter(e => e.subcategory === 'Tolls').reduce((s, e) => s + e.amount, 0), userOffice?.currency)}</td>
+                          <td className="p-2 text-right">{getSubcategoryTotal('C', 'Tolls').toFixed(2)}</td>
                         </tr>
                         <tr className="border-b border-slate-200">
                           <td className="p-2"></td>
                           <td className="p-2"></td>
                           <td className="p-2">Subsistence (meals while away from office)</td>
-                          <td className="p-2 text-right">{formatCurrency((groupedExpenses['C'] || []).filter(e => e.subcategory === 'Subsistence').reduce((s, e) => s + e.amount, 0), userOffice?.currency)}</td>
+                          <td className="p-2 text-right">{getSubcategoryTotal('C', 'Subsistence').toFixed(2)}</td>
                         </tr>
                         <tr className="border-b border-slate-300">
-                          <td className="p-2">D</td>
+                          <td className="p-2">D.</td>
                           <td className="p-2 text-blue-700 underline">Vehicle Repairs</td>
-                          <td className="p-2">Repairs / Parts</td>
-                          <td className="p-2 text-right">{formatCurrency(categoryTotals['D'] || 0, userOffice?.currency)}</td>
+                          <td className="p-2">Repairs</td>
+                          <td className="p-2 text-right">{getSubcategoryTotal('D', 'Repairs').toFixed(2)}</td>
+                        </tr>
+                        <tr className="border-b border-slate-300">
+                          <td className="p-2"></td>
+                          <td className="p-2"></td>
+                          <td className="p-2">Parts</td>
+                          <td className="p-2 text-right">{getSubcategoryTotal('D', 'Parts').toFixed(2)}</td>
                         </tr>
                       </tbody>
                     </table>
@@ -634,61 +835,69 @@ export default function BerkeleyExpenseSystem() {
                     <table className="w-full text-sm">
                       <tbody>
                         <tr className="border-b border-slate-200">
-                          <td className="p-2 w-8">E</td>
+                          <td className="p-2 w-8">E.</td>
                           <td className="p-2 text-blue-700 underline">Entertaining</td>
                           <td className="p-2">Customers (Staff & Customers)</td>
-                          <td className="p-2 text-right w-28 font-medium">{formatCurrency((groupedExpenses['E'] || []).filter(e => e.subcategory?.includes('Customer')).reduce((s, e) => s + e.amount, 0), userOffice?.currency)}</td>
+                          <td className="p-2 text-right w-28 font-medium">{getSubcategoryTotal('E', 'Customers (Staff & Customers)').toFixed(2)}</td>
                         </tr>
                         <tr className="border-b border-slate-200">
                           <td className="p-2"></td>
                           <td className="p-2"></td>
                           <td className="p-2">Employees (Must be only Staff present)</td>
-                          <td className="p-2 text-right">{formatCurrency((groupedExpenses['E'] || []).filter(e => e.subcategory?.includes('Employee')).reduce((s, e) => s + e.amount, 0), userOffice?.currency)}</td>
+                          <td className="p-2 text-right">{getSubcategoryTotal('E', 'Employees Only').toFixed(2)}</td>
                         </tr>
                         <tr className="border-b border-slate-200">
-                          <td className="p-2">F</td>
+                          <td className="p-2">F.</td>
                           <td className="p-2 text-blue-700 underline">Welfare</td>
                           <td className="p-2">Hotel Accommodation</td>
-                          <td className="p-2 text-right">{formatCurrency((groupedExpenses['F'] || []).filter(e => e.subcategory?.includes('Hotel')).reduce((s, e) => s + e.amount, 0), userOffice?.currency)}</td>
+                          <td className="p-2 text-right">{getSubcategoryTotal('F', 'Hotel Accommodation').toFixed(2)}</td>
                         </tr>
                         <tr className="border-b border-slate-200">
                           <td className="p-2"></td>
                           <td className="p-2"></td>
                           <td className="p-2">Gifts to Employees / Corporate Gifts</td>
-                          <td className="p-2 text-right">{formatCurrency((groupedExpenses['F'] || []).filter(e => !e.subcategory?.includes('Hotel')).reduce((s, e) => s + e.amount, 0), userOffice?.currency)}</td>
+                          <td className="p-2 text-right">{(getSubcategoryTotal('F', 'Gifts to Employees') + getSubcategoryTotal('F', 'Corporate Gifts')).toFixed(2)}</td>
                         </tr>
                         <tr className="border-b border-slate-200">
-                          <td className="p-2">G</td>
+                          <td className="p-2">G.</td>
                           <td className="p-2 text-blue-700 underline">Subscriptions</td>
                           <td className="p-2">Professional / Non-Professional / Newspapers</td>
-                          <td className="p-2 text-right">{formatCurrency(categoryTotals['G'] || 0, userOffice?.currency)}</td>
+                          <td className="p-2 text-right">{getCategoryTotal('G').toFixed(2)}</td>
                         </tr>
                         <tr className="border-b border-slate-200">
-                          <td className="p-2">H</td>
+                          <td className="p-2">H.</td>
                           <td className="p-2 text-blue-700 underline">Computer Costs</td>
                           <td className="p-2">All items</td>
-                          <td className="p-2 text-right">{formatCurrency(categoryTotals['H'] || 0, userOffice?.currency)}</td>
+                          <td className="p-2 text-right">{getCategoryTotal('H').toFixed(2)}</td>
                         </tr>
                         <tr className="border-b border-slate-200">
-                          <td className="p-2">I</td>
+                          <td className="p-2">I.</td>
                           <td className="p-2 text-blue-700 underline">WIP</td>
                           <td className="p-2">All items</td>
-                          <td className="p-2 text-right">{formatCurrency(categoryTotals['I'] || 0, userOffice?.currency)}</td>
+                          <td className="p-2 text-right">{getCategoryTotal('I').toFixed(2)}</td>
                         </tr>
                         <tr className="border-b border-slate-200">
-                          <td className="p-2">I</td>
+                          <td className="p-2">I.</td>
                           <td className="p-2 text-blue-700 underline">Other</td>
                           <td className="p-2">Miscellaneous Vatable Items</td>
-                          <td className="p-2 text-right">{formatCurrency(0, userOffice?.currency)}</td>
+                          <td className="p-2 text-right">0.00</td>
                         </tr>
                       </tbody>
                     </table>
                   </div>
 
-                  {/* Total */}
-                  <div className="border-t-2 border-slate-400 bg-blue-50 p-3 flex justify-between items-center">
-                    <span className="font-bold text-lg">Total expenses claimed</span>
-                    <span className="font-bold text-xl text-blue-700">{formatCurrency(totalPendingAmount, userOffice?.currency)}</span>
+                  {/* Total - Show by currency */}
+                  <div className="border-t-2 border-slate-400 bg-blue-50 p-3">
+                    <div className="flex justify-between items-center">
+                      <span className="font-bold text-lg">Total expenses claimed</span>
+                      <div className="text-right">
+                        {Object.entries(expensesByCurrency).map(([currency, data]) => (
+                          <div key={currency} className="font-bold text-xl text-blue-700">
+                            {formatCurrency(data.total, currency)}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
                   </div>
                 </div>
 
@@ -736,7 +945,7 @@ export default function BerkeleyExpenseSystem() {
                         <tr className="bg-slate-200">
                           <th className="border border-slate-300 p-2 w-16">Receipt No</th>
                           <th className="border border-slate-300 p-2">VAT</th>
-                          <th className="border border-slate-300 p-2" colSpan="2">B. Parking</th>
+                          <th className="border border-slate-300 p-2">B. Parking</th>
                           <th className="border border-slate-300 p-2" colSpan="5">C. Travel Expenses</th>
                           <th className="border border-slate-300 p-2" colSpan="2">D. Motor Vehicles</th>
                           <th className="border border-slate-300 p-2 w-48">Full Description</th>
@@ -758,7 +967,7 @@ export default function BerkeleyExpenseSystem() {
                       <tbody>
                         {travelExpenses.length === 0 ? (
                           <tr>
-                            <td colSpan="12" className="border border-slate-300 p-8 text-center text-slate-400">
+                            <td colSpan="11" className="border border-slate-300 p-8 text-center text-slate-400">
                               No travel expenses
                             </td>
                           </tr>
@@ -775,23 +984,23 @@ export default function BerkeleyExpenseSystem() {
                               <td className="border border-slate-300 p-2 text-right">{exp.subcategory === 'Subsistence' ? exp.amount.toFixed(2) : ''}</td>
                               <td className="border border-slate-300 p-2 text-right">{exp.subcategory === 'Repairs' ? exp.amount.toFixed(2) : ''}</td>
                               <td className="border border-slate-300 p-2 text-right">{exp.subcategory === 'Parts' ? exp.amount.toFixed(2) : ''}</td>
-                              <td className="border border-slate-300 p-2 text-xs">{exp.ref} {exp.description}</td>
+                              <td className="border border-slate-300 p-2 text-xs">{exp.description}</td>
                             </tr>
                           ))
                         )}
                         {/* Totals row */}
                         <tr className="bg-blue-100 font-bold">
                           <td className="border border-slate-300 p-2" colSpan="2">Totals</td>
-                          <td className="border border-slate-300 p-2 text-right">{(categoryTotals['B'] || 0).toFixed(2)}</td>
-                          <td className="border border-slate-300 p-2 text-right">{(groupedExpenses['C'] || []).filter(e => e.subcategory === 'Public Transport').reduce((s, e) => s + e.amount, 0).toFixed(2)}</td>
-                          <td className="border border-slate-300 p-2 text-right">{(groupedExpenses['C'] || []).filter(e => e.subcategory === 'Taxis').reduce((s, e) => s + e.amount, 0).toFixed(2)}</td>
-                          <td className="border border-slate-300 p-2 text-right">{(groupedExpenses['C'] || []).filter(e => e.subcategory === 'Tolls').reduce((s, e) => s + e.amount, 0).toFixed(2)}</td>
-                          <td className="border border-slate-300 p-2 text-right">{(groupedExpenses['C'] || []).filter(e => e.subcategory === 'Congestion Charging').reduce((s, e) => s + e.amount, 0).toFixed(2)}</td>
-                          <td className="border border-slate-300 p-2 text-right">{(groupedExpenses['C'] || []).filter(e => e.subcategory === 'Subsistence').reduce((s, e) => s + e.amount, 0).toFixed(2)}</td>
-                          <td className="border border-slate-300 p-2 text-right">{(groupedExpenses['D'] || []).filter(e => e.subcategory === 'Repairs').reduce((s, e) => s + e.amount, 0).toFixed(2)}</td>
-                          <td className="border border-slate-300 p-2 text-right">{(groupedExpenses['D'] || []).filter(e => e.subcategory === 'Parts').reduce((s, e) => s + e.amount, 0).toFixed(2)}</td>
+                          <td className="border border-slate-300 p-2 text-right">{getCategoryTotal('B').toFixed(2)}</td>
+                          <td className="border border-slate-300 p-2 text-right">{getSubcategoryTotal('C', 'Public Transport').toFixed(2)}</td>
+                          <td className="border border-slate-300 p-2 text-right">{getSubcategoryTotal('C', 'Taxis').toFixed(2)}</td>
+                          <td className="border border-slate-300 p-2 text-right">{getSubcategoryTotal('C', 'Tolls').toFixed(2)}</td>
+                          <td className="border border-slate-300 p-2 text-right">{getSubcategoryTotal('C', 'Congestion Charging').toFixed(2)}</td>
+                          <td className="border border-slate-300 p-2 text-right">{getSubcategoryTotal('C', 'Subsistence').toFixed(2)}</td>
+                          <td className="border border-slate-300 p-2 text-right">{getSubcategoryTotal('D', 'Repairs').toFixed(2)}</td>
+                          <td className="border border-slate-300 p-2 text-right">{getSubcategoryTotal('D', 'Parts').toFixed(2)}</td>
                           <td className="border border-slate-300 p-2 text-right text-blue-700">
-                            {userOffice?.currency} {(categoryTotals['C'] + categoryTotals['D'] + categoryTotals['B']).toFixed(2)}
+                            {(getCategoryTotal('B') + getCategoryTotal('C') + getCategoryTotal('D')).toFixed(2)}
                           </td>
                         </tr>
                       </tbody>
@@ -865,7 +1074,7 @@ export default function BerkeleyExpenseSystem() {
                                 <td className="border border-slate-300 p-2 text-right">{isWelfare && exp.subcategory?.includes('Gifts to Employees') ? exp.amount.toFixed(2) : ''}</td>
                                 <td className="border border-slate-300 p-2 text-right">{isWelfare && exp.subcategory?.includes('Corporate') ? exp.amount.toFixed(2) : ''}</td>
                                 <td className="border border-slate-300 p-2 text-xs">
-                                  {exp.ref} {exp.merchant} {exp.attendees ? `- ${exp.attendees}` : ''}
+                                  {exp.merchant}{exp.attendees ? ` - ${exp.attendees}` : ''}
                                 </td>
                               </tr>
                             );
@@ -875,16 +1084,16 @@ export default function BerkeleyExpenseSystem() {
                         <tr className="bg-blue-100 font-bold">
                           <td className="border border-slate-300 p-2">Totals</td>
                           <td className="border border-slate-300 p-2 text-right" colSpan="3">
-                            {(groupedExpenses['E'] || []).filter(e => e.subcategory?.includes('Employee')).reduce((s, e) => s + e.amount, 0).toFixed(2)}
+                            {getSubcategoryTotal('E', 'Employees Only').toFixed(2)}
                           </td>
                           <td className="border border-slate-300 p-2 text-right" colSpan="3">
-                            {(groupedExpenses['E'] || []).filter(e => e.subcategory?.includes('Customer')).reduce((s, e) => s + e.amount, 0).toFixed(2)}
+                            {getSubcategoryTotal('E', 'Customers (Staff & Customers)').toFixed(2)}
                           </td>
                           <td className="border border-slate-300 p-2 text-right" colSpan="3">
-                            {(categoryTotals['F'] || 0).toFixed(2)}
+                            {getCategoryTotal('F').toFixed(2)}
                           </td>
                           <td className="border border-slate-300 p-2 text-right text-blue-700">
-                            {userOffice?.currency} {(categoryTotals['E'] + categoryTotals['F']).toFixed(2)}
+                            {(getCategoryTotal('E') + getCategoryTotal('F')).toFixed(2)}
                           </td>
                         </tr>
                       </tbody>
@@ -943,7 +1152,7 @@ export default function BerkeleyExpenseSystem() {
                           <div>
                             <p className="text-red-800 font-bold">❌ CREDIT CARD STATEMENT REQUIRED</p>
                             <p className="text-red-700 text-sm mt-2">
-                              Foreign currency expenses: {foreignCurrencyExpenses.map(e => e.ref).join(', ')}
+                              Foreign currency expenses: {foreignCurrencyExpenses.map(e => `${e.ref} (${e.currency})`).join(', ')}
                             </p>
                             <button 
                               onClick={() => { setShowPreview(false); setShowStatementUpload(true); }}
@@ -1057,13 +1266,19 @@ export default function BerkeleyExpenseSystem() {
     setLoading(true);
     try {
       const claimNumber = `EXP-2026-${String(claims.length + 1).padStart(3, '0')}`;
+      
+      // Calculate total by currency
+      const currencies = [...new Set(pendingExpenses.map(e => e.currency))];
+      const totalAmount = pendingExpenses.reduce((sum, e) => sum + e.amount, 0);
+      const primaryCurrency = currencies[0] || userOffice?.currency;
+      
       const newClaim = {
         claim_number: claimNumber,
         user_id: currentUser.id,
         user_name: currentUser.name,
         office: userOffice?.name,
-        currency: userOffice?.currency,
-        total_amount: totalPendingAmount,
+        currency: primaryCurrency,
+        total_amount: totalAmount,
         item_count: pendingExpenses.length,
         status: 'pending_review',
         credit_card_statement: creditCardStatement?.name || null,
@@ -1089,6 +1304,20 @@ export default function BerkeleyExpenseSystem() {
   };
 
   // ============================================
+  // DOWNLOAD EXCEL HANDLER
+  // ============================================
+  const handleDownloadExcel = async (claim) => {
+    try {
+      const employee = EMPLOYEES.find(e => e.id === claim.user_id);
+      const office = OFFICES.find(o => employee && o.code === employee.office);
+      await generateExcelFile(claim, claim.user_name, office?.name || claim.office);
+    } catch (err) {
+      console.error('Download error:', err);
+      alert('❌ Failed to download Excel file. Please try again.');
+    }
+  };
+
+  // ============================================
   // MY EXPENSES TAB
   // ============================================
   const MyExpensesTab = () => {
@@ -1102,15 +1331,28 @@ export default function BerkeleyExpenseSystem() {
 
     return (
       <div className="space-y-4">
-        {/* Stats */}
+        {/* Stats - Show by currency */}
         <div className="grid grid-cols-2 gap-4">
           <div className="bg-white rounded-2xl shadow-lg p-6 text-center">
             <div className="text-4xl font-bold text-slate-800">{pendingExpenses.length}</div>
             <div className="text-sm text-slate-500 mt-1">Pending Receipts</div>
           </div>
           <div className="bg-white rounded-2xl shadow-lg p-6 text-center">
-            <div className="text-3xl font-bold text-blue-600">{formatCurrency(totalPendingAmount, userOffice?.currency)}</div>
-            <div className="text-sm text-slate-500 mt-1">Total Amount</div>
+            {Object.keys(expensesByCurrency).length === 0 ? (
+              <>
+                <div className="text-3xl font-bold text-blue-600">{formatCurrency(0, userOffice?.currency)}</div>
+                <div className="text-sm text-slate-500 mt-1">Total Amount</div>
+              </>
+            ) : (
+              <>
+                {Object.entries(expensesByCurrency).map(([currency, data]) => (
+                  <div key={currency} className="text-2xl font-bold text-blue-600">
+                    {formatCurrency(data.total, currency)}
+                  </div>
+                ))}
+                <div className="text-sm text-slate-500 mt-1">Total Amount</div>
+              </>
+            )}
           </div>
         </div>
 
@@ -1201,7 +1443,7 @@ export default function BerkeleyExpenseSystem() {
             <div className="space-y-2">
               {myClaims.map(claim => (
                 <div key={claim.id} className="flex items-center justify-between p-4 rounded-xl bg-slate-50 border border-slate-200">
-                  <div>
+                  <div className="flex-1">
                     <div className="flex items-center gap-2">
                       <span className="font-semibold text-slate-800">{claim.claim_number}</span>
                       <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${
@@ -1214,7 +1456,15 @@ export default function BerkeleyExpenseSystem() {
                     </div>
                     <p className="text-sm text-slate-500">{claim.item_count} items • {formatDate(claim.submitted_at)}</p>
                   </div>
-                  <div className="font-bold text-slate-800">{formatCurrency(claim.total_amount, claim.currency)}</div>
+                  <div className="flex items-center gap-3">
+                    <div className="font-bold text-slate-800">{formatCurrency(claim.total_amount, claim.currency)}</div>
+                    <button
+                      onClick={() => handleDownloadExcel(claim)}
+                      className="bg-green-100 hover:bg-green-200 text-green-700 px-3 py-2 rounded-lg text-sm font-medium transition-all flex items-center gap-1"
+                    >
+                      📥 Excel
+                    </button>
+                  </div>
                 </div>
               ))}
             </div>
@@ -1304,8 +1554,14 @@ export default function BerkeleyExpenseSystem() {
                     </div>
                     <p className="text-sm text-slate-500">{claim.office} • {claim.item_count} items • {formatDate(claim.submitted_at)}</p>
                   </div>
-                  <div className="text-right ml-4">
+                  <div className="flex items-center gap-3">
                     <div className="font-bold text-slate-800">{formatCurrency(claim.total_amount, claim.currency)}</div>
+                    <button
+                      onClick={(e) => { e.stopPropagation(); handleDownloadExcel(claim); }}
+                      className="bg-green-100 hover:bg-green-200 text-green-700 px-3 py-2 rounded-lg text-sm font-medium transition-all flex items-center gap-1"
+                    >
+                      📥 Excel
+                    </button>
                   </div>
                 </div>
               ))}
@@ -1318,8 +1574,8 @@ export default function BerkeleyExpenseSystem() {
           <h3 className="font-bold text-slate-800 mb-4">📁 All Claims</h3>
           <div className="space-y-2">
             {visibleClaims.filter(c => c.status !== 'pending_review').map(claim => (
-              <div key={claim.id} onClick={() => setSelectedClaim(claim)} className="flex items-center justify-between p-4 rounded-xl bg-slate-50 border border-slate-200 hover:border-blue-300 cursor-pointer">
-                <div>
+              <div key={claim.id} className="flex items-center justify-between p-4 rounded-xl bg-slate-50 border border-slate-200">
+                <div onClick={() => setSelectedClaim(claim)} className="flex-1 cursor-pointer">
                   <div className="flex items-center gap-2">
                     <span className="font-semibold text-slate-800">{claim.user_name}</span>
                     <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${
@@ -1330,7 +1586,15 @@ export default function BerkeleyExpenseSystem() {
                   </div>
                   <p className="text-sm text-slate-500">{claim.office} • {claim.item_count} items</p>
                 </div>
-                <div className="font-bold text-slate-800">{formatCurrency(claim.total_amount, claim.currency)}</div>
+                <div className="flex items-center gap-3">
+                  <div className="font-bold text-slate-800">{formatCurrency(claim.total_amount, claim.currency)}</div>
+                  <button
+                    onClick={() => handleDownloadExcel(claim)}
+                    className="bg-green-100 hover:bg-green-200 text-green-700 px-3 py-2 rounded-lg text-sm font-medium transition-all flex items-center gap-1"
+                  >
+                    📥 Excel
+                  </button>
+                </div>
               </div>
             ))}
           </div>
@@ -1361,6 +1625,14 @@ export default function BerkeleyExpenseSystem() {
                     <div className="text-2xl font-bold text-slate-800">{selectedClaim.item_count}</div>
                   </div>
                 </div>
+
+                {/* Download Excel Button */}
+                <button
+                  onClick={() => handleDownloadExcel(selectedClaim)}
+                  className="w-full bg-gradient-to-r from-green-600 to-emerald-600 text-white py-3 rounded-xl font-semibold shadow-lg hover:shadow-xl transition-all flex items-center justify-center gap-2"
+                >
+                  📥 Download Excel File
+                </button>
 
                 {selectedClaim.credit_card_statement && (
                   <div className="bg-blue-50 border border-blue-200 rounded-xl p-4">
