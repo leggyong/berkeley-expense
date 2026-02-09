@@ -3,7 +3,7 @@ import React, { useState, useEffect, useRef } from 'react';
 /*
  * ============================================
  * BERKELEY INTERNATIONAL EXPENSE MANAGEMENT SYSTEM
- * Version: 2.0 - Image Annotation + Backcharging
+ * Version: 2.1 - Editable Annotations + 54 Developments
  * ============================================
  */
 const SUPABASE_URL = 'https://wlhoyjsicvkncfjbexoi.supabase.co';
@@ -58,30 +58,20 @@ const OFFICES = [
 ];
 
 // ============================================
-// DEVELOPMENTS FOR BACKCHARGING
+// DEVELOPMENTS FOR BACKCHARGING (54 developments)
 // ============================================
 const DEVELOPMENTS = [
-  { code: 'RVR', name: 'Royal Wharf', region: 'UK' },
-  { code: 'SQP', name: 'South Quay Plaza', region: 'UK' },
-  { code: 'WDW', name: 'Woodberry Down', region: 'UK' },
-  { code: 'KGX', name: 'Kings Cross', region: 'UK' },
-  { code: 'GWQ', name: 'Grand Union', region: 'UK' },
-  { code: 'CPT', name: 'Chelsea Creek', region: 'UK' },
-  { code: 'SYD', name: 'One Sydney Harbour', region: 'AUS' },
-  { code: 'MEL', name: 'Melbourne Quarter', region: 'AUS' },
-  { code: 'BNE', name: 'Brisbane Portside', region: 'AUS' },
-  { code: 'TKO', name: 'Tseung Kwan O', region: 'HK' },
-  { code: 'TKW', name: 'To Kwa Wan', region: 'HK' },
-  { code: 'TWN', name: 'Tsuen Wan', region: 'HK' },
-  { code: 'SHA', name: 'Shanghai Residences', region: 'CN' },
-  { code: 'BEJ', name: 'Beijing Tower', region: 'CN' },
-  { code: 'SIN', name: 'Singapore Marina', region: 'SG' },
-  { code: 'BKK', name: 'Bangkok Riverside', region: 'TH' },
-  { code: 'DXB', name: 'Dubai Creek', region: 'UAE' },
-  { code: 'ABD', name: 'Abu Dhabi Central', region: 'UAE' },
-  { code: 'RYD', name: 'Riyadh Gate', region: 'KSA' },
-  { code: 'JED', name: 'Jeddah Waterfront', region: 'KSA' },
-  { code: 'GEN', name: 'General / Corporate', region: 'ALL' }
+  '250 City Road', 'Abbey Barn Park', 'Alexandra Gate', 'Bankside Gardens', 'Bath Riverside',
+  'Beaufort Park', 'Bermondsey Place', 'Bow Common', 'Camden', 'Carnwath Road',
+  'Chelsea Creek', 'Cranleigh', 'Eden Grove', 'Foal Hurst Green', 'Glasswater Locks',
+  'Grand Union', 'Green Park Village', 'Guildford', 'Hareshill, Fleet', 'Hartland Village',
+  'Heron Wharf', 'Hertford Locks', 'Highwood Village', 'Hildenborough', 'Horlicks Quarter',
+  'Kidbrooke Village', "King's Road Park", 'London Dock', 'Milton Keynes', 'Oval Village',
+  'Parkside Collection', 'Plumstead', 'Prince of Wales Drive', 'Reading Riverworks', "Regent's View",
+  'Royal Arsenal Riverside', 'Silkstream', 'South Quay Plaza', 'Spring Hill', 'Sunningdale Park',
+  'Sutton', 'The Exchange', 'The Green Quarter', 'Trent Park', 'Trillium',
+  'TwelveTrees Park', 'Wallingford', 'Wandsworth Mills', 'West End Gate', 'White City',
+  'Winterbrook', 'Woodberry Down'
 ];
 
 // ============================================
@@ -114,7 +104,7 @@ const SPECIAL_REVIEWERS = {
 };
 
 // ============================================
-// EMPLOYEES
+// EMPLOYEES (Emma Fowler removed)
 // ============================================
 const EMPLOYEES = [
   { id: 101, name: 'Fang Yi', office: 'BEJ', role: 'employee', reimburseCurrency: 'CNY', password: 'berkeley123' },
@@ -167,7 +157,6 @@ const EMPLOYEES = [
   { id: 816, name: 'Humphrey George Robert Perrins', office: 'SIN', role: 'employee', reimburseCurrency: 'SGD', password: 'berkeley123' },
   { id: 817, name: 'Tay Ruo Fan', office: 'SIN', role: 'employee', reimburseCurrency: 'SGD', password: 'berkeley123' },
   { id: 818, name: 'Wah Wah May Zaw', office: 'SIN', role: 'employee', reimburseCurrency: 'SGD', password: 'berkeley123' },
-  { id: 819, name: 'Emma Fowler', office: 'SIN', role: 'finance', reimburseCurrency: 'GBP', password: 'berkeley123' },
   { id: 901, name: 'Sutanya Jaruphiboon', office: 'BKK', role: 'employee', reimburseCurrency: 'THB', password: 'berkeley123' },
   { id: 902, name: 'Chayasid Jongpipattanachoke', office: 'BKK', role: 'employee', reimburseCurrency: 'THB', password: 'berkeley123' },
   { id: 903, name: 'Juthamas Leewanun', office: 'BKK', role: 'employee', reimburseCurrency: 'THB', password: 'berkeley123' },
@@ -183,7 +172,7 @@ const EMPLOYEES = [
 ];
 
 // ============================================
-// EXPENSE CATEGORIES - Brackets removed except for E
+// EXPENSE CATEGORIES
 // ============================================
 const EXPENSE_CATEGORIES = {
   A: { name: 'Petrol Expenditure', subcategories: ['Full Petrol Allowance', 'Business Mileage Return'], icon: '⛽', requiresAttendees: false },
@@ -256,60 +245,104 @@ const ImageViewer = ({ src, onClose }) => (
 );
 
 // ============================================
-// STATEMENT ANNOTATION COMPONENT
+// STATEMENT ANNOTATION COMPONENT - Draggable & Resizable
 // ============================================
-const StatementAnnotator = ({ image, expenses, onSave, onCancel }) => {
+const StatementAnnotator = ({ image, expenses, existingAnnotations = [], onSave, onCancel }) => {
   const canvasRef = useRef(null);
-  const [annotations, setAnnotations] = useState([]);
+  const containerRef = useRef(null);
+  const [annotations, setAnnotations] = useState(existingAnnotations);
   const [selectedLabel, setSelectedLabel] = useState(null);
-  const [isDrawing, setIsDrawing] = useState(false);
+  const [dragging, setDragging] = useState(null);
+  const [resizing, setResizing] = useState(null);
   const [imageLoaded, setImageLoaded] = useState(false);
+  const [imgDimensions, setImgDimensions] = useState({ width: 0, height: 0 });
+  const [baseImage, setBaseImage] = useState(null);
 
+  // Load image
   useEffect(() => {
-    const canvas = canvasRef.current;
-    const ctx = canvas.getContext('2d');
     const img = new Image();
     img.onload = () => {
-      const maxWidth = 800;
+      const maxWidth = Math.min(800, window.innerWidth - 100);
       const scale = Math.min(maxWidth / img.width, 1);
-      canvas.width = img.width * scale;
-      canvas.height = img.height * scale;
-      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+      setImgDimensions({ width: img.width * scale, height: img.height * scale, scale });
+      setBaseImage(img);
       setImageLoaded(true);
     };
     img.src = image;
   }, [image]);
 
+  // Redraw canvas
   useEffect(() => {
-    if (!imageLoaded) return;
+    if (!imageLoaded || !baseImage) return;
     const canvas = canvasRef.current;
     const ctx = canvas.getContext('2d');
-    const img = new Image();
-    img.onload = () => {
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
-      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-      annotations.forEach(ann => {
-        ctx.strokeStyle = '#ff6600';
-        ctx.lineWidth = 3;
-        ctx.strokeRect(ann.x, ann.y, ann.width, ann.height);
-        ctx.fillStyle = '#ff6600';
-        ctx.fillRect(ann.x, ann.y - 25, 40, 25);
-        ctx.fillStyle = 'white';
-        ctx.font = 'bold 16px Arial';
-        ctx.fillText(ann.ref, ann.x + 5, ann.y - 7);
-      });
-    };
-    img.src = image;
-  }, [annotations, imageLoaded, image]);
+    canvas.width = imgDimensions.width;
+    canvas.height = imgDimensions.height;
+    ctx.drawImage(baseImage, 0, 0, imgDimensions.width, imgDimensions.height);
+    
+    annotations.forEach(ann => {
+      ctx.strokeStyle = '#ff6600';
+      ctx.lineWidth = 3;
+      ctx.strokeRect(ann.x, ann.y, ann.width, ann.height);
+      ctx.fillStyle = '#ff6600';
+      const labelWidth = Math.max(35, ann.ref.length * 12);
+      ctx.fillRect(ann.x, ann.y - 22, labelWidth, 22);
+      ctx.fillStyle = 'white';
+      ctx.font = 'bold 14px Arial';
+      ctx.fillText(ann.ref, ann.x + 5, ann.y - 6);
+      // Resize handle
+      ctx.fillStyle = '#ff6600';
+      ctx.fillRect(ann.x + ann.width - 8, ann.y + ann.height - 8, 8, 8);
+    });
+  }, [annotations, imageLoaded, baseImage, imgDimensions]);
 
-  const handleCanvasClick = (e) => {
-    if (!selectedLabel) return;
+  const getMousePos = (e) => {
     const rect = canvasRef.current.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    const y = e.clientY - rect.top;
-    const newAnn = { ref: selectedLabel, x: x - 75, y: y - 15, width: 150, height: 30 };
-    setAnnotations(prev => [...prev.filter(a => a.ref !== selectedLabel), newAnn]);
-    setSelectedLabel(null);
+    return { x: e.clientX - rect.left, y: e.clientY - rect.top };
+  };
+
+  const findAnnotationAt = (pos) => {
+    for (let i = annotations.length - 1; i >= 0; i--) {
+      const ann = annotations[i];
+      if (pos.x >= ann.x && pos.x <= ann.x + ann.width && pos.y >= ann.y && pos.y <= ann.y + ann.height) {
+        return { ann, index: i, isResize: pos.x >= ann.x + ann.width - 12 && pos.y >= ann.y + ann.height - 12 };
+      }
+    }
+    return null;
+  };
+
+  const handleMouseDown = (e) => {
+    const pos = getMousePos(e);
+    const found = findAnnotationAt(pos);
+    
+    if (found) {
+      if (found.isResize) {
+        setResizing({ index: found.index, startX: pos.x, startY: pos.y, startW: found.ann.width, startH: found.ann.height });
+      } else {
+        setDragging({ index: found.index, offsetX: pos.x - found.ann.x, offsetY: pos.y - found.ann.y });
+      }
+    } else if (selectedLabel) {
+      // Place new annotation
+      const newAnn = { ref: selectedLabel, x: pos.x - 50, y: pos.y - 15, width: 100, height: 30 };
+      setAnnotations(prev => [...prev.filter(a => a.ref !== selectedLabel), newAnn]);
+      setSelectedLabel(null);
+    }
+  };
+
+  const handleMouseMove = (e) => {
+    const pos = getMousePos(e);
+    if (dragging !== null) {
+      setAnnotations(prev => prev.map((a, i) => i === dragging.index ? { ...a, x: pos.x - dragging.offsetX, y: pos.y - dragging.offsetY } : a));
+    } else if (resizing !== null) {
+      const dx = pos.x - resizing.startX;
+      const dy = pos.y - resizing.startY;
+      setAnnotations(prev => prev.map((a, i) => i === resizing.index ? { ...a, width: Math.max(50, resizing.startW + dx), height: Math.max(20, resizing.startH + dy) } : a));
+    }
+  };
+
+  const handleMouseUp = () => {
+    setDragging(null);
+    setResizing(null);
   };
 
   const removeAnnotation = (ref) => {
@@ -323,19 +356,21 @@ const StatementAnnotator = ({ image, expenses, onSave, onCancel }) => {
   };
 
   const foreignExpenses = expenses.filter(e => e.isForeignCurrency);
+  const untaggedExpenses = foreignExpenses.filter(e => !annotations.some(a => a.ref === e.ref));
 
   return (
     <div className="fixed inset-0 bg-black/90 flex flex-col z-[100]">
       <div className="bg-gradient-to-r from-amber-500 to-orange-500 text-white p-4 flex justify-between items-center shrink-0">
         <div>
           <h2 className="text-lg font-bold">📝 Annotate Credit Card Statement</h2>
-          <p className="text-amber-100 text-sm">Click a label below, then click on the statement to place it</p>
+          <p className="text-amber-100 text-sm">Select a label, click to place. Drag to move, drag corner to resize.</p>
         </div>
         <button onClick={onCancel} className="w-8 h-8 rounded-full bg-white/20">✕</button>
       </div>
 
-      <div className="flex-1 overflow-auto p-4">
+      <div className="flex-1 overflow-auto p-4" ref={containerRef}>
         <div className="max-w-4xl mx-auto">
+          {/* Label buttons */}
           <div className="bg-white rounded-xl p-4 mb-4">
             <p className="font-semibold mb-3">Select expense label to place:</p>
             <div className="flex flex-wrap gap-2">
@@ -353,30 +388,46 @@ const StatementAnnotator = ({ image, expenses, onSave, onCancel }) => {
                     }`}
                   >
                     {exp.ref} - {exp.merchant}
-                    {isPlaced && <span className="ml-2" onClick={(e) => { e.stopPropagation(); removeAnnotation(exp.ref); }}>✕</span>}
+                    {isPlaced && <span className="ml-2 cursor-pointer" onClick={(e) => { e.stopPropagation(); removeAnnotation(exp.ref); }}>✕</span>}
                   </button>
                 );
               })}
             </div>
+            
+            {untaggedExpenses.length > 0 && (
+              <div className="mt-3 bg-amber-50 border border-amber-300 rounded-lg p-3">
+                <p className="text-amber-800 text-sm font-medium">⚠️ {untaggedExpenses.length} expense(s) not yet tagged: {untaggedExpenses.map(e => e.ref).join(', ')}</p>
+              </div>
+            )}
+            
             {selectedLabel && (
-              <p className="mt-3 text-orange-600 font-medium">👆 Now click on the statement image where {selectedLabel} appears</p>
+              <p className="mt-3 text-orange-600 font-medium">👆 Click on the statement image to place {selectedLabel}</p>
             )}
           </div>
 
+          {/* Canvas */}
           <div className="bg-white rounded-xl p-4 overflow-auto">
-            <canvas
-              ref={canvasRef}
-              onClick={handleCanvasClick}
-              className={`border-2 ${selectedLabel ? 'border-orange-400 cursor-crosshair' : 'border-slate-300'} rounded-lg`}
-            />
+            {imageLoaded && (
+              <canvas
+                ref={canvasRef}
+                onMouseDown={handleMouseDown}
+                onMouseMove={handleMouseMove}
+                onMouseUp={handleMouseUp}
+                onMouseLeave={handleMouseUp}
+                className={`border-2 ${selectedLabel ? 'border-orange-400 cursor-crosshair' : dragging || resizing ? 'cursor-move' : 'border-slate-300'} rounded-lg`}
+                style={{ cursor: dragging ? 'move' : resizing ? 'se-resize' : selectedLabel ? 'crosshair' : 'default' }}
+              />
+            )}
           </div>
+
+          <p className="text-white/60 text-sm mt-3 text-center">💡 Tip: Drag boxes to move them. Drag the orange corner to resize.</p>
         </div>
       </div>
 
       <div className="bg-slate-100 p-4 flex gap-3 justify-end shrink-0">
         <button onClick={onCancel} className="px-6 py-3 rounded-xl border-2 border-slate-300 font-semibold text-slate-600">Cancel</button>
         <button onClick={handleSave} className="px-6 py-3 rounded-xl bg-gradient-to-r from-green-600 to-emerald-600 text-white font-semibold">
-          Save Annotated Statement ✓
+          Save Annotations ✓
         </button>
       </div>
     </div>
@@ -397,7 +448,9 @@ export default function BerkeleyExpenseSystem() {
   const [showStatementUpload, setShowStatementUpload] = useState(false);
   const [showStatementAnnotator, setShowStatementAnnotator] = useState(false);
   const [creditCardStatement, setCreditCardStatement] = useState(null);
+  const [statementImageData, setStatementImageData] = useState(null);
   const [annotatedStatementImage, setAnnotatedStatementImage] = useState(null);
+  const [statementAnnotations, setStatementAnnotations] = useState([]);
   const [selectedClaim, setSelectedClaim] = useState(null);
   const [activeTab, setActiveTab] = useState('my_expenses');
   const [previewPage, setPreviewPage] = useState(0);
@@ -460,15 +513,6 @@ export default function BerkeleyExpenseSystem() {
       if (c.status !== 'pending_review' && c.status !== 'pending_level2') return false;
       return canUserReviewClaim(currentUser.id, c);
     });
-  };
-
-  const getVisibleClaims = () => {
-    if (!currentUser) return [];
-    if (currentUser.role === 'finance') return claims;
-    const reviewable = getReviewableClaims();
-    const own = claims.filter(c => c.user_id === currentUser.id);
-    const combined = [...reviewable, ...own];
-    return [...new Map(combined.map(c => [c.id, c])).values()];
   };
 
   // ============================================
@@ -672,17 +716,9 @@ export default function BerkeleyExpenseSystem() {
     setDownloading(true);
     try {
       const employee = EMPLOYEES.find(e => e.id === claim.user_id);
-      await generatePDFFromHTML(
-        claim.expenses || [], 
-        claim.user_name, 
-        employee?.office, 
-        claim.claim_number, 
-        claim.submitted_at, 
-        claim.annotated_statement,
-        employee?.reimburseCurrency || claim.currency
-      );
+      await generatePDFFromHTML(claim.expenses || [], claim.user_name, employee?.office, claim.claim_number, claim.submitted_at, claim.annotated_statement, employee?.reimburseCurrency || claim.currency);
     } catch (err) {
-      alert('❌ Failed to download PDF.');
+      alert('❌ Failed');
     }
     setDownloading(false);
   };
@@ -690,17 +726,9 @@ export default function BerkeleyExpenseSystem() {
   const handleDownloadPreviewPDF = async () => {
     setDownloading(true);
     try {
-      await generatePDFFromHTML(
-        pendingExpenses, 
-        currentUser.name, 
-        currentUser.office, 
-        `DRAFT-${Date.now().toString().slice(-6)}`, 
-        new Date().toISOString(), 
-        annotatedStatementImage,
-        getUserReimburseCurrency(currentUser)
-      );
+      await generatePDFFromHTML(pendingExpenses, currentUser.name, currentUser.office, `DRAFT-${Date.now().toString().slice(-6)}`, new Date().toISOString(), annotatedStatementImage, getUserReimburseCurrency(currentUser));
     } catch (err) {
-      alert('❌ Failed to download PDF.');
+      alert('❌ Failed');
     }
     setDownloading(false);
   };
@@ -771,7 +799,7 @@ export default function BerkeleyExpenseSystem() {
               <p className="text-center text-xs text-slate-400 mt-4">Default: <code className="bg-slate-100 px-2 py-1 rounded">berkeley123</code></p>
             </div>
           )}
-          <p className="text-center text-xs text-slate-400 mt-8">v2.0</p>
+          <p className="text-center text-xs text-slate-400 mt-8">v2.1</p>
         </div>
       </div>
     );
@@ -819,24 +847,15 @@ export default function BerkeleyExpenseSystem() {
     };
 
     const addBackcharge = () => {
-      setFormData(prev => ({
-        ...prev,
-        backcharges: [...prev.backcharges, { development: '', percentage: '' }]
-      }));
+      setFormData(prev => ({ ...prev, backcharges: [...prev.backcharges, { development: '', percentage: '' }] }));
     };
 
     const updateBackcharge = (idx, field, value) => {
-      setFormData(prev => ({
-        ...prev,
-        backcharges: prev.backcharges.map((bc, i) => i === idx ? { ...bc, [field]: value } : bc)
-      }));
+      setFormData(prev => ({ ...prev, backcharges: prev.backcharges.map((bc, i) => i === idx ? { ...bc, [field]: value } : bc) }));
     };
 
     const removeBackcharge = (idx) => {
-      setFormData(prev => ({
-        ...prev,
-        backcharges: prev.backcharges.filter((_, i) => i !== idx)
-      }));
+      setFormData(prev => ({ ...prev, backcharges: prev.backcharges.filter((_, i) => i !== idx) }));
     };
 
     const backchargeTotal = formData.backcharges.reduce((sum, bc) => sum + (parseFloat(bc.percentage) || 0), 0);
@@ -845,8 +864,7 @@ export default function BerkeleyExpenseSystem() {
     const handleSave = () => {
       if (editExpense) {
         setExpenses(prev => prev.map(e => e.id === editExpense.id ? {
-          ...e,
-          ...formData,
+          ...e, ...formData,
           amount: parseFloat(formData.amount),
           reimbursementAmount: isForeignCurrency ? parseFloat(formData.reimbursementAmount) : parseFloat(formData.amount),
           reimbursementCurrency: userReimburseCurrency,
@@ -878,18 +896,18 @@ export default function BerkeleyExpenseSystem() {
         <div className="bg-white rounded-2xl max-w-lg w-full max-h-[90vh] overflow-hidden shadow-2xl">
           <div className="bg-gradient-to-r from-blue-600 to-indigo-600 text-white p-5 flex justify-between items-center">
             <div>
-              <h2 className="text-lg font-bold">{editExpense ? '✏️ Edit Expense' : '📸 Add Expense'}</h2>
+              <h2 className="text-lg font-bold">{editExpense ? '✏️ Edit' : '📸 Add'} Expense</h2>
               <p className="text-blue-100 text-sm">Reimburse in {userReimburseCurrency}</p>
             </div>
-            <button onClick={onClose} className="w-8 h-8 rounded-full bg-white/20 hover:bg-white/30">✕</button>
+            <button onClick={onClose} className="w-8 h-8 rounded-full bg-white/20">✕</button>
           </div>
 
           <div className="p-6 overflow-y-auto max-h-[calc(90vh-180px)]">
             {step === 1 && (
-              <label className="block border-3 border-dashed border-slate-300 rounded-2xl p-8 text-center cursor-pointer hover:border-blue-500 hover:bg-blue-50">
+              <label className="block border-3 border-dashed border-slate-300 rounded-2xl p-8 text-center cursor-pointer hover:border-blue-500">
                 <input type="file" accept="image/*,application/pdf" capture="environment" onChange={handleFileChange} className="hidden" />
                 <div className="text-5xl mb-4">📸</div>
-                <p className="font-semibold text-slate-700">Take photo or upload receipt</p>
+                <p className="font-semibold">Take photo or upload receipt</p>
               </label>
             )}
 
@@ -897,15 +915,10 @@ export default function BerkeleyExpenseSystem() {
               <div className="space-y-4">
                 {receiptPreview && (
                   <div className="relative">
-                    <img 
-                      src={receiptPreview} 
-                      alt="Receipt" 
-                      className="w-full h-40 object-contain bg-slate-100 rounded-xl cursor-pointer hover:opacity-90" 
-                      onClick={() => setShowFullImage(true)}
-                    />
+                    <img src={receiptPreview} alt="Receipt" className="w-full h-40 object-contain bg-slate-100 rounded-xl cursor-pointer" onClick={() => setShowFullImage(true)} />
                     <div className="absolute bottom-2 right-2 flex gap-2">
                       <button onClick={() => setShowFullImage(true)} className="bg-black/60 text-white px-3 py-1 rounded-lg text-xs">🔍 View</button>
-                      <button onClick={() => { setStep(1); setReceiptPreview(null); }} className="bg-white/90 px-3 py-1 rounded-lg text-xs shadow">📷 Change</button>
+                      <button onClick={() => { setStep(1); setReceiptPreview(null); }} className="bg-white/90 px-3 py-1 rounded-lg text-xs">📷 Change</button>
                     </div>
                   </div>
                 )}
@@ -918,103 +931,61 @@ export default function BerkeleyExpenseSystem() {
                 <div className="bg-slate-50 rounded-xl p-4 space-y-3">
                   <p className="text-xs font-semibold text-slate-600 uppercase">💵 Original Expense</p>
                   <div className="grid grid-cols-2 gap-4">
-                    <div>
-                      <label className="block text-xs font-semibold text-slate-500 mb-1">Amount *</label>
-                      <input type="number" step="0.01" className="w-full p-3 border-2 border-slate-200 rounded-xl focus:border-blue-500 outline-none bg-white" value={formData.amount} onChange={e => setFormData(prev => ({ ...prev, amount: e.target.value }))} />
-                    </div>
-                    <div>
-                      <label className="block text-xs font-semibold text-slate-500 mb-1">Currency *</label>
-                      <select className="w-full p-3 border-2 border-slate-200 rounded-xl focus:border-blue-500 outline-none bg-white" value={formData.currency} onChange={e => setFormData(prev => ({ ...prev, currency: e.target.value }))}>
-                        {CURRENCIES.map(c => <option key={c} value={c}>{c}</option>)}
-                      </select>
-                    </div>
+                    <input type="number" step="0.01" className="p-3 border-2 border-slate-200 rounded-xl" placeholder="Amount" value={formData.amount} onChange={e => setFormData(prev => ({ ...prev, amount: e.target.value }))} />
+                    <select className="p-3 border-2 border-slate-200 rounded-xl bg-white" value={formData.currency} onChange={e => setFormData(prev => ({ ...prev, currency: e.target.value }))}>
+                      {CURRENCIES.map(c => <option key={c} value={c}>{c}</option>)}
+                    </select>
                   </div>
                 </div>
 
                 {isForeignCurrency && (
                   <div className="bg-amber-50 border-2 border-amber-300 rounded-xl p-4">
                     <p className="text-sm font-bold text-amber-800 mb-2">💳 Foreign Currency</p>
-                    <input type="number" step="0.01" className="w-full p-3 border-2 border-amber-300 rounded-xl outline-none bg-white" placeholder={`Amount in ${userReimburseCurrency} from statement`} value={formData.reimbursementAmount} onChange={e => setFormData(prev => ({ ...prev, reimbursementAmount: e.target.value }))} />
+                    <input type="number" step="0.01" className="w-full p-3 border-2 border-amber-300 rounded-xl bg-white" placeholder={`Amount in ${userReimburseCurrency}`} value={formData.reimbursementAmount} onChange={e => setFormData(prev => ({ ...prev, reimbursementAmount: e.target.value }))} />
                   </div>
                 )}
 
                 <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Date *</label>
-                    <input type="date" className="w-full p-3 border-2 border-slate-200 rounded-xl focus:border-blue-500 outline-none" value={formData.date} onChange={e => setFormData(prev => ({ ...prev, date: e.target.value }))} />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Category *</label>
-                    <select className="w-full p-3 border-2 border-slate-200 rounded-xl focus:border-blue-500 outline-none bg-white" value={formData.category} onChange={e => setFormData(prev => ({ ...prev, category: e.target.value, subcategory: EXPENSE_CATEGORIES[e.target.value].subcategories[0] }))}>
-                      {Object.entries(EXPENSE_CATEGORIES).map(([key, val]) => <option key={key} value={key}>{val.icon} {key}. {val.name}</option>)}
-                    </select>
-                  </div>
-                </div>
-
-                <div>
-                  <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Sub-category *</label>
-                  <select className="w-full p-3 border-2 border-slate-200 rounded-xl focus:border-blue-500 outline-none bg-white" value={formData.subcategory} onChange={e => setFormData(prev => ({ ...prev, subcategory: e.target.value }))}>
-                    {EXPENSE_CATEGORIES[formData.category].subcategories.map(sub => <option key={sub} value={sub}>{sub}</option>)}
+                  <input type="date" className="p-3 border-2 border-slate-200 rounded-xl" value={formData.date} onChange={e => setFormData(prev => ({ ...prev, date: e.target.value }))} />
+                  <select className="p-3 border-2 border-slate-200 rounded-xl bg-white" value={formData.category} onChange={e => setFormData(prev => ({ ...prev, category: e.target.value, subcategory: EXPENSE_CATEGORIES[e.target.value].subcategories[0] }))}>
+                    {Object.entries(EXPENSE_CATEGORIES).map(([key, val]) => <option key={key} value={key}>{val.icon} {key}. {val.name}</option>)}
                   </select>
                 </div>
 
-                <div>
-                  <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Description *</label>
-                  <input type="text" className="w-full p-3 border-2 border-slate-200 rounded-xl focus:border-blue-500 outline-none" value={formData.description} onChange={e => setFormData(prev => ({ ...prev, description: e.target.value }))} />
-                </div>
+                <select className="w-full p-3 border-2 border-slate-200 rounded-xl bg-white" value={formData.subcategory} onChange={e => setFormData(prev => ({ ...prev, subcategory: e.target.value }))}>
+                  {EXPENSE_CATEGORIES[formData.category].subcategories.map(sub => <option key={sub} value={sub}>{sub}</option>)}
+                </select>
+
+                <input type="text" className="w-full p-3 border-2 border-slate-200 rounded-xl" placeholder="Description *" value={formData.description} onChange={e => setFormData(prev => ({ ...prev, description: e.target.value }))} />
 
                 {needsAttendees && (
-                  <div>
-                    <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Attendees *</label>
-                    <textarea className="w-full p-3 border-2 border-slate-200 rounded-xl focus:border-blue-500 outline-none resize-none" rows={2} value={formData.attendees} onChange={e => setFormData(prev => ({ ...prev, attendees: e.target.value }))} />
-                  </div>
+                  <textarea className="w-full p-3 border-2 border-slate-200 rounded-xl resize-none" rows={2} placeholder="Attendees (Name & Company) *" value={formData.attendees} onChange={e => setFormData(prev => ({ ...prev, attendees: e.target.value }))} />
                 )}
 
-                {/* Backcharging Section */}
+                {/* Backcharging */}
                 <div className="bg-blue-50 border-2 border-blue-200 rounded-xl p-4">
-                  <div className="flex items-center justify-between mb-3">
-                    <label className="flex items-center gap-2 cursor-pointer">
-                      <input 
-                        type="checkbox" 
-                        checked={formData.hasBackcharge} 
-                        onChange={e => setFormData(prev => ({ ...prev, hasBackcharge: e.target.checked, backcharges: e.target.checked ? prev.backcharges : [] }))}
-                        className="w-5 h-5 rounded"
-                      />
-                      <span className="font-semibold text-blue-800">📊 Backcharge to Development(s)</span>
-                    </label>
-                  </div>
+                  <label className="flex items-center gap-2 cursor-pointer mb-3">
+                    <input type="checkbox" checked={formData.hasBackcharge} onChange={e => setFormData(prev => ({ ...prev, hasBackcharge: e.target.checked, backcharges: e.target.checked ? prev.backcharges : [] }))} className="w-5 h-5" />
+                    <span className="font-semibold text-blue-800">📊 Backcharge to Development(s)</span>
+                  </label>
 
                   {formData.hasBackcharge && (
                     <div className="space-y-3">
                       {formData.backcharges.map((bc, idx) => (
                         <div key={idx} className="flex gap-2 items-center">
-                          <select 
-                            className="flex-1 p-2 border rounded-lg text-sm bg-white"
-                            value={bc.development}
-                            onChange={e => updateBackcharge(idx, 'development', e.target.value)}
-                          >
+                          <select className="flex-1 p-2 border rounded-lg text-sm bg-white" value={bc.development} onChange={e => updateBackcharge(idx, 'development', e.target.value)}>
                             <option value="">Select development</option>
-                            {DEVELOPMENTS.map(dev => (
-                              <option key={dev.code} value={dev.name}>{dev.name} ({dev.region})</option>
-                            ))}
+                            {DEVELOPMENTS.map(dev => <option key={dev} value={dev}>{dev}</option>)}
                           </select>
-                          <input 
-                            type="number" 
-                            step="0.1"
-                            className="w-20 p-2 border rounded-lg text-sm text-center"
-                            placeholder="%"
-                            value={bc.percentage}
-                            onChange={e => updateBackcharge(idx, 'percentage', e.target.value)}
-                          />
-                          <span className="text-sm text-slate-500">%</span>
-                          <button onClick={() => removeBackcharge(idx)} className="text-red-500 hover:text-red-700 p-1">✕</button>
+                          <input type="number" step="0.1" className="w-20 p-2 border rounded-lg text-center text-sm" placeholder="%" value={bc.percentage} onChange={e => updateBackcharge(idx, 'percentage', e.target.value)} />
+                          <span className="text-sm">%</span>
+                          <button onClick={() => removeBackcharge(idx)} className="text-red-500 p-1">✕</button>
                         </div>
                       ))}
-                      <button onClick={addBackcharge} className="text-blue-600 text-sm font-medium hover:text-blue-800">+ Add Development</button>
-                      
+                      <button onClick={addBackcharge} className="text-blue-600 text-sm font-medium">+ Add Development</button>
                       {formData.backcharges.length > 0 && (
-                        <div className={`text-sm font-medium mt-2 p-2 rounded ${backchargeTotal >= 99.5 && backchargeTotal <= 100.5 ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
-                          Total: {backchargeTotal.toFixed(1)}% {backchargeTotal >= 99.5 && backchargeTotal <= 100.5 ? '✓' : '(should be ~100%)'}
+                        <div className={`text-sm font-medium p-2 rounded ${backchargeValid ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
+                          Total: {backchargeTotal.toFixed(1)}% {backchargeValid ? '✓' : '(~100% required)'}
                         </div>
                       )}
                     </div>
@@ -1024,82 +995,71 @@ export default function BerkeleyExpenseSystem() {
             )}
           </div>
 
-          <div className="p-4 border-t border-slate-100 bg-slate-50">
+          <div className="p-4 border-t bg-slate-50">
             {step === 2 && (
               <div className="flex gap-3">
-                {!editExpense && <button onClick={() => setStep(1)} className="flex-1 py-3 rounded-xl border-2 border-slate-300 font-semibold text-slate-600">← Back</button>}
-                <button onClick={handleSave} disabled={!canSave} className={`${editExpense ? 'w-full' : 'flex-[2]'} py-3 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 text-white font-semibold shadow-lg disabled:opacity-50`}>
-                  {editExpense ? '💾 Save Changes' : 'Save ✓'}
+                {!editExpense && <button onClick={() => setStep(1)} className="flex-1 py-3 rounded-xl border-2 border-slate-300 font-semibold">← Back</button>}
+                <button onClick={handleSave} disabled={!canSave} className={`${editExpense ? 'w-full' : 'flex-[2]'} py-3 rounded-xl bg-blue-600 text-white font-semibold disabled:opacity-50`}>
+                  {editExpense ? '💾 Save' : 'Save ✓'}
                 </button>
               </div>
             )}
           </div>
         </div>
-
         {showFullImage && receiptPreview && <ImageViewer src={receiptPreview} onClose={() => setShowFullImage(false)} />}
       </div>
     );
   };
 
   // ============================================
-  // STATEMENT UPLOAD MODAL
+  // STATEMENT UPLOAD
   // ============================================
   const StatementUploadModal = () => {
     const [file, setFile] = useState(null);
-    const [filePreview, setFilePreview] = useState(null);
+    const [preview, setPreview] = useState(null);
 
     const handleFileChange = (e) => {
-      const selectedFile = e.target.files[0];
-      if (selectedFile) {
-        setFile(selectedFile);
-        if (selectedFile.type.startsWith('image/')) {
+      const f = e.target.files[0];
+      if (f) {
+        setFile(f);
+        if (f.type.startsWith('image/')) {
           const reader = new FileReader();
-          reader.onloadend = () => setFilePreview(reader.result);
-          reader.readAsDataURL(selectedFile);
+          reader.onloadend = () => setPreview(reader.result);
+          reader.readAsDataURL(f);
         }
       }
     };
 
     const handleContinue = () => {
       setCreditCardStatement(file);
+      setStatementImageData(preview);
       setShowStatementUpload(false);
-      if (filePreview) {
-        setShowStatementAnnotator(true);
-      } else {
-        setShowPreview(true);
-      }
+      setShowStatementAnnotator(true);
     };
 
     return (
       <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50">
         <div className="bg-white rounded-2xl max-w-md w-full shadow-2xl">
-          <div className="bg-gradient-to-r from-amber-500 to-orange-500 text-white p-5">
-            <h2 className="text-lg font-bold">💳 Upload Credit Card Statement</h2>
-            <p className="text-amber-100 text-sm">You'll be able to annotate it next</p>
+          <div className="bg-amber-500 text-white p-5">
+            <h2 className="text-lg font-bold">💳 Upload Statement</h2>
           </div>
           <div className="p-6">
-            <label className={`block border-3 border-dashed rounded-2xl p-6 text-center cursor-pointer ${file ? 'border-green-400 bg-green-50' : 'border-slate-300 hover:border-blue-500'}`}>
+            <label className={`block border-3 border-dashed rounded-2xl p-6 text-center cursor-pointer ${file ? 'border-green-400 bg-green-50' : 'border-slate-300'}`}>
               <input type="file" accept="image/*" className="hidden" onChange={handleFileChange} />
               {file ? (
                 <div>
                   <span className="text-3xl">✅</span>
                   <p className="font-semibold text-green-700 mt-2">{file.name}</p>
-                  {filePreview && <img src={filePreview} alt="Preview" className="mt-3 max-h-32 mx-auto rounded" />}
+                  {preview && <img src={preview} alt="Preview" className="mt-3 max-h-32 mx-auto rounded" />}
                 </div>
               ) : (
-                <div>
-                  <span className="text-4xl">📄</span>
-                  <p className="font-semibold mt-2">Upload statement image</p>
-                  <p className="text-xs text-slate-500 mt-1">JPG, PNG supported</p>
-                </div>
+                <div><span className="text-4xl">📄</span><p className="font-semibold mt-2">Upload statement image</p></div>
               )}
             </label>
           </div>
-          <div className="p-4 border-t bg-slate-50 flex gap-3">
-            <button onClick={() => setShowStatementUpload(false)} className="flex-1 py-3 rounded-xl border-2 border-slate-300 font-semibold text-slate-600">Cancel</button>
-            <button onClick={handleContinue} disabled={!file} className="flex-[2] py-3 rounded-xl bg-green-600 text-white font-semibold disabled:opacity-50">
-              Continue to Annotate →
-            </button>
+          <div className="p-4 border-t flex gap-3">
+            <button onClick={() => setShowStatementUpload(false)} className="flex-1 py-3 rounded-xl border-2 font-semibold">Cancel</button>
+            <button onClick={handleContinue} disabled={!file} className="flex-[2] py-3 rounded-xl bg-green-600 text-white font-semibold disabled:opacity-50">Annotate →</button>
           </div>
         </div>
       </div>
@@ -1116,7 +1076,10 @@ export default function BerkeleyExpenseSystem() {
     const getCategoryTotal = (cat) => (groupedExpenses[cat] || []).reduce((sum, e) => sum + parseFloat(e.reimbursementAmount || e.amount || 0), 0);
     const pages = ['Summary', 'Receipts'];
     const workflow = getApprovalWorkflow(currentUser.id, currentUser.office);
-    const [selectedReceiptImage, setSelectedReceiptImage] = useState(null);
+    const [viewImg, setViewImg] = useState(null);
+
+    // Check for untagged foreign currency expenses
+    const untaggedExpenses = foreignCurrencyExpenses.filter(e => !statementAnnotations.some(a => a.ref === e.ref));
 
     return (
       <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-50">
@@ -1127,7 +1090,7 @@ export default function BerkeleyExpenseSystem() {
               <p className="text-blue-200 text-sm">{pages[previewPage]} • {userReimburseCurrency}</p>
             </div>
             <div className="flex items-center gap-2">
-              <button onClick={handleDownloadPreviewPDF} disabled={downloading} className="bg-green-500 hover:bg-green-600 text-white px-4 py-2 rounded-lg font-semibold text-sm">📥 PDF</button>
+              <button onClick={handleDownloadPreviewPDF} disabled={downloading} className="bg-green-500 text-white px-4 py-2 rounded-lg font-semibold text-sm">📥 PDF</button>
               <button onClick={() => { setShowPreview(false); setPreviewPage(0); }} className="w-8 h-8 rounded-full bg-white/20">✕</button>
             </div>
           </div>
@@ -1147,18 +1110,15 @@ export default function BerkeleyExpenseSystem() {
                   <div><span className="text-slate-500">Name:</span> <strong>{currentUser.name}</strong></div>
                   <div><span className="text-slate-500">Currency:</span> <strong className="text-green-700">{userReimburseCurrency}</strong></div>
                 </div>
-                
                 {workflow && (
                   <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 mb-6 text-sm">
-                    <p className="font-semibold text-blue-800">Approval Path:</p>
-                    <p className="text-blue-700">1. {workflow.level1Name} → 2. {workflow.level2Name}</p>
+                    <p className="font-semibold text-blue-800">Approval: {workflow.level1Name} → {workflow.level2Name}</p>
                   </div>
                 )}
-                
-                <table className="w-full text-sm border-collapse">
+                <table className="w-full text-sm">
                   <tbody>
                     {Object.keys(EXPENSE_CATEGORIES).map(cat => (
-                      <tr key={cat} className="border-b border-slate-200">
+                      <tr key={cat} className="border-b">
                         <td className="py-2 font-bold text-blue-700 w-8">{cat}.</td>
                         <td className="py-2">{EXPENSE_CATEGORIES[cat].name}</td>
                         <td className="py-2 text-right font-medium">{userReimburseCurrency} {getCategoryTotal(cat).toFixed(2)}</td>
@@ -1186,12 +1146,7 @@ export default function BerkeleyExpenseSystem() {
                         </div>
                       </div>
                       {exp.receiptPreview ? (
-                        <img 
-                          src={exp.receiptPreview} 
-                          alt={exp.ref} 
-                          className="w-full h-24 object-cover cursor-pointer hover:opacity-90" 
-                          onClick={() => setSelectedReceiptImage(exp.receiptPreview)}
-                        />
+                        <img src={exp.receiptPreview} alt={exp.ref} className="w-full h-24 object-cover cursor-pointer" onClick={() => setViewImg(exp.receiptPreview)} />
                       ) : (
                         <div className="w-full h-24 bg-slate-100 flex items-center justify-center text-3xl">📄</div>
                       )}
@@ -1213,8 +1168,23 @@ export default function BerkeleyExpenseSystem() {
 
                 {annotatedStatementImage && (
                   <div className="mt-6 bg-green-50 border border-green-200 rounded-xl p-4">
-                    <p className="text-green-800 font-semibold mb-2">✅ Annotated Statement</p>
-                    <img src={annotatedStatementImage} alt="Annotated statement" className="max-h-40 rounded cursor-pointer" onClick={() => setSelectedReceiptImage(annotatedStatementImage)} />
+                    <div className="flex justify-between items-start">
+                      <p className="text-green-800 font-semibold">✅ Annotated Statement</p>
+                      <button 
+                        onClick={() => { setShowPreview(false); setShowStatementAnnotator(true); }} 
+                        className="text-blue-600 text-sm font-medium hover:underline"
+                      >
+                        ✏️ Edit Annotations
+                      </button>
+                    </div>
+                    <img src={annotatedStatementImage} alt="Statement" className="mt-2 max-h-40 rounded cursor-pointer" onClick={() => setViewImg(annotatedStatementImage)} />
+                    
+                    {untaggedExpenses.length > 0 && (
+                      <div className="mt-3 bg-amber-100 border border-amber-300 rounded-lg p-3">
+                        <p className="text-amber-800 text-sm font-medium">⚠️ Untagged expenses: {untaggedExpenses.map(e => e.ref).join(', ')}</p>
+                        <button onClick={() => { setShowPreview(false); setShowStatementAnnotator(true); }} className="text-amber-700 text-sm underline mt-1">Click to add tags</button>
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
@@ -1222,14 +1192,13 @@ export default function BerkeleyExpenseSystem() {
           </div>
 
           <div className="p-4 border-t bg-slate-50 flex gap-3 shrink-0">
-            <button onClick={() => { setShowPreview(false); setPreviewPage(0); }} className="flex-1 py-3 rounded-xl border-2 border-slate-300 font-semibold text-slate-600">← Back</button>
-            <button onClick={async () => { await handleSubmitClaim(); setShowPreview(false); setPreviewPage(0); }} disabled={!canSubmit || loading} className={`flex-[2] py-3 rounded-xl font-semibold shadow-lg ${canSubmit && !loading ? 'bg-gradient-to-r from-green-600 to-emerald-600 text-white' : 'bg-slate-300 text-slate-500 cursor-not-allowed'}`}>
+            <button onClick={() => { setShowPreview(false); setPreviewPage(0); }} className="flex-1 py-3 rounded-xl border-2 font-semibold">← Back</button>
+            <button onClick={async () => { await handleSubmitClaim(); setShowPreview(false); setPreviewPage(0); }} disabled={!canSubmit || loading} className={`flex-[2] py-3 rounded-xl font-semibold ${canSubmit && !loading ? 'bg-green-600 text-white' : 'bg-slate-300 text-slate-500 cursor-not-allowed'}`}>
               {loading ? '⏳...' : canSubmit ? 'Submit ✓' : '⚠️ Upload Statement'}
             </button>
           </div>
         </div>
-
-        {selectedReceiptImage && <ImageViewer src={selectedReceiptImage} onClose={() => setSelectedReceiptImage(null)} />}
+        {viewImg && <ImageViewer src={viewImg} onClose={() => setViewImg(null)} />}
       </div>
     );
   };
@@ -1244,21 +1213,17 @@ export default function BerkeleyExpenseSystem() {
       const workflow = getApprovalWorkflow(currentUser.id, currentUser.office);
       
       if (returnedClaim) {
-        const { error } = await supabase.from('claims').update({
+        await supabase.from('claims').update({
           total_amount: reimbursementTotal,
           item_count: pendingExpenses.length,
           status: 'pending_review',
           approval_level: 1,
           expenses: pendingExpenses,
-          annotated_statement: annotatedStatementImage,
-          resubmitted_at: new Date().toISOString()
+          annotated_statement: annotatedStatementImage
         }).eq('id', returnedClaim.id);
-        
-        if (!error) { setExpenses([]); setCreditCardStatement(null); setAnnotatedStatementImage(null); await loadClaims(); alert('✅ Resubmitted!'); }
-        else alert('❌ Failed');
       } else {
         const claimNumber = `EXP-2026-${String(claims.length + 1).padStart(3, '0')}`;
-        const { error } = await supabase.from('claims').insert([{
+        await supabase.from('claims').insert([{
           claim_number: claimNumber, 
           user_id: currentUser.id, 
           user_name: currentUser.name,
@@ -1275,9 +1240,14 @@ export default function BerkeleyExpenseSystem() {
           annotated_statement: annotatedStatementImage,
           expenses: pendingExpenses
         }]);
-        if (!error) { setExpenses([]); setCreditCardStatement(null); setAnnotatedStatementImage(null); await loadClaims(); alert('✅ Submitted!'); }
-        else alert('❌ Failed');
       }
+      setExpenses([]); 
+      setCreditCardStatement(null); 
+      setAnnotatedStatementImage(null);
+      setStatementAnnotations([]);
+      setStatementImageData(null);
+      await loadClaims(); 
+      alert('✅ Submitted!');
     } catch { alert('❌ Failed'); }
     setLoading(false);
   };
@@ -1288,26 +1258,15 @@ export default function BerkeleyExpenseSystem() {
   const handleApprove = async (claim) => { 
     setLoading(true);
     const currentLevel = claim.approval_level || 1;
-    
     if (currentLevel === 1) {
-      await supabase.from('claims').update({ 
-        status: 'pending_level2',
-        approval_level: 2,
-        level1_approved_by: currentUser.name,
-        level1_approved_at: new Date().toISOString()
-      }).eq('id', claim.id);
+      await supabase.from('claims').update({ status: 'pending_level2', approval_level: 2, level1_approved_by: currentUser.name }).eq('id', claim.id);
     } else {
-      await supabase.from('claims').update({ 
-        status: 'approved',
-        level2_approved_by: currentUser.name,
-        level2_approved_at: new Date().toISOString()
-      }).eq('id', claim.id);
+      await supabase.from('claims').update({ status: 'approved', level2_approved_by: currentUser.name }).eq('id', claim.id);
     }
-    
     await loadClaims(); 
     setSelectedClaim(null); 
     setLoading(false);
-    alert(currentLevel === 1 ? '✅ Approved → Next reviewer' : '✅ Final Approval');
+    alert(currentLevel === 1 ? '✅ → Next reviewer' : '✅ Final Approval');
   };
   
   const handleReject = async (id) => { 
@@ -1320,11 +1279,7 @@ export default function BerkeleyExpenseSystem() {
 
   const handleRequestChanges = async (claimId, comment) => {
     setLoading(true);
-    await supabase.from('claims').update({ 
-      status: 'changes_requested', 
-      admin_comment: comment,
-      reviewed_by: currentUser.name
-    }).eq('id', claimId);
+    await supabase.from('claims').update({ status: 'changes_requested', admin_comment: comment, reviewed_by: currentUser.name }).eq('id', claimId);
     await loadClaims();
     setSelectedClaim(null);
     setShowRequestChanges(false);
@@ -1333,9 +1288,7 @@ export default function BerkeleyExpenseSystem() {
     alert('✅ Sent back');
   };
 
-  // ============================================
-  // EDIT CLAIM MODAL (Admin)
-  // ============================================
+  // Edit Claim Modal
   const EditClaimModal = ({ claim, onClose }) => {
     const [editedExpenses, setEditedExpenses] = useState(claim.expenses || []);
     const [saving, setSaving] = useState(false);
@@ -1347,12 +1300,7 @@ export default function BerkeleyExpenseSystem() {
     const handleSaveEdits = async () => {
       setSaving(true);
       const newTotal = editedExpenses.reduce((sum, e) => sum + parseFloat(e.reimbursementAmount || e.amount || 0), 0);
-      await supabase.from('claims').update({
-        expenses: editedExpenses,
-        total_amount: newTotal,
-        item_count: editedExpenses.length,
-        edited_by: currentUser.name
-      }).eq('id', claim.id);
+      await supabase.from('claims').update({ expenses: editedExpenses, total_amount: newTotal, edited_by: currentUser.name }).eq('id', claim.id);
       await loadClaims();
       setSaving(false);
       onClose();
@@ -1361,15 +1309,14 @@ export default function BerkeleyExpenseSystem() {
 
     return (
       <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50">
-        <div className="bg-white rounded-2xl max-w-4xl w-full max-h-[90vh] overflow-hidden shadow-2xl">
-          <div className="bg-gradient-to-r from-purple-600 to-indigo-600 text-white p-5 flex justify-between items-center">
-            <h2 className="text-lg font-bold">✏️ Edit: {claim.user_name}</h2>
+        <div className="bg-white rounded-2xl max-w-4xl w-full max-h-[90vh] overflow-hidden">
+          <div className="bg-purple-600 text-white p-5 flex justify-between">
+            <h2 className="font-bold">✏️ Edit: {claim.user_name}</h2>
             <button onClick={onClose} className="w-8 h-8 rounded-full bg-white/20">✕</button>
           </div>
-
           <div className="p-6 overflow-y-auto max-h-[calc(90vh-180px)]">
             {editedExpenses.map((exp, idx) => (
-              <div key={idx} className="border-2 border-slate-200 rounded-xl p-4 mb-4">
+              <div key={idx} className="border-2 rounded-xl p-4 mb-4">
                 <span className="bg-blue-100 text-blue-700 font-bold px-3 py-1 rounded-lg">{exp.ref}</span>
                 <div className="grid grid-cols-2 gap-4 mt-3">
                   <input type="text" className="p-2 border rounded-lg text-sm" placeholder="Merchant" value={exp.merchant} onChange={e => updateExpense(idx, 'merchant', e.target.value)} />
@@ -1380,12 +1327,9 @@ export default function BerkeleyExpenseSystem() {
               </div>
             ))}
           </div>
-
-          <div className="p-4 border-t bg-slate-50 flex gap-3">
-            <button onClick={onClose} className="flex-1 py-3 rounded-xl border-2 border-slate-300 font-semibold">Cancel</button>
-            <button onClick={handleSaveEdits} disabled={saving} className="flex-[2] py-3 rounded-xl bg-purple-600 text-white font-semibold disabled:opacity-50">
-              {saving ? '⏳...' : '💾 Save'}
-            </button>
+          <div className="p-4 border-t flex gap-3">
+            <button onClick={onClose} className="flex-1 py-3 rounded-xl border-2 font-semibold">Cancel</button>
+            <button onClick={handleSaveEdits} disabled={saving} className="flex-[2] py-3 rounded-xl bg-purple-600 text-white font-semibold disabled:opacity-50">{saving ? '⏳' : '💾 Save'}</button>
           </div>
         </div>
       </div>
@@ -1428,9 +1372,9 @@ export default function BerkeleyExpenseSystem() {
 
         <div className="bg-white rounded-2xl shadow-lg p-6">
           <div className="flex flex-wrap gap-3">
-            <button onClick={() => setShowAddExpense(true)} className="bg-gradient-to-r from-blue-600 to-indigo-600 text-white px-6 py-3 rounded-xl font-semibold shadow-lg">📸 Add Receipt</button>
+            <button onClick={() => setShowAddExpense(true)} className="bg-blue-600 text-white px-6 py-3 rounded-xl font-semibold shadow-lg">📸 Add Receipt</button>
             {pendingExpenses.length > 0 && (
-              <button onClick={() => setShowPreview(true)} className="bg-white border-2 border-green-500 text-green-600 px-6 py-3 rounded-xl font-semibold">📋 Preview ({pendingExpenses.length})</button>
+              <button onClick={() => setShowPreview(true)} className="border-2 border-green-500 text-green-600 px-6 py-3 rounded-xl font-semibold">📋 Preview ({pendingExpenses.length})</button>
             )}
           </div>
         </div>
@@ -1476,11 +1420,7 @@ export default function BerkeleyExpenseSystem() {
                 <div key={claim.id} className="flex items-center justify-between p-4 rounded-xl bg-slate-50 border">
                   <div>
                     <span className="font-semibold">{claim.claim_number}</span>
-                    <span className={`ml-2 text-xs px-2 py-0.5 rounded-full ${
-                      claim.status === 'approved' ? 'bg-green-100 text-green-700' : 
-                      claim.status === 'rejected' ? 'bg-red-100 text-red-700' : 
-                      'bg-amber-100 text-amber-700'
-                    }`}>{claim.status}</span>
+                    <span className={`ml-2 text-xs px-2 py-0.5 rounded-full ${claim.status === 'approved' ? 'bg-green-100 text-green-700' : claim.status === 'rejected' ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-700'}`}>{claim.status}</span>
                   </div>
                   <div className="flex items-center gap-3">
                     <span className="font-bold">{formatCurrency(claim.total_amount, claim.currency)}</span>
@@ -1508,9 +1448,7 @@ export default function BerkeleyExpenseSystem() {
                 <div key={claim.id} onClick={() => setSelectedClaim(claim)} className="flex items-center justify-between p-4 rounded-xl bg-slate-50 border cursor-pointer hover:border-blue-300">
                   <div>
                     <span className="font-semibold">{claim.user_name}</span>
-                    <span className={`ml-2 text-xs px-2 py-0.5 rounded-full ${claim.approval_level === 2 ? 'bg-blue-100 text-blue-700' : 'bg-amber-100 text-amber-700'}`}>
-                      L{claim.approval_level || 1}
-                    </span>
+                    <span className={`ml-2 text-xs px-2 py-0.5 rounded-full ${claim.approval_level === 2 ? 'bg-blue-100 text-blue-700' : 'bg-amber-100 text-amber-700'}`}>L{claim.approval_level || 1}</span>
                     <p className="text-sm text-slate-500">{claim.office}</p>
                   </div>
                   <span className="font-bold">{formatCurrency(claim.total_amount, claim.currency)}</span>
@@ -1524,10 +1462,7 @@ export default function BerkeleyExpenseSystem() {
           <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50" onClick={() => setSelectedClaim(null)}>
             <div className="bg-white rounded-2xl max-w-2xl w-full max-h-[90vh] overflow-auto" onClick={e => e.stopPropagation()}>
               <div className="p-6 border-b flex justify-between">
-                <div>
-                  <h2 className="text-xl font-bold">{selectedClaim.user_name}</h2>
-                  <p className="text-sm text-slate-500">{selectedClaim.claim_number}</p>
-                </div>
+                <div><h2 className="text-xl font-bold">{selectedClaim.user_name}</h2><p className="text-sm text-slate-500">{selectedClaim.claim_number}</p></div>
                 <button onClick={() => setSelectedClaim(null)} className="text-2xl text-slate-400">×</button>
               </div>
               <div className="p-6">
@@ -1559,11 +1494,9 @@ export default function BerkeleyExpenseSystem() {
         
         {showRequestChanges && selectedClaim && (
           <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50">
-            <div className="bg-white rounded-2xl max-w-md w-full shadow-2xl">
+            <div className="bg-white rounded-2xl max-w-md w-full">
               <div className="bg-amber-500 text-white p-5"><h2 className="font-bold">📝 Request Changes</h2></div>
-              <div className="p-6">
-                <textarea className="w-full p-3 border-2 rounded-xl" rows={4} placeholder="What needs fixing?" value={changeRequestComment} onChange={(e) => setChangeRequestComment(e.target.value)} />
-              </div>
+              <div className="p-6"><textarea className="w-full p-3 border-2 rounded-xl" rows={4} placeholder="What needs fixing?" value={changeRequestComment} onChange={(e) => setChangeRequestComment(e.target.value)} /></div>
               <div className="p-4 border-t flex gap-3">
                 <button onClick={() => setShowRequestChanges(false)} className="flex-1 py-3 rounded-xl border-2 font-semibold">Cancel</button>
                 <button onClick={() => handleRequestChanges(selectedClaim.id, changeRequestComment)} disabled={!changeRequestComment.trim()} className="flex-[2] py-3 rounded-xl bg-amber-500 text-white font-semibold disabled:opacity-50">Send 📤</button>
@@ -1577,9 +1510,9 @@ export default function BerkeleyExpenseSystem() {
 
   const canReview = currentUser.role === 'admin' || currentUser.role === 'manager' || currentUser.role === 'finance' || getReviewableClaims().length > 0;
 
-  // Handle statement annotation save
   const handleStatementAnnotationSave = (annotatedImage, annotations) => {
     setAnnotatedStatementImage(annotatedImage);
+    setStatementAnnotations(annotations);
     setShowStatementAnnotator(false);
     setShowPreview(true);
   };
@@ -1597,7 +1530,7 @@ export default function BerkeleyExpenseSystem() {
               <div className="text-sm font-medium">{currentUser.name.split(' ').slice(0, 2).join(' ')}</div>
               <div className="text-xs text-slate-400 capitalize">{currentUser.role}</div>
             </div>
-            <button onClick={() => { setCurrentUser(null); setExpenses([]); setCreditCardStatement(null); setAnnotatedStatementImage(null); setActiveTab('my_expenses'); }} className="bg-white/10 hover:bg-white/20 px-3 py-2 rounded-lg text-xs font-medium">Logout</button>
+            <button onClick={() => { setCurrentUser(null); setExpenses([]); setCreditCardStatement(null); setAnnotatedStatementImage(null); setStatementAnnotations([]); setStatementImageData(null); setActiveTab('my_expenses'); }} className="bg-white/10 px-3 py-2 rounded-lg text-xs font-medium">Logout</button>
           </div>
         </div>
       </header>
@@ -1621,10 +1554,11 @@ export default function BerkeleyExpenseSystem() {
       {(showAddExpense || editingExpense) && <AddExpenseModal editExpense={editingExpense} onClose={() => { setShowAddExpense(false); setEditingExpense(null); }} />}
       {showPreview && <PreviewClaimModal />}
       {showStatementUpload && <StatementUploadModal />}
-      {showStatementAnnotator && creditCardStatement && (
+      {showStatementAnnotator && statementImageData && (
         <StatementAnnotator 
-          image={URL.createObjectURL(creditCardStatement)}
+          image={statementImageData}
           expenses={pendingExpenses}
+          existingAnnotations={statementAnnotations}
           onSave={handleStatementAnnotationSave}
           onCancel={() => { setShowStatementAnnotator(false); setShowPreview(true); }}
         />
