@@ -3,7 +3,7 @@ import React, { useState, useEffect } from 'react';
 /*
  * ============================================
  * BERKELEY INTERNATIONAL EXPENSE MANAGEMENT SYSTEM
- * Version: 1.7 - Full Employee List + Password Login
+ * Version: 1.8 - PDF Improvements + Admin Edit
  * ============================================
  */
 const SUPABASE_URL = 'https://wlhoyjsicvkncfjbexoi.supabase.co';
@@ -42,39 +42,36 @@ const supabase = {
 };
 
 // ============================================
-// OFFICES
+// OFFICES with Company Names
 // ============================================
 const OFFICES = [
-  { code: 'BEJ', name: 'Beijing', currency: 'CNY', country: 'China' },
-  { code: 'CHE', name: 'Chengdu', currency: 'CNY', country: 'China' },
-  { code: 'SHA', name: 'Shanghai', currency: 'CNY', country: 'China' },
-  { code: 'SHE', name: 'Shenzhen', currency: 'CNY', country: 'China' },
-  { code: 'HKG', name: 'Hong Kong', currency: 'HKD', country: 'Hong Kong' },
-  { code: 'LON', name: 'London', currency: 'GBP', country: 'UK' },
-  { code: 'MYS', name: 'Malaysia', currency: 'MYR', country: 'Malaysia' },
-  { code: 'SIN', name: 'Singapore', currency: 'SGD', country: 'Singapore' },
-  { code: 'BKK', name: 'Bangkok', currency: 'THB', country: 'Thailand' },
-  { code: 'DXB', name: 'Dubai', currency: 'AED', country: 'UAE' }
+  { code: 'BEJ', name: 'Beijing', currency: 'CNY', country: 'China', companyName: 'Berkeley Real Estate Consulting (Beijing) Co., Ltd.' },
+  { code: 'CHE', name: 'Chengdu', currency: 'CNY', country: 'China', companyName: 'Berkeley Real Estate Consulting (Beijing) Co., Ltd. Chengdu Branch' },
+  { code: 'SHA', name: 'Shanghai', currency: 'CNY', country: 'China', companyName: 'Berkeley Real Estate Consulting (Beijing) Co., Ltd. Shanghai Branch' },
+  { code: 'SHE', name: 'Shenzhen', currency: 'CNY', country: 'China', companyName: 'Berkeley Real Estate Consulting (Beijing) Co., Ltd. Shenzhen Branch' },
+  { code: 'HKG', name: 'Hong Kong', currency: 'HKD', country: 'Hong Kong', companyName: 'Berkeley (Hong Kong) Limited' },
+  { code: 'LON', name: 'London', currency: 'GBP', country: 'UK', companyName: 'Berkeley London Residential Ltd' },
+  { code: 'MYS', name: 'Malaysia', currency: 'MYR', country: 'Malaysia', companyName: 'Berkeley (Malaysia) Sdn Bhd' },
+  { code: 'SIN', name: 'Singapore', currency: 'SGD', country: 'Singapore', companyName: 'Berkeley (Singapore)' },
+  { code: 'BKK', name: 'Bangkok', currency: 'THB', country: 'Thailand', companyName: 'Berkeley (Thailand) Co., Ltd.' },
+  { code: 'DXB', name: 'Dubai', currency: 'AED', country: 'UAE', companyName: 'Berkeley London Residential Ltd' }
 ];
 
 // ============================================
-// EMPLOYEES - Full List with Passwords
-// Default password: berkeley123 (employees should change)
+// EMPLOYEES
 // ============================================
 const EMPLOYEES = [
-  // CHINA - BEIJING (BEJ)
+  // CHINA - BEIJING
   { id: 101, name: 'Fang Yi', office: 'BEJ', role: 'employee', reimburseCurrency: 'CNY', password: 'berkeley123' },
   { id: 102, name: 'Caroline Zhu Yunshu', office: 'BEJ', role: 'employee', reimburseCurrency: 'CNY', password: 'berkeley123' },
   { id: 103, name: 'Even Huang Yiyun', office: 'BEJ', role: 'employee', reimburseCurrency: 'CNY', password: 'berkeley123' },
   { id: 104, name: 'Charrisa Xia Bei Jia', office: 'BEJ', role: 'employee', reimburseCurrency: 'CNY', password: 'berkeley123' },
-  { id: 105, name: 'Alice Kong Jing', office: 'BEJ', role: 'employee', reimburseCurrency: 'CNY', password: 'berkeley123' },
-  
-  // CHINA - CHENGDU (CHE)
+  { id: 105, name: 'Alice Kong Jing', office: 'BEJ', role: 'admin', reimburseCurrency: 'CNY', password: 'berkeley123' },
+  // CHINA - CHENGDU
   { id: 201, name: 'Suki Li Siqi', office: 'CHE', role: 'employee', reimburseCurrency: 'CNY', password: 'berkeley123' },
   { id: 202, name: 'Icey Zuo Ziying', office: 'CHE', role: 'employee', reimburseCurrency: 'CNY', password: 'berkeley123' },
   { id: 203, name: 'Dora Ji Jue Shi Yu', office: 'CHE', role: 'employee', reimburseCurrency: 'CNY', password: 'berkeley123' },
-  
-  // CHINA - SHANGHAI (SHA)
+  // CHINA - SHANGHAI
   { id: 301, name: 'Ariel Tang Xin', office: 'SHA', role: 'employee', reimburseCurrency: 'CNY', password: 'berkeley123' },
   { id: 302, name: 'Eddy Tao Xiao Feng', office: 'SHA', role: 'employee', reimburseCurrency: 'CNY', password: 'berkeley123' },
   { id: 303, name: 'Elsa Huang Wei-Chen', office: 'SHA', role: 'employee', reimburseCurrency: 'CNY', password: 'berkeley123' },
@@ -83,14 +80,12 @@ const EMPLOYEES = [
   { id: 306, name: 'Cathy Liu Shikun', office: 'SHA', role: 'admin', reimburseCurrency: 'CNY', password: 'berkeley123' },
   { id: 307, name: 'Amy Wang Shiyun', office: 'SHA', role: 'employee', reimburseCurrency: 'CNY', password: 'berkeley123' },
   { id: 308, name: 'Echo Yu Miao', office: 'SHA', role: 'employee', reimburseCurrency: 'CNY', password: 'berkeley123' },
-  
-  // CHINA - SHENZHEN (SHE)
+  // CHINA - SHENZHEN
   { id: 401, name: 'Ryan Lee Yu-Yen', office: 'SHE', role: 'employee', reimburseCurrency: 'CNY', password: 'berkeley123' },
   { id: 402, name: 'Simon Wong Chuen Lun', office: 'SHE', role: 'employee', reimburseCurrency: 'CNY', password: 'berkeley123' },
   { id: 403, name: 'Zayn Huang Yanxiao', office: 'SHE', role: 'employee', reimburseCurrency: 'CNY', password: 'berkeley123' },
   { id: 404, name: 'Jade Shen Jie', office: 'SHE', role: 'employee', reimburseCurrency: 'CNY', password: 'berkeley123' },
-  
-  // HONG KONG (HKG)
+  // HONG KONG
   { id: 501, name: 'Kate Tai Tsz Lok', office: 'HKG', role: 'employee', reimburseCurrency: 'HKD', password: 'berkeley123' },
   { id: 502, name: 'Anthony Andrew Jurenko', office: 'HKG', role: 'employee', reimburseCurrency: 'HKD', password: 'berkeley123' },
   { id: 503, name: 'Suki Fong Tsz Ching', office: 'HKG', role: 'employee', reimburseCurrency: 'HKD', password: 'berkeley123' },
@@ -100,15 +95,12 @@ const EMPLOYEES = [
   { id: 507, name: 'Michelle Shum', office: 'HKG', role: 'employee', reimburseCurrency: 'HKD', password: 'berkeley123' },
   { id: 508, name: 'Jennifer Wong Ching Sin', office: 'HKG', role: 'employee', reimburseCurrency: 'HKD', password: 'berkeley123' },
   { id: 509, name: 'Annabelle Yiu Wai-Ying', office: 'HKG', role: 'admin', reimburseCurrency: 'HKD', password: 'berkeley123' },
-  
-  // LONDON (LON) - Reimburse in GBP
+  // LONDON
   { id: 601, name: 'Mouna Ben Cheikh', office: 'LON', role: 'employee', reimburseCurrency: 'GBP', password: 'berkeley123' },
   { id: 602, name: 'Farah Al-Yawer', office: 'LON', role: 'employee', reimburseCurrency: 'GBP', password: 'berkeley123' },
-  
-  // MALAYSIA (MYS)
+  // MALAYSIA
   { id: 701, name: 'Joanne Chee Pek Har', office: 'MYS', role: 'employee', reimburseCurrency: 'MYR', password: 'berkeley123' },
-  
-  // SINGAPORE (SIN)
+  // SINGAPORE
   { id: 801, name: 'John Yan Chung Keung', office: 'SIN', role: 'employee', reimburseCurrency: 'SGD', password: 'berkeley123' },
   { id: 802, name: 'Janice Zhu Huijun', office: 'SIN', role: 'employee', reimburseCurrency: 'SGD', password: 'berkeley123' },
   { id: 803, name: 'Karen Chia Pei Ru', office: 'SIN', role: 'admin', reimburseCurrency: 'SGD', password: 'berkeley123' },
@@ -128,14 +120,12 @@ const EMPLOYEES = [
   { id: 817, name: 'Tay Ruo Fan', office: 'SIN', role: 'employee', reimburseCurrency: 'SGD', password: 'berkeley123' },
   { id: 818, name: 'Wah Wah May Zaw', office: 'SIN', role: 'employee', reimburseCurrency: 'SGD', password: 'berkeley123' },
   { id: 819, name: 'Emma Fowler', office: 'SIN', role: 'finance', reimburseCurrency: 'GBP', password: 'berkeley123' },
-  
-  // THAILAND (BKK)
+  // THAILAND
   { id: 901, name: 'Sutanya Jaruphiboon', office: 'BKK', role: 'employee', reimburseCurrency: 'THB', password: 'berkeley123' },
   { id: 902, name: 'Chayasid Jongpipattanachoke', office: 'BKK', role: 'employee', reimburseCurrency: 'THB', password: 'berkeley123' },
   { id: 903, name: 'Juthamas Leewanun', office: 'BKK', role: 'employee', reimburseCurrency: 'THB', password: 'berkeley123' },
   { id: 904, name: 'Norakamol Seninvinin', office: 'BKK', role: 'admin', reimburseCurrency: 'THB', password: 'berkeley123' },
-  
-  // UAE - DUBAI (DXB) - All AED
+  // UAE - DUBAI
   { id: 1001, name: 'Christopher James Mclean Frame', office: 'DXB', role: 'employee', reimburseCurrency: 'AED', password: 'berkeley123' },
   { id: 1002, name: 'Christine Mendoza Dimaranan', office: 'DXB', role: 'admin', reimburseCurrency: 'AED', password: 'berkeley123' },
   { id: 1003, name: 'Nathan Jon Abrahams', office: 'DXB', role: 'employee', reimburseCurrency: 'AED', password: 'berkeley123' },
@@ -146,19 +136,17 @@ const EMPLOYEES = [
   { id: 1008, name: 'Keisha Latoya Whitehorne', office: 'DXB', role: 'employee', reimburseCurrency: 'AED', password: 'berkeley123' },
 ];
 
-// ============================================
-// EXPENSE CATEGORIES
-// ============================================
 const EXPENSE_CATEGORIES = {
-  A: { name: 'Petrol Expenditure', subcategories: ['Full Petrol Allowance / Fuel Card', 'Business Mileage'], icon: '⛽', requiresAttendees: false },
+  A: { name: 'Petrol Expenditure', subcategories: ['Full Petrol Allowance / Fuel Card Holders', 'Business Mileage Return (As Attached)'], icon: '⛽', requiresAttendees: false },
   B: { name: 'Parking', subcategories: ['Off-Street Parking'], icon: '🅿️', requiresAttendees: false },
-  C: { name: 'Travel Expenses', subcategories: ['Public Transport', 'Taxis', 'Tolls', 'Congestion Charging', 'Subsistence'], icon: '🚕', requiresAttendees: false },
+  C: { name: 'Travel Expenses', subcategories: ['Public Transport (Trains, Tubes, Buses etc.)', 'Taxis', 'Tolls', 'Congestion Charging', 'Subsistence (meals while away from office)'], icon: '🚕', requiresAttendees: false },
   D: { name: 'Vehicle Repairs', subcategories: ['Repairs', 'Parts'], icon: '🔧', requiresAttendees: false },
-  E: { name: 'Entertaining', subcategories: ['Customers (Staff & Customers)', 'Employees Only'], icon: '🍽️', requiresAttendees: true },
+  E: { name: 'Entertaining', subcategories: ['Customers (Staff & Customers)', 'Employees (Must be only Staff present)'], icon: '🍽️', requiresAttendees: true },
   F: { name: 'Welfare', subcategories: ['Hotel Accommodation', 'Gifts to Employees', 'Corporate Gifts'], icon: '🏨', requiresAttendees: true },
-  G: { name: 'Subscriptions', subcategories: ['Professional', 'Non-Professional', 'Newspapers/Magazines'], icon: '📰', requiresAttendees: false },
+  G: { name: 'Subscriptions', subcategories: ['Professional', 'Non - Professional', 'Newspapers, Magazines etc.'], icon: '📰', requiresAttendees: false },
   H: { name: 'Computer Costs', subcategories: ['All Items'], icon: '💻', requiresAttendees: false },
-  I: { name: 'WIP / Other', subcategories: ['WIP', 'Miscellaneous Vatable Items'], icon: '📦', requiresAttendees: false }
+  I: { name: 'WIP', subcategories: ['All Items'], icon: '📦', requiresAttendees: false },
+  J: { name: 'Other', subcategories: ['Miscellaneous Vatable Items'], icon: '📋', requiresAttendees: false }
 };
 
 const CURRENCIES = ['SGD', 'HKD', 'CNY', 'THB', 'AED', 'GBP', 'USD', 'EUR', 'MYR', 'JPY', 'SAR'];
@@ -202,9 +190,12 @@ export default function BerkeleyExpenseSystem() {
   const [selectedClaim, setSelectedClaim] = useState(null);
   const [activeTab, setActiveTab] = useState('my_expenses');
   const [previewPage, setPreviewPage] = useState(0);
+  const [editingClaim, setEditingClaim] = useState(null);
+  const [showRequestChanges, setShowRequestChanges] = useState(false);
+  const [changeRequestComment, setChangeRequestComment] = useState('');
   
   // Login state
-  const [loginStep, setLoginStep] = useState('select'); // 'select' or 'password'
+  const [loginStep, setLoginStep] = useState('select');
   const [selectedEmployee, setSelectedEmployee] = useState(null);
   const [passwordInput, setPasswordInput] = useState('');
   const [loginError, setLoginError] = useState('');
@@ -224,16 +215,27 @@ export default function BerkeleyExpenseSystem() {
     if (currentUser) loadClaims();
   }, [currentUser]);
 
+  // Check for returned claims when user logs in
+  useEffect(() => {
+    if (currentUser) {
+      const returnedClaims = claims.filter(c => c.user_id === currentUser.id && c.status === 'changes_requested');
+      if (returnedClaims.length > 0) {
+        // Load the returned claim into expenses for editing
+        const latestReturned = returnedClaims[0];
+        if (latestReturned.expenses) {
+          setExpenses(latestReturned.expenses.map(e => ({ ...e, status: 'draft' })));
+        }
+      }
+    }
+  }, [currentUser, claims]);
+
   const getUserOffice = (user) => OFFICES.find(o => o.code === user?.office);
   const userOffice = getUserOffice(currentUser);
   const getUserReimburseCurrency = (user) => user?.reimburseCurrency || getUserOffice(user)?.currency;
+  const getCompanyName = (officeCode) => OFFICES.find(o => o.code === officeCode)?.companyName || 'Berkeley';
   const pendingExpenses = expenses.filter(e => e.status === 'draft');
   
-  const reimbursementTotal = pendingExpenses.reduce((sum, e) => {
-    const amount = e.reimbursementAmount || e.amount;
-    return sum + parseFloat(amount || 0);
-  }, 0);
-  
+  const reimbursementTotal = pendingExpenses.reduce((sum, e) => sum + parseFloat(e.reimbursementAmount || e.amount || 0), 0);
   const foreignCurrencyExpenses = pendingExpenses.filter(e => e.isForeignCurrency);
   const hasForeignCurrency = foreignCurrencyExpenses.length > 0;
 
@@ -255,15 +257,18 @@ export default function BerkeleyExpenseSystem() {
   };
 
   // ============================================
-  // PDF GENERATION
+  // PDF GENERATION - Matching Original Format
   // ============================================
-  const generatePDFFromHTML = async (expenseList, userName, officeName, claimNumber, submittedDate, creditCardStatementName, reimburseCurrency) => {
+  const generatePDFFromHTML = async (expenseList, userName, officeCode, claimNumber, submittedDate, creditCardStatementName, reimburseCurrency) => {
     const printWindow = window.open('', '_blank');
     if (!printWindow) {
       alert('Please allow popups to download PDF');
       return;
     }
 
+    const office = OFFICES.find(o => o.code === officeCode);
+    const companyName = office?.companyName || 'Berkeley';
+    
     const groupedExpenses = expenseList.reduce((acc, exp) => {
       if (!acc[exp.category]) acc[exp.category] = [];
       acc[exp.category].push(exp);
@@ -273,18 +278,35 @@ export default function BerkeleyExpenseSystem() {
     const getSubcategoryTotal = (cat, subcat) => {
       return (groupedExpenses[cat] || [])
         .filter(e => e.subcategory === subcat)
-        .reduce((sum, e) => sum + (e.reimbursementAmount || e.amount), 0);
+        .reduce((sum, e) => sum + parseFloat(e.reimbursementAmount || e.amount || 0), 0);
     };
 
     const getCategoryTotal = (cat) => {
-      return (groupedExpenses[cat] || []).reduce((sum, e) => sum + (e.reimbursementAmount || e.amount), 0);
+      return (groupedExpenses[cat] || []).reduce((sum, e) => sum + parseFloat(e.reimbursementAmount || e.amount || 0), 0);
     };
 
-    const totalAmount = expenseList.reduce((sum, e) => sum + (e.reimbursementAmount || e.amount), 0);
+    const totalAmount = expenseList.reduce((sum, e) => sum + parseFloat(e.reimbursementAmount || e.amount || 0), 0);
     const claimMonth = expenseList.length > 0 ? getMonthYear(expenseList[0].date) : '';
-    const travelExpenses = [...(groupedExpenses['B'] || []), ...(groupedExpenses['C'] || []), ...(groupedExpenses['D'] || [])];
+    
+    // Group expenses for detail pages
+    const travelExpenses = [...(groupedExpenses['A'] || []), ...(groupedExpenses['B'] || []), ...(groupedExpenses['C'] || []), ...(groupedExpenses['D'] || [])];
     const entertainingExpenses = [...(groupedExpenses['E'] || []), ...(groupedExpenses['F'] || [])];
 
+    // Calculate subtotals for travel
+    const travelSubtotals = {
+      petrol: getCategoryTotal('A'),
+      parking: getCategoryTotal('B'),
+      pubTrans: getSubcategoryTotal('C', 'Public Transport (Trains, Tubes, Buses etc.)'),
+      taxis: getSubcategoryTotal('C', 'Taxis'),
+      tolls: getSubcategoryTotal('C', 'Tolls'),
+      congestion: getSubcategoryTotal('C', 'Congestion Charging'),
+      subsistence: getSubcategoryTotal('C', 'Subsistence (meals while away from office)'),
+      repairs: getSubcategoryTotal('D', 'Repairs'),
+      parts: getSubcategoryTotal('D', 'Parts'),
+      total: getCategoryTotal('A') + getCategoryTotal('B') + getCategoryTotal('C') + getCategoryTotal('D')
+    };
+
+    // Build receipt images HTML
     let receiptsHTML = '';
     for (const exp of expenseList) {
       receiptsHTML += `
@@ -294,8 +316,8 @@ export default function BerkeleyExpenseSystem() {
             <div class="receipt-info">
               <strong>${exp.merchant}</strong><br>
               ${exp.description || ''}<br>
-              <span class="amount">Original: ${formatCurrency(exp.amount, exp.currency)}</span>
-              ${exp.isForeignCurrency ? `<br><span class="reimburse">Reimburse: ${formatCurrency(exp.reimbursementAmount, exp.reimbursementCurrency)}</span>` : ''}
+              Original: ${formatCurrency(exp.amount, exp.currency)}
+              ${exp.isForeignCurrency ? `<br>Reimburse: ${formatCurrency(exp.reimbursementAmount, reimburseCurrency)}` : ''}
               <br>${formatShortDate(exp.date)}
             </div>
           </div>
@@ -311,195 +333,376 @@ export default function BerkeleyExpenseSystem() {
         <title>Expense Claim - ${claimNumber || 'Draft'}</title>
         <style>
           * { margin: 0; padding: 0; box-sizing: border-box; }
-          body { font-family: Arial, sans-serif; font-size: 11px; }
-          .page { page-break-after: always; padding: 15mm; min-height: 100vh; }
+          body { font-family: Arial, sans-serif; font-size: 10px; color: #000; }
+          .page { page-break-after: always; padding: 12mm 15mm; min-height: 100vh; }
           .page:last-child { page-break-after: avoid; }
-          .header { background: #1a237e; color: white; padding: 15px; margin-bottom: 15px; display: flex; align-items: center; }
-          .logo { width: 50px; height: 50px; background: white; border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 28px; font-weight: bold; color: #1a237e; margin-right: 15px; }
-          .header-text h1 { font-size: 18px; margin-bottom: 3px; }
-          .header-text p { font-size: 11px; opacity: 0.9; }
-          .info-box { border: 1px solid #999; margin-bottom: 15px; }
-          .info-row { display: flex; border-bottom: 1px solid #ddd; }
+          
+          /* Header */
+          .header { text-align: center; margin-bottom: 15px; border-bottom: 2px solid #000; padding-bottom: 10px; }
+          .header h1 { font-size: 16px; font-weight: bold; margin-bottom: 3px; }
+          .header .company { font-size: 11px; color: #666; }
+          
+          /* Info Box */
+          .info-box { border: 1px solid #000; margin-bottom: 15px; }
+          .info-row { display: flex; border-bottom: 1px solid #000; }
           .info-row:last-child { border-bottom: none; }
-          .info-cell { flex: 1; padding: 8px 12px; }
-          .info-cell:first-child { border-right: 1px solid #ddd; }
-          .info-label { color: #666; font-size: 10px; }
-          .info-value { font-weight: bold; color: #003399; }
-          .section-title { background: #e0e0e0; padding: 8px 12px; font-weight: bold; font-size: 12px; }
-          .subsection-title { background: #f5f5f5; padding: 6px 12px; font-weight: bold; font-size: 11px; border-bottom: 1px solid #ddd; }
-          table { width: 100%; border-collapse: collapse; }
-          th, td { border: 1px solid #ccc; padding: 6px 8px; text-align: left; }
-          th { background: #e0e0e0; font-size: 10px; }
-          .amount-col { text-align: right; width: 80px; }
-          .ref-col { width: 50px; font-weight: bold; color: #003399; }
-          .cat-link { color: #003399; }
-          .total-row { background: #e3f2fd; }
-          .total-row td { font-weight: bold; font-size: 13px; }
-          .total-amount { color: #003399; }
+          .info-cell { flex: 1; padding: 5px 8px; border-right: 1px solid #000; }
+          .info-cell:last-child { border-right: none; }
+          .info-label { font-size: 9px; color: #666; }
+          .info-value { font-weight: bold; }
+          
+          /* Expenses Table - Matching Original */
+          .expenses-section { border: 1px solid #000; margin-bottom: 15px; }
+          .section-header { background: #f0f0f0; padding: 5px 8px; font-weight: bold; border-bottom: 1px solid #000; font-size: 11px; }
+          .category-header { background: #f8f8f8; padding: 4px 8px; font-weight: bold; font-size: 10px; border-bottom: 1px solid #ccc; text-decoration: underline; }
+          
+          .expense-row { display: flex; border-bottom: 1px solid #ddd; }
+          .expense-row:last-child { border-bottom: none; }
+          .col-cat { width: 25px; padding: 3px 5px; font-weight: bold; }
+          .col-name { width: 100px; padding: 3px 5px; text-decoration: underline; }
+          .col-detail { flex: 1; padding: 3px 5px; }
+          .col-amount { width: 80px; padding: 3px 5px; text-align: right; }
+          .col-total-label { width: 50px; padding: 3px 5px; font-weight: bold; }
+          
+          .sub-row { display: flex; padding-left: 125px; border-bottom: 1px solid #eee; }
+          .sub-row .col-detail { padding: 2px 5px; }
+          .sub-row .col-amount { padding: 2px 5px; }
+          
+          .total-row { display: flex; background: #f0f0f0; border-top: 2px solid #000; padding: 8px; }
+          .total-row .label { flex: 1; font-weight: bold; font-size: 11px; }
+          .total-row .amount { width: 100px; text-align: right; font-weight: bold; font-size: 11px; border: 1px solid #000; padding: 3px 8px; }
+          
+          /* Signature */
           .signature-section { margin-top: 20px; }
-          .sig-row { display: flex; margin-bottom: 15px; }
+          .sig-row { display: flex; margin-bottom: 15px; gap: 20px; }
           .sig-field { flex: 1; }
-          .sig-label { font-size: 10px; color: #666; margin-bottom: 5px; }
-          .sig-line { border-bottom: 1px solid #999; height: 25px; display: flex; align-items: flex-end; padding-bottom: 3px; }
-          .sig-value { color: #003399; font-style: italic; }
-          .warning-box { background: #fff8e1; border: 1px solid #ffb300; padding: 8px 12px; margin-bottom: 10px; font-size: 10px; color: #8d6e00; }
+          .sig-label { font-size: 9px; margin-bottom: 3px; }
+          .sig-line { border-bottom: 1px solid #000; height: 20px; }
+          
+          /* Detail Pages */
+          .detail-header { text-align: center; margin-bottom: 15px; border-bottom: 1px solid #000; padding-bottom: 10px; }
+          .detail-header h2 { font-size: 14px; }
+          .detail-header .name { font-size: 11px; color: #666; }
+          
+          .detail-table { width: 100%; border-collapse: collapse; margin-bottom: 15px; }
+          .detail-table th, .detail-table td { border: 1px solid #000; padding: 4px 6px; text-align: left; font-size: 9px; }
+          .detail-table th { background: #f0f0f0; font-weight: bold; }
+          .detail-table .amount { text-align: right; }
+          .detail-table .ref { font-weight: bold; width: 30px; }
+          .detail-table .desc { min-width: 150px; }
+          .subtotal-row { background: #f8f8f8; font-weight: bold; }
+          
+          /* Receipt Pages */
           .receipt-page { padding: 10mm; }
-          .receipt-header { background: #1a237e; color: white; padding: 15px; margin-bottom: 10px; display: flex; align-items: center; }
-          .receipt-ref { font-size: 32px; font-weight: bold; margin-right: 20px; }
-          .receipt-info { font-size: 12px; }
-          .receipt-info .amount { font-weight: bold; }
-          .receipt-info .reimburse { color: #90caf9; }
-          .receipt-img { max-width: 100%; max-height: 220mm; object-fit: contain; display: block; margin: 0 auto; }
+          .receipt-header { background: #333; color: white; padding: 12px; margin-bottom: 10px; display: flex; align-items: center; }
+          .receipt-ref { font-size: 28px; font-weight: bold; margin-right: 20px; min-width: 50px; }
+          .receipt-info { font-size: 11px; }
+          .receipt-img { max-width: 100%; max-height: 230mm; object-fit: contain; display: block; margin: 0 auto; }
           .no-receipt { background: #f5f5f5; padding: 50px; text-align: center; color: #999; }
-          @media print { .page { padding: 10mm; } }
+          
+          @media print { 
+            .page { padding: 10mm; }
+            body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+          }
         </style>
       </head>
       <body>
+        <!-- Page 1: Summary -->
         <div class="page">
           <div class="header">
-            <div class="logo">B</div>
-            <div class="header-text">
-              <h1>Motor & Expense Claim Form</h1>
-              <p>Berkeley London Residential Ltd</p>
-            </div>
+            <h1>Motor & Expense Claim Form</h1>
+            <div class="company">${companyName}</div>
           </div>
+          
           <div class="info-box">
             <div class="info-row">
               <div class="info-cell"><span class="info-label">Name</span><br><span class="info-value">${userName}</span></div>
               <div class="info-cell"><span class="info-label">Month</span><br><span class="info-value">${claimMonth}</span></div>
             </div>
             <div class="info-row">
-              <div class="info-cell"><span class="info-label">Office</span><br><span class="info-value">${officeName}</span></div>
-              <div class="info-cell"><span class="info-label">Claim #</span><br><span class="info-value">${claimNumber || 'DRAFT'}</span></div>
-            </div>
-            <div class="info-row">
+              <div class="info-cell"><span class="info-label">Claim Number</span><br><span class="info-value">${claimNumber || 'DRAFT'}</span></div>
               <div class="info-cell"><span class="info-label">Reimbursement Currency</span><br><span class="info-value">${reimburseCurrency}</span></div>
-              <div class="info-cell"></div>
             </div>
           </div>
-          <div class="section-title">Expenses Claim</div>
-          <div class="subsection-title">Motor Vehicle Expenditure</div>
-          <table>
-            <tr><td class="ref-col">A.</td><td class="cat-link">Petrol Expenditure</td><td>Full Petrol Allowance / Fuel Card</td><td class="amount-col">${getCategoryTotal('A').toFixed(2)}</td></tr>
-            <tr><td class="ref-col">B.</td><td class="cat-link">Parking</td><td>Off-Street Parking</td><td class="amount-col">${getCategoryTotal('B').toFixed(2)}</td></tr>
-            <tr><td class="ref-col">C.</td><td class="cat-link">Travel Expenses</td><td>Taxis</td><td class="amount-col">${getSubcategoryTotal('C', 'Taxis').toFixed(2)}</td></tr>
-            <tr><td></td><td></td><td>Public Transport / Tolls / Subsistence</td><td class="amount-col">${(getSubcategoryTotal('C', 'Public Transport') + getSubcategoryTotal('C', 'Tolls') + getSubcategoryTotal('C', 'Subsistence') + getSubcategoryTotal('C', 'Congestion Charging')).toFixed(2)}</td></tr>
-            <tr><td class="ref-col">D.</td><td class="cat-link">Vehicle Repairs</td><td>Repairs / Parts</td><td class="amount-col">${getCategoryTotal('D').toFixed(2)}</td></tr>
-          </table>
-          <div class="subsection-title">Business Expenditure</div>
-          <table>
-            <tr><td class="ref-col">E.</td><td class="cat-link">Entertaining</td><td>Customers / Employees</td><td class="amount-col">${getCategoryTotal('E').toFixed(2)}</td></tr>
-            <tr><td class="ref-col">F.</td><td class="cat-link">Welfare</td><td>Hotels / Gifts</td><td class="amount-col">${getCategoryTotal('F').toFixed(2)}</td></tr>
-            <tr><td class="ref-col">G-I.</td><td class="cat-link">Other</td><td>Subscriptions / Computer / WIP</td><td class="amount-col">${(getCategoryTotal('G') + getCategoryTotal('H') + getCategoryTotal('I')).toFixed(2)}</td></tr>
-          </table>
-          <table>
-            <tr class="total-row">
-              <td colspan="3"><strong>Total expenses claimed</strong></td>
-              <td class="amount-col total-amount">${reimburseCurrency} ${totalAmount.toFixed(2)}</td>
-            </tr>
-          </table>
+          
+          <div class="expenses-section">
+            <div class="section-header">Expenses claim</div>
+            
+            <!-- Motor Vehicle Expenditure -->
+            <div class="category-header">Motor Vehicle Expenditure</div>
+            
+            <div class="expense-row">
+              <div class="col-cat">A.</div>
+              <div class="col-name">Petrol Expenditure</div>
+              <div class="col-detail">Full Petrol Allowance / Fuel Card Holders</div>
+              <div class="col-total-label">Total</div>
+            </div>
+            <div class="sub-row">
+              <div class="col-detail"></div>
+              <div class="col-amount">${reimburseCurrency} ${getSubcategoryTotal('A', 'Full Petrol Allowance / Fuel Card Holders').toFixed(2)}</div>
+            </div>
+            <div class="sub-row">
+              <div class="col-detail">Business Mileage Return (As Attached)</div>
+              <div class="col-amount">${reimburseCurrency} ${getSubcategoryTotal('A', 'Business Mileage Return (As Attached)').toFixed(2)}</div>
+            </div>
+            
+            <div class="expense-row">
+              <div class="col-cat">B.</div>
+              <div class="col-name">Parking</div>
+              <div class="col-detail">Off-Street Parking</div>
+              <div class="col-amount">${reimburseCurrency} ${getCategoryTotal('B').toFixed(2)}</div>
+            </div>
+            
+            <div class="expense-row">
+              <div class="col-cat">C.</div>
+              <div class="col-name">Travel Expenses</div>
+              <div class="col-detail"></div>
+              <div class="col-amount"></div>
+            </div>
+            <div class="sub-row">
+              <div class="col-detail">Public Transport (Trains, Tubes, Buses etc.)</div>
+              <div class="col-amount">${reimburseCurrency} ${getSubcategoryTotal('C', 'Public Transport (Trains, Tubes, Buses etc.)').toFixed(2)}</div>
+            </div>
+            <div class="sub-row">
+              <div class="col-detail">Taxis</div>
+              <div class="col-amount">${reimburseCurrency} ${getSubcategoryTotal('C', 'Taxis').toFixed(2)}</div>
+            </div>
+            <div class="sub-row">
+              <div class="col-detail">Tolls</div>
+              <div class="col-amount">${reimburseCurrency} ${getSubcategoryTotal('C', 'Tolls').toFixed(2)}</div>
+            </div>
+            <div class="sub-row">
+              <div class="col-detail">Congestion Charging</div>
+              <div class="col-amount">${reimburseCurrency} ${getSubcategoryTotal('C', 'Congestion Charging').toFixed(2)}</div>
+            </div>
+            <div class="sub-row">
+              <div class="col-detail">Subsistence (meals while away from office)</div>
+              <div class="col-amount">${reimburseCurrency} ${getSubcategoryTotal('C', 'Subsistence (meals while away from office)').toFixed(2)}</div>
+            </div>
+            
+            <div class="expense-row">
+              <div class="col-cat">D</div>
+              <div class="col-name">Vehicle Repairs</div>
+              <div class="col-detail">Repairs</div>
+              <div class="col-amount">${reimburseCurrency} ${getSubcategoryTotal('D', 'Repairs').toFixed(2)}</div>
+            </div>
+            <div class="sub-row">
+              <div class="col-detail">Parts</div>
+              <div class="col-amount">${reimburseCurrency} ${getSubcategoryTotal('D', 'Parts').toFixed(2)}</div>
+            </div>
+            
+            <!-- Business Expenditure -->
+            <div class="category-header">Business Expenditure</div>
+            
+            <div class="expense-row">
+              <div class="col-cat">E</div>
+              <div class="col-name">Entertaining</div>
+              <div class="col-detail"></div>
+              <div class="col-total-label">Total</div>
+            </div>
+            <div class="sub-row">
+              <div class="col-detail">Customers (Staff & Customers)</div>
+              <div class="col-amount">${reimburseCurrency} ${getSubcategoryTotal('E', 'Customers (Staff & Customers)').toFixed(2)}</div>
+            </div>
+            <div class="sub-row">
+              <div class="col-detail">Employees (Must be only Staff present)</div>
+              <div class="col-amount">${reimburseCurrency} ${getSubcategoryTotal('E', 'Employees (Must be only Staff present)').toFixed(2)}</div>
+            </div>
+            
+            <div class="expense-row">
+              <div class="col-cat">F</div>
+              <div class="col-name">Welfare</div>
+              <div class="col-detail">Hotel Accommodation</div>
+              <div class="col-amount">${reimburseCurrency} ${getSubcategoryTotal('F', 'Hotel Accommodation').toFixed(2)}</div>
+            </div>
+            <div class="sub-row">
+              <div class="col-detail">Gifts to Employees</div>
+              <div class="col-amount">${reimburseCurrency} ${getSubcategoryTotal('F', 'Gifts to Employees').toFixed(2)}</div>
+            </div>
+            <div class="sub-row">
+              <div class="col-detail">Corporate Gifts</div>
+              <div class="col-amount">${reimburseCurrency} ${getSubcategoryTotal('F', 'Corporate Gifts').toFixed(2)}</div>
+            </div>
+            
+            <div class="expense-row">
+              <div class="col-cat">G</div>
+              <div class="col-name">Subscriptions</div>
+              <div class="col-detail">Professional</div>
+              <div class="col-amount">${reimburseCurrency} ${getSubcategoryTotal('G', 'Professional').toFixed(2)}</div>
+            </div>
+            <div class="sub-row">
+              <div class="col-detail">Non - Professional</div>
+              <div class="col-amount">${reimburseCurrency} ${getSubcategoryTotal('G', 'Non - Professional').toFixed(2)}</div>
+            </div>
+            <div class="sub-row">
+              <div class="col-detail">Newspapers, Magazines etc.</div>
+              <div class="col-amount">${reimburseCurrency} ${getSubcategoryTotal('G', 'Newspapers, Magazines etc.').toFixed(2)}</div>
+            </div>
+            
+            <div class="expense-row">
+              <div class="col-cat">H</div>
+              <div class="col-name">Computer Costs</div>
+              <div class="col-detail">All Items</div>
+              <div class="col-amount">${reimburseCurrency} ${getCategoryTotal('H').toFixed(2)}</div>
+            </div>
+            
+            <div class="expense-row">
+              <div class="col-cat">I</div>
+              <div class="col-name">WIP</div>
+              <div class="col-detail">All Items</div>
+              <div class="col-amount">${reimburseCurrency} ${getCategoryTotal('I').toFixed(2)}</div>
+            </div>
+            
+            <div class="expense-row">
+              <div class="col-cat">J</div>
+              <div class="col-name">Other</div>
+              <div class="col-detail">Miscellaneous Vatable Items</div>
+              <div class="col-amount">${reimburseCurrency} ${getCategoryTotal('J').toFixed(2)}</div>
+            </div>
+          </div>
+          
+          <div class="total-row">
+            <div class="label">Total expenses claimed</div>
+            <div class="amount">${reimburseCurrency} ${totalAmount.toFixed(2)}</div>
+          </div>
+          
           <div class="signature-section">
             <div class="sig-row">
               <div class="sig-field">
-                <div class="sig-label">Signature of Claimant</div>
-                <div class="sig-line"><span class="sig-value">${userName}</span></div>
+                <div class="sig-label">Signature of Claimant:</div>
+                <div class="sig-line" style="font-style: italic; padding-top: 5px;">${userName}</div>
               </div>
-              <div class="sig-field" style="margin-left: 20px;">
-                <div class="sig-label">Date</div>
-                <div class="sig-line">${formatDate(submittedDate || new Date().toISOString())}</div>
+              <div class="sig-field">
+                <div class="sig-label">Date:</div>
+                <div class="sig-line" style="padding-top: 5px;">${formatDate(submittedDate || new Date().toISOString())}</div>
               </div>
             </div>
-            <div class="sig-field">
-              <div class="sig-label">Authorised</div>
-              <div class="sig-line"></div>
+            <div class="sig-row">
+              <div class="sig-field">
+                <div class="sig-label">Authorised:</div>
+                <div class="sig-line"></div>
+              </div>
+              <div class="sig-field">
+                <div class="sig-label">Date:</div>
+                <div class="sig-line"></div>
+              </div>
             </div>
           </div>
         </div>
+        
+        <!-- Page 2: Travel Expense Detail -->
         <div class="page">
-          <div class="header">
-            <div class="logo">B</div>
-            <div class="header-text">
-              <h1>Travel Expense Detail</h1>
-              <p>${userName}</p>
-            </div>
+          <div class="detail-header">
+            <h2>Travel Expense Detail</h2>
+            <div class="name">${userName}</div>
           </div>
-          <table>
+          
+          <table class="detail-table">
             <thead>
               <tr>
-                <th>Ref</th><th>Parking</th><th>Pub.Trans</th><th>Taxis</th><th>Tolls</th><th>Subsist.</th><th>Repairs</th><th>Parts</th><th>Description</th><th>Amount (${reimburseCurrency})</th>
+                <th class="ref">Ref</th>
+                <th>Parking</th>
+                <th>Pub.Trans</th>
+                <th>Taxis</th>
+                <th>Tolls</th>
+                <th>Subsist.</th>
+                <th>Repairs</th>
+                <th>Parts</th>
+                <th class="desc">Description</th>
               </tr>
             </thead>
             <tbody>
-              ${travelExpenses.length === 0 ? '<tr><td colspan="10" style="text-align:center;padding:20px;color:#999;">No travel expenses</td></tr>' : 
+              ${travelExpenses.length === 0 ? '<tr><td colspan="9" style="text-align:center;padding:20px;color:#999;">No travel expenses</td></tr>' : 
                 travelExpenses.map(exp => `
                   <tr>
-                    <td class="ref-col">${exp.ref}</td>
-                    <td class="amount-col">${exp.category === 'B' ? (exp.reimbursementAmount || exp.amount).toFixed(2) : ''}</td>
-                    <td class="amount-col">${exp.subcategory === 'Public Transport' ? (exp.reimbursementAmount || exp.amount).toFixed(2) : ''}</td>
-                    <td class="amount-col">${exp.subcategory === 'Taxis' ? (exp.reimbursementAmount || exp.amount).toFixed(2) : ''}</td>
-                    <td class="amount-col">${exp.subcategory === 'Tolls' ? (exp.reimbursementAmount || exp.amount).toFixed(2) : ''}</td>
-                    <td class="amount-col">${exp.subcategory === 'Subsistence' ? (exp.reimbursementAmount || exp.amount).toFixed(2) : ''}</td>
-                    <td class="amount-col">${exp.subcategory === 'Repairs' ? (exp.reimbursementAmount || exp.amount).toFixed(2) : ''}</td>
-                    <td class="amount-col">${exp.subcategory === 'Parts' ? (exp.reimbursementAmount || exp.amount).toFixed(2) : ''}</td>
-                    <td>${exp.description || ''}</td>
-                    <td class="amount-col"><strong>${(exp.reimbursementAmount || exp.amount).toFixed(2)}</strong></td>
+                    <td class="ref">${exp.ref}</td>
+                    <td class="amount">${exp.category === 'B' ? (exp.reimbursementAmount || exp.amount).toFixed(2) : ''}</td>
+                    <td class="amount">${exp.subcategory === 'Public Transport (Trains, Tubes, Buses etc.)' ? (exp.reimbursementAmount || exp.amount).toFixed(2) : ''}</td>
+                    <td class="amount">${exp.subcategory === 'Taxis' ? (exp.reimbursementAmount || exp.amount).toFixed(2) : ''}</td>
+                    <td class="amount">${exp.subcategory === 'Tolls' ? (exp.reimbursementAmount || exp.amount).toFixed(2) : ''}</td>
+                    <td class="amount">${exp.subcategory === 'Subsistence (meals while away from office)' ? (exp.reimbursementAmount || exp.amount).toFixed(2) : ''}</td>
+                    <td class="amount">${exp.subcategory === 'Repairs' ? (exp.reimbursementAmount || exp.amount).toFixed(2) : ''}</td>
+                    <td class="amount">${exp.subcategory === 'Parts' ? (exp.reimbursementAmount || exp.amount).toFixed(2) : ''}</td>
+                    <td class="desc">${exp.description || ''}</td>
                   </tr>
                 `).join('')}
-              <tr class="total-row">
-                <td colspan="9"><strong>Total Travel Expenses</strong></td>
-                <td class="amount-col total-amount">${(getCategoryTotal('B') + getCategoryTotal('C') + getCategoryTotal('D')).toFixed(2)}</td>
+              <tr class="subtotal-row">
+                <td><strong>Subtotals</strong></td>
+                <td class="amount">${travelSubtotals.parking.toFixed(2)}</td>
+                <td class="amount">${travelSubtotals.pubTrans.toFixed(2)}</td>
+                <td class="amount">${travelSubtotals.taxis.toFixed(2)}</td>
+                <td class="amount">${travelSubtotals.tolls.toFixed(2)}</td>
+                <td class="amount">${travelSubtotals.subsistence.toFixed(2)}</td>
+                <td class="amount">${travelSubtotals.repairs.toFixed(2)}</td>
+                <td class="amount">${travelSubtotals.parts.toFixed(2)}</td>
+                <td><strong>Total: ${reimburseCurrency} ${travelSubtotals.total.toFixed(2)}</strong></td>
               </tr>
             </tbody>
           </table>
         </div>
+        
+        <!-- Page 3: Entertaining Detail -->
         <div class="page">
-          <div class="header">
-            <div class="logo">B</div>
-            <div class="header-text">
-              <h1>Entertaining and Welfare Detail</h1>
-              <p>${userName}</p>
-            </div>
+          <div class="detail-header">
+            <h2>Entertaining and Welfare Detail</h2>
+            <div class="name">${userName}</div>
           </div>
-          <div class="warning-box">⚠️ PLEASE ENSURE A FULL LIST OF GUESTS ENTERTAINED ARE SUPPLIED WITH EACH RECEIPT</div>
-          <table>
+          
+          <div style="background: #fff8e1; border: 1px solid #ffb300; padding: 8px; margin-bottom: 15px; font-size: 9px;">
+            <strong>⚠️ PLEASE ENSURE A FULL LIST OF GUESTS ENTERTAINED ARE SUPPLIED WITH EACH RECEIPT</strong>
+          </div>
+          
+          <table class="detail-table">
             <thead>
               <tr>
-                <th>Ref</th><th>Emp. Meals</th><th>Bus. Meals</th><th>Hotels</th><th>Gifts</th><th>Description / Attendees</th><th>Amount (${reimburseCurrency})</th>
+                <th class="ref">Ref</th>
+                <th>Emp. Meals</th>
+                <th>Bus. Meals</th>
+                <th>Hotels</th>
+                <th>Emp. Gifts</th>
+                <th>Corp. Gifts</th>
+                <th class="desc">Description / Attendees</th>
               </tr>
             </thead>
             <tbody>
               ${entertainingExpenses.length === 0 ? '<tr><td colspan="7" style="text-align:center;padding:20px;color:#999;">No entertaining expenses</td></tr>' : 
                 entertainingExpenses.map(exp => `
                   <tr>
-                    <td class="ref-col">${exp.ref}</td>
-                    <td class="amount-col">${exp.category === 'E' && exp.subcategory?.includes('Employee') ? (exp.reimbursementAmount || exp.amount).toFixed(2) : ''}</td>
-                    <td class="amount-col">${exp.category === 'E' && exp.subcategory?.includes('Customer') ? (exp.reimbursementAmount || exp.amount).toFixed(2) : ''}</td>
-                    <td class="amount-col">${exp.category === 'F' && exp.subcategory?.includes('Hotel') ? (exp.reimbursementAmount || exp.amount).toFixed(2) : ''}</td>
-                    <td class="amount-col">${exp.category === 'F' && !exp.subcategory?.includes('Hotel') ? (exp.reimbursementAmount || exp.amount).toFixed(2) : ''}</td>
-                    <td>${exp.merchant}${exp.attendees ? ' - ' + exp.attendees : ''}</td>
-                    <td class="amount-col"><strong>${(exp.reimbursementAmount || exp.amount).toFixed(2)}</strong></td>
+                    <td class="ref">${exp.ref}</td>
+                    <td class="amount">${exp.subcategory === 'Employees (Must be only Staff present)' ? (exp.reimbursementAmount || exp.amount).toFixed(2) : ''}</td>
+                    <td class="amount">${exp.subcategory === 'Customers (Staff & Customers)' ? (exp.reimbursementAmount || exp.amount).toFixed(2) : ''}</td>
+                    <td class="amount">${exp.subcategory === 'Hotel Accommodation' ? (exp.reimbursementAmount || exp.amount).toFixed(2) : ''}</td>
+                    <td class="amount">${exp.subcategory === 'Gifts to Employees' ? (exp.reimbursementAmount || exp.amount).toFixed(2) : ''}</td>
+                    <td class="amount">${exp.subcategory === 'Corporate Gifts' ? (exp.reimbursementAmount || exp.amount).toFixed(2) : ''}</td>
+                    <td class="desc">${exp.merchant}${exp.attendees ? ' - ' + exp.attendees : ''}</td>
                   </tr>
                 `).join('')}
-              <tr class="total-row">
-                <td colspan="6"><strong>Total Entertaining & Welfare</strong></td>
-                <td class="amount-col total-amount">${(getCategoryTotal('E') + getCategoryTotal('F')).toFixed(2)}</td>
+              <tr class="subtotal-row">
+                <td><strong>Subtotals</strong></td>
+                <td class="amount">${getSubcategoryTotal('E', 'Employees (Must be only Staff present)').toFixed(2)}</td>
+                <td class="amount">${getSubcategoryTotal('E', 'Customers (Staff & Customers)').toFixed(2)}</td>
+                <td class="amount">${getSubcategoryTotal('F', 'Hotel Accommodation').toFixed(2)}</td>
+                <td class="amount">${getSubcategoryTotal('F', 'Gifts to Employees').toFixed(2)}</td>
+                <td class="amount">${getSubcategoryTotal('F', 'Corporate Gifts').toFixed(2)}</td>
+                <td><strong>Total: ${reimburseCurrency} ${(getCategoryTotal('E') + getCategoryTotal('F')).toFixed(2)}</strong></td>
               </tr>
             </tbody>
           </table>
         </div>
+        
+        <!-- Receipt Pages -->
         ${receiptsHTML}
+        
         ${creditCardStatementName ? `
         <div class="page">
-          <div class="header" style="background: #ff9800;">
-            <div class="logo" style="color: #ff9800;">💳</div>
-            <div class="header-text">
-              <h1>Credit Card Statement</h1>
-              <p>Supporting document for foreign currency expenses</p>
-            </div>
+          <div class="detail-header">
+            <h2>Credit Card Statement</h2>
+            <div class="name">Supporting document for foreign currency expenses</div>
           </div>
           <p style="margin-top: 20px;">Attached file: <strong>${creditCardStatementName}</strong></p>
         </div>
         ` : ''}
+        
         <script>window.onload = function() { window.print(); setTimeout(function() { window.close(); }, 500); };</script>
       </body>
       </html>
@@ -513,8 +716,7 @@ export default function BerkeleyExpenseSystem() {
     setDownloading(true);
     try {
       const employee = EMPLOYEES.find(e => e.id === claim.user_id);
-      const office = OFFICES.find(o => employee && o.code === employee.office);
-      await generatePDFFromHTML(claim.expenses || [], claim.user_name, office?.name || claim.office, claim.claim_number, claim.submitted_at, claim.credit_card_statement, employee?.reimburseCurrency || claim.currency);
+      await generatePDFFromHTML(claim.expenses || [], claim.user_name, employee?.office, claim.claim_number, claim.submitted_at, claim.credit_card_statement, employee?.reimburseCurrency || claim.currency);
     } catch (err) {
       alert('❌ Failed to download PDF.');
     }
@@ -524,7 +726,7 @@ export default function BerkeleyExpenseSystem() {
   const handleDownloadPreviewPDF = async () => {
     setDownloading(true);
     try {
-      await generatePDFFromHTML(pendingExpenses, currentUser.name, userOffice?.name, `DRAFT-${Date.now().toString().slice(-6)}`, new Date().toISOString(), creditCardStatement?.name, getUserReimburseCurrency(currentUser));
+      await generatePDFFromHTML(pendingExpenses, currentUser.name, currentUser.office, `DRAFT-${Date.now().toString().slice(-6)}`, new Date().toISOString(), creditCardStatement?.name, getUserReimburseCurrency(currentUser));
     } catch (err) {
       alert('❌ Failed to download PDF.');
     }
@@ -532,7 +734,7 @@ export default function BerkeleyExpenseSystem() {
   };
 
   // ============================================
-  // LOGIN SCREEN WITH PASSWORD
+  // LOGIN SCREEN
   // ============================================
   if (!currentUser) {
     const handleSelectEmployee = (e) => {
@@ -557,18 +759,10 @@ export default function BerkeleyExpenseSystem() {
       }
     };
 
-    const handleBackToSelect = () => {
-      setLoginStep('select');
-      setSelectedEmployee(null);
-      setPasswordInput('');
-      setLoginError('');
-    };
-
     return (
       <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 flex items-center justify-center p-4">
         <div className="bg-white rounded-3xl shadow-2xl p-8 max-w-md w-full">
           <div className="text-center mb-8">
-            <div className="w-20 h-20 bg-gradient-to-br from-blue-600 to-indigo-700 rounded-2xl flex items-center justify-center text-white text-3xl font-bold mx-auto mb-4 shadow-lg">B</div>
             <h1 className="text-2xl font-bold text-slate-800">Berkeley Expenses</h1>
             <p className="text-slate-500 text-sm mt-2">
               {loginStep === 'select' ? 'Select your name to continue' : `Welcome, ${selectedEmployee?.name.split(' ')[0]}`}
@@ -576,81 +770,37 @@ export default function BerkeleyExpenseSystem() {
           </div>
 
           {loginStep === 'select' && (
-            <div className="space-y-4">
-              <label className="block text-sm font-semibold text-slate-600 mb-2">Your Name</label>
-              <select
-                className="w-full p-4 border-2 border-slate-200 rounded-xl text-base focus:border-blue-500 outline-none bg-white"
-                onChange={handleSelectEmployee}
-                defaultValue=""
-              >
-                <option value="" disabled>-- Select your name --</option>
-                {OFFICES.map(office => {
-                  const officeEmployees = EMPLOYEES.filter(e => e.office === office.code).sort((a, b) => a.name.localeCompare(b.name));
-                  if (officeEmployees.length === 0) return null;
-                  return (
-                    <optgroup key={office.code} label={`📍 ${office.name} (${office.currency})`}>
-                      {officeEmployees.map(emp => (
-                        <option key={emp.id} value={emp.id}>
-                          {emp.name}
-                        </option>
-                      ))}
-                    </optgroup>
-                  );
-                })}
-              </select>
-            </div>
+            <select className="w-full p-4 border-2 border-slate-200 rounded-xl text-base focus:border-blue-500 outline-none bg-white" onChange={handleSelectEmployee} defaultValue="">
+              <option value="" disabled>-- Select your name --</option>
+              {OFFICES.map(office => {
+                const officeEmployees = EMPLOYEES.filter(e => e.office === office.code).sort((a, b) => a.name.localeCompare(b.name));
+                if (officeEmployees.length === 0) return null;
+                return (
+                  <optgroup key={office.code} label={`📍 ${office.name} (${office.currency})`}>
+                    {officeEmployees.map(emp => <option key={emp.id} value={emp.id}>{emp.name}</option>)}
+                  </optgroup>
+                );
+              })}
+            </select>
           )}
 
           {loginStep === 'password' && (
             <div className="space-y-4">
               <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 mb-4">
-                <p className="text-sm text-blue-800">
-                  <strong>{selectedEmployee?.name}</strong><br/>
-                  <span className="text-blue-600">{getUserOffice(selectedEmployee)?.name} • Reimburse in {selectedEmployee?.reimburseCurrency}</span>
-                </p>
+                <p className="text-sm text-blue-800"><strong>{selectedEmployee?.name}</strong><br/>
+                <span className="text-blue-600">{getUserOffice(selectedEmployee)?.name} • {selectedEmployee?.reimburseCurrency}</span></p>
               </div>
-
-              <div>
-                <label className="block text-sm font-semibold text-slate-600 mb-2">Password</label>
-                <input
-                  type="password"
-                  className="w-full p-4 border-2 border-slate-200 rounded-xl text-lg focus:border-blue-500 outline-none"
-                  placeholder="Enter your password"
-                  value={passwordInput}
-                  onChange={(e) => setPasswordInput(e.target.value)}
-                  onKeyPress={(e) => e.key === 'Enter' && handleLogin()}
-                  autoFocus
-                />
-              </div>
-
-              {loginError && (
-                <div className="bg-red-50 border border-red-200 rounded-xl p-3 text-sm text-red-700">
-                  ⚠️ {loginError}
-                </div>
-              )}
-
+              <input type="password" className="w-full p-4 border-2 border-slate-200 rounded-xl text-lg focus:border-blue-500 outline-none" placeholder="Enter your password" value={passwordInput} onChange={(e) => setPasswordInput(e.target.value)} onKeyPress={(e) => e.key === 'Enter' && handleLogin()} autoFocus />
+              {loginError && <div className="bg-red-50 border border-red-200 rounded-xl p-3 text-sm text-red-700">⚠️ {loginError}</div>}
               <div className="flex gap-3 pt-2">
-                <button
-                  onClick={handleBackToSelect}
-                  className="flex-1 py-3 rounded-xl border-2 border-slate-300 font-semibold text-slate-600 hover:bg-slate-100"
-                >
-                  ← Back
-                </button>
-                <button
-                  onClick={handleLogin}
-                  className="flex-[2] py-3 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 text-white font-semibold shadow-lg hover:shadow-xl"
-                >
-                  Login 🔐
-                </button>
+                <button onClick={() => { setLoginStep('select'); setSelectedEmployee(null); }} className="flex-1 py-3 rounded-xl border-2 border-slate-300 font-semibold text-slate-600">← Back</button>
+                <button onClick={handleLogin} className="flex-[2] py-3 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 text-white font-semibold shadow-lg">Login 🔐</button>
               </div>
-
-              <p className="text-center text-xs text-slate-400 mt-4">
-                Default password: <code className="bg-slate-100 px-2 py-1 rounded">berkeley123</code>
-              </p>
+              <p className="text-center text-xs text-slate-400 mt-4">Default password: <code className="bg-slate-100 px-2 py-1 rounded">berkeley123</code></p>
             </div>
           )}
 
-          <p className="text-center text-xs text-slate-400 mt-8">v1.7 - Secure Login</p>
+          <p className="text-center text-xs text-slate-400 mt-8">v1.8 - Admin Edit + PDF Improvements</p>
         </div>
       </div>
     );
@@ -720,7 +870,6 @@ export default function BerkeleyExpenseSystem() {
                 <input type="file" accept="image/*,application/pdf" capture="environment" onChange={handleFileChange} className="hidden" />
                 <div className="text-5xl mb-4">📸</div>
                 <p className="font-semibold text-slate-700">Take photo or upload receipt</p>
-                <p className="text-sm text-slate-500 mt-1">JPG, PNG or PDF</p>
               </label>
             )}
 
@@ -729,13 +878,13 @@ export default function BerkeleyExpenseSystem() {
                 {receiptPreview && (
                   <div className="relative">
                     <img src={receiptPreview} alt="Receipt" className="w-full h-40 object-contain bg-slate-100 rounded-xl" />
-                    <button onClick={() => { setStep(1); setReceiptFile(null); setReceiptPreview(null); }} className="absolute top-2 right-2 bg-white/90 hover:bg-white px-3 py-1 rounded-lg text-sm font-medium shadow">📷 Retake</button>
+                    <button onClick={() => { setStep(1); setReceiptFile(null); setReceiptPreview(null); }} className="absolute top-2 right-2 bg-white/90 px-3 py-1 rounded-lg text-sm shadow">📷 Retake</button>
                   </div>
                 )}
 
                 <div>
-                  <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Merchant / Vendor *</label>
-                  <input type="text" className="w-full p-3 border-2 border-slate-200 rounded-xl focus:border-blue-500 outline-none" placeholder="e.g., Uber, Restaurant" value={formData.merchant} onChange={e => setFormData(prev => ({ ...prev, merchant: e.target.value }))} />
+                  <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Merchant *</label>
+                  <input type="text" className="w-full p-3 border-2 border-slate-200 rounded-xl focus:border-blue-500 outline-none" value={formData.merchant} onChange={e => setFormData(prev => ({ ...prev, merchant: e.target.value }))} />
                 </div>
 
                 <div className="bg-slate-50 rounded-xl p-4 space-y-3">
@@ -743,7 +892,7 @@ export default function BerkeleyExpenseSystem() {
                   <div className="grid grid-cols-2 gap-4">
                     <div>
                       <label className="block text-xs font-semibold text-slate-500 mb-1">Amount *</label>
-                      <input type="number" step="0.01" className="w-full p-3 border-2 border-slate-200 rounded-xl focus:border-blue-500 outline-none bg-white" placeholder="0.00" value={formData.amount} onChange={e => setFormData(prev => ({ ...prev, amount: e.target.value }))} />
+                      <input type="number" step="0.01" className="w-full p-3 border-2 border-slate-200 rounded-xl focus:border-blue-500 outline-none bg-white" value={formData.amount} onChange={e => setFormData(prev => ({ ...prev, amount: e.target.value }))} />
                     </div>
                     <div>
                       <label className="block text-xs font-semibold text-slate-500 mb-1">Currency *</label>
@@ -756,65 +905,40 @@ export default function BerkeleyExpenseSystem() {
 
                 {isForeignCurrency && (
                   <div className="bg-amber-50 border-2 border-amber-300 rounded-xl p-4 space-y-3">
-                    <div className="flex items-center gap-2">
-                      <span className="text-xl">💳</span>
-                      <div>
-                        <p className="text-sm font-bold text-amber-800">Foreign Currency Detected</p>
-                        <p className="text-xs text-amber-700">Enter the {userReimburseCurrency} amount from your credit card statement</p>
-                      </div>
-                    </div>
-                    <div className="grid grid-cols-2 gap-4">
-                      <div>
-                        <label className="block text-xs font-semibold text-amber-700 mb-1">Reimbursement Amount *</label>
-                        <input type="number" step="0.01" className="w-full p-3 border-2 border-amber-300 rounded-xl focus:border-amber-500 outline-none bg-white" placeholder="From statement" value={formData.reimbursementAmount} onChange={e => setFormData(prev => ({ ...prev, reimbursementAmount: e.target.value }))} />
-                      </div>
-                      <div>
-                        <label className="block text-xs font-semibold text-amber-700 mb-1">Currency</label>
-                        <input type="text" className="w-full p-3 border-2 border-amber-300 rounded-xl bg-amber-100 text-amber-800 font-bold" value={userReimburseCurrency} disabled />
-                      </div>
-                    </div>
+                    <p className="text-sm font-bold text-amber-800">💳 Foreign Currency - Enter {userReimburseCurrency} amount from statement</p>
+                    <input type="number" step="0.01" className="w-full p-3 border-2 border-amber-300 rounded-xl outline-none bg-white" placeholder={`Amount in ${userReimburseCurrency}`} value={formData.reimbursementAmount} onChange={e => setFormData(prev => ({ ...prev, reimbursementAmount: e.target.value }))} />
                   </div>
                 )}
 
                 <div>
-                  <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Date of Expense *</label>
+                  <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Date *</label>
                   <input type="date" className="w-full p-3 border-2 border-slate-200 rounded-xl focus:border-blue-500 outline-none" value={formData.date} onChange={e => setFormData(prev => ({ ...prev, date: e.target.value }))} />
                 </div>
 
                 <div>
                   <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Category *</label>
                   <select className="w-full p-3 border-2 border-slate-200 rounded-xl focus:border-blue-500 outline-none bg-white" value={formData.category} onChange={e => setFormData(prev => ({ ...prev, category: e.target.value, subcategory: EXPENSE_CATEGORIES[e.target.value].subcategories[0] }))}>
-                    {Object.entries(EXPENSE_CATEGORIES).map(([key, val]) => (
-                      <option key={key} value={key}>{val.icon} {key}. {val.name}</option>
-                    ))}
+                    {Object.entries(EXPENSE_CATEGORIES).map(([key, val]) => <option key={key} value={key}>{val.icon} {key}. {val.name}</option>)}
                   </select>
                 </div>
 
                 <div>
                   <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Sub-category *</label>
                   <select className="w-full p-3 border-2 border-slate-200 rounded-xl focus:border-blue-500 outline-none bg-white" value={formData.subcategory} onChange={e => setFormData(prev => ({ ...prev, subcategory: e.target.value }))}>
-                    {EXPENSE_CATEGORIES[formData.category].subcategories.map(sub => (
-                      <option key={sub} value={sub}>{sub}</option>
-                    ))}
+                    {EXPENSE_CATEGORIES[formData.category].subcategories.map(sub => <option key={sub} value={sub}>{sub}</option>)}
                   </select>
                 </div>
 
                 <div>
-                  <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Description / Purpose *</label>
-                  <input type="text" className="w-full p-3 border-2 border-slate-200 rounded-xl focus:border-blue-500 outline-none" placeholder="e.g., Taxi to client meeting" value={formData.description} onChange={e => setFormData(prev => ({ ...prev, description: e.target.value }))} />
+                  <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Description *</label>
+                  <input type="text" className="w-full p-3 border-2 border-slate-200 rounded-xl focus:border-blue-500 outline-none" value={formData.description} onChange={e => setFormData(prev => ({ ...prev, description: e.target.value }))} />
                 </div>
 
                 {needsAttendees && (
-                  <>
-                    <div>
-                      <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Attendees * (Name & Company)</label>
-                      <textarea className="w-full p-3 border-2 border-slate-200 rounded-xl focus:border-blue-500 outline-none resize-none" rows={2} placeholder="e.g., John Smith (ABC Corp)" value={formData.attendees} onChange={e => setFormData(prev => ({ ...prev, attendees: e.target.value }))} />
-                    </div>
-                    <div>
-                      <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Number of Guests</label>
-                      <input type="number" className="w-full p-3 border-2 border-slate-200 rounded-xl focus:border-blue-500 outline-none" placeholder="e.g., 4" value={formData.numberOfGuests} onChange={e => setFormData(prev => ({ ...prev, numberOfGuests: e.target.value }))} />
-                    </div>
-                  </>
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Attendees * (Name & Company)</label>
+                    <textarea className="w-full p-3 border-2 border-slate-200 rounded-xl focus:border-blue-500 outline-none resize-none" rows={2} value={formData.attendees} onChange={e => setFormData(prev => ({ ...prev, attendees: e.target.value }))} />
+                  </div>
                 )}
               </div>
             )}
@@ -823,8 +947,8 @@ export default function BerkeleyExpenseSystem() {
           <div className="p-4 border-t border-slate-100 bg-slate-50">
             {step === 2 && (
               <div className="flex gap-3">
-                <button onClick={() => setStep(1)} className="flex-1 py-3 rounded-xl border-2 border-slate-300 font-semibold text-slate-600 hover:bg-slate-100">← Back</button>
-                <button onClick={handleSave} disabled={!canSave} className="flex-[2] py-3 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 text-white font-semibold shadow-lg disabled:opacity-50 disabled:cursor-not-allowed">Save ✓</button>
+                <button onClick={() => setStep(1)} className="flex-1 py-3 rounded-xl border-2 border-slate-300 font-semibold text-slate-600">← Back</button>
+                <button onClick={handleSave} disabled={!canSave} className="flex-[2] py-3 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 text-white font-semibold shadow-lg disabled:opacity-50">Save ✓</button>
               </div>
             )}
           </div>
@@ -838,14 +962,9 @@ export default function BerkeleyExpenseSystem() {
   // ============================================
   const PreviewClaimModal = () => {
     const userReimburseCurrency = getUserReimburseCurrency(currentUser);
-    const groupedExpenses = pendingExpenses.reduce((acc, exp) => {
-      if (!acc[exp.category]) acc[exp.category] = [];
-      acc[exp.category].push(exp);
-      return acc;
-    }, {});
+    const groupedExpenses = pendingExpenses.reduce((acc, exp) => { if (!acc[exp.category]) acc[exp.category] = []; acc[exp.category].push(exp); return acc; }, {});
     const canSubmit = !hasForeignCurrency || (hasForeignCurrency && creditCardStatement);
-    const getCategoryTotal = (cat) => (groupedExpenses[cat] || []).reduce((sum, e) => sum + (e.reimbursementAmount || e.amount), 0);
-    const claimMonth = pendingExpenses.length > 0 ? getMonthYear(pendingExpenses[0].date) : '';
+    const getCategoryTotal = (cat) => (groupedExpenses[cat] || []).reduce((sum, e) => sum + parseFloat(e.reimbursementAmount || e.amount || 0), 0);
     const pages = ['Summary', 'Travel', 'Entertaining', 'Receipts'];
 
     return (
@@ -857,45 +976,39 @@ export default function BerkeleyExpenseSystem() {
               <p className="text-blue-200 text-sm">{pages[previewPage]} • {userReimburseCurrency}</p>
             </div>
             <div className="flex items-center gap-2">
-              <button onClick={handleDownloadPreviewPDF} disabled={downloading} className="bg-green-500 hover:bg-green-600 text-white px-4 py-2 rounded-lg font-semibold text-sm flex items-center gap-2 disabled:opacity-50">
-                {downloading ? '⏳' : '📥'} PDF
-              </button>
-              <button onClick={() => { setShowPreview(false); setPreviewPage(0); }} className="w-8 h-8 rounded-full bg-white/20 hover:bg-white/30 flex items-center justify-center">✕</button>
+              <button onClick={handleDownloadPreviewPDF} disabled={downloading} className="bg-green-500 hover:bg-green-600 text-white px-4 py-2 rounded-lg font-semibold text-sm">📥 PDF</button>
+              <button onClick={() => { setShowPreview(false); setPreviewPage(0); }} className="w-8 h-8 rounded-full bg-white/20">✕</button>
             </div>
           </div>
 
           <div className="bg-slate-100 px-4 py-2 flex gap-2 overflow-x-auto shrink-0">
-            {pages.map((page, idx) => (
-              <button key={idx} onClick={() => setPreviewPage(idx)} className={`px-4 py-2 rounded-lg text-sm font-medium whitespace-nowrap ${previewPage === idx ? 'bg-blue-600 text-white shadow' : 'bg-white text-slate-600'}`}>{page}</button>
-            ))}
+            {pages.map((page, idx) => <button key={idx} onClick={() => setPreviewPage(idx)} className={`px-4 py-2 rounded-lg text-sm font-medium whitespace-nowrap ${previewPage === idx ? 'bg-blue-600 text-white' : 'bg-white text-slate-600'}`}>{page}</button>)}
           </div>
 
           <div className="flex-1 overflow-y-auto p-6">
             {previewPage === 0 && (
               <div className="max-w-3xl mx-auto border-2 border-slate-300 rounded-xl p-6">
                 <div className="text-center mb-6">
-                  <div className="w-16 h-16 bg-blue-900 rounded-xl flex items-center justify-center text-white text-2xl font-bold mx-auto mb-2">B</div>
-                  <h1 className="text-xl font-bold">Motor & Expense Claim</h1>
+                  <h1 className="text-xl font-bold">Motor & Expense Claim Form</h1>
+                  <p className="text-sm text-slate-500">{getCompanyName(currentUser.office)}</p>
                 </div>
                 <div className="grid grid-cols-2 gap-4 mb-6 text-sm">
-                  <div><span className="text-slate-500">Name:</span> <strong className="text-blue-700">{currentUser.name}</strong></div>
-                  <div><span className="text-slate-500">Month:</span> <strong>{claimMonth}</strong></div>
-                  <div><span className="text-slate-500">Office:</span> <strong>{userOffice?.name}</strong></div>
+                  <div><span className="text-slate-500">Name:</span> <strong>{currentUser.name}</strong></div>
                   <div><span className="text-slate-500">Currency:</span> <strong className="text-green-700">{userReimburseCurrency}</strong></div>
                 </div>
                 <table className="w-full text-sm border-collapse">
                   <tbody>
-                    {['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I'].map(cat => (
+                    {Object.keys(EXPENSE_CATEGORIES).map(cat => (
                       <tr key={cat} className="border-b border-slate-200">
                         <td className="py-2 font-bold text-blue-700 w-8">{cat}.</td>
-                        <td className="py-2">{EXPENSE_CATEGORIES[cat].icon} {EXPENSE_CATEGORIES[cat].name}</td>
-                        <td className="py-2 text-right font-medium">{getCategoryTotal(cat).toFixed(2)}</td>
+                        <td className="py-2">{EXPENSE_CATEGORIES[cat].name}</td>
+                        <td className="py-2 text-right font-medium">{userReimburseCurrency} {getCategoryTotal(cat).toFixed(2)}</td>
                       </tr>
                     ))}
                   </tbody>
                 </table>
                 <div className="bg-blue-50 p-4 rounded-xl mt-4 flex justify-between items-center">
-                  <span className="font-bold text-lg">Total to Reimburse</span>
+                  <span className="font-bold text-lg">Total</span>
                   <span className="font-bold text-2xl text-blue-700">{formatCurrency(reimbursementTotal, userReimburseCurrency)}</span>
                 </div>
               </div>
@@ -906,10 +1019,7 @@ export default function BerkeleyExpenseSystem() {
                 <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
                   {pendingExpenses.map(exp => (
                     <div key={exp.id} className="border-2 border-slate-300 rounded-lg overflow-hidden">
-                      <div className="bg-blue-100 p-2 flex justify-between">
-                        <span className="font-bold text-blue-700">{exp.ref}</span>
-                        {exp.isForeignCurrency && <span>💳</span>}
-                      </div>
+                      <div className="bg-blue-100 p-2 flex justify-between"><span className="font-bold text-blue-700">{exp.ref}</span>{exp.isForeignCurrency && <span>💳</span>}</div>
                       {exp.receiptPreview ? <img src={exp.receiptPreview} alt={exp.ref} className="w-full h-24 object-cover" /> : <div className="w-full h-24 bg-slate-100 flex items-center justify-center text-3xl">📄</div>}
                       <div className="p-2 bg-slate-50 text-xs">
                         <p className="truncate font-medium">{exp.merchant}</p>
@@ -927,11 +1037,7 @@ export default function BerkeleyExpenseSystem() {
               </div>
             )}
 
-            {(previewPage === 1 || previewPage === 2) && (
-              <div className="text-center py-12 text-slate-400">
-                <p>Detail tables shown in PDF download</p>
-              </div>
-            )}
+            {(previewPage === 1 || previewPage === 2) && <div className="text-center py-12 text-slate-400">Details shown in PDF</div>}
           </div>
 
           <div className="p-4 border-t bg-slate-50 flex gap-3 shrink-0">
@@ -948,7 +1054,7 @@ export default function BerkeleyExpenseSystem() {
   const StatementUploadModal = () => {
     const [file, setFile] = useState(null);
     return (
-      <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+      <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50">
         <div className="bg-white rounded-2xl max-w-md w-full shadow-2xl">
           <div className="bg-gradient-to-r from-amber-500 to-orange-500 text-white p-5 flex justify-between items-center">
             <h2 className="text-lg font-bold">💳 Credit Card Statement</h2>
@@ -962,40 +1068,235 @@ export default function BerkeleyExpenseSystem() {
           </div>
           <div className="p-4 border-t bg-slate-50 flex gap-3">
             <button onClick={() => setShowStatementUpload(false)} className="flex-1 py-3 rounded-xl border-2 border-slate-300 font-semibold text-slate-600">Cancel</button>
-            <button onClick={() => { setCreditCardStatement(file); setShowStatementUpload(false); setShowPreview(true); }} disabled={!file} className="flex-[2] py-3 rounded-xl bg-gradient-to-r from-green-600 to-emerald-600 text-white font-semibold disabled:opacity-50">Continue ✓</button>
+            <button onClick={() => { setCreditCardStatement(file); setShowStatementUpload(false); setShowPreview(true); }} disabled={!file} className="flex-[2] py-3 rounded-xl bg-green-600 text-white font-semibold disabled:opacity-50">Continue ✓</button>
           </div>
         </div>
       </div>
     );
   };
 
+  // ============================================
+  // SUBMIT & UPDATE CLAIM
+  // ============================================
   const handleSubmitClaim = async () => {
     setLoading(true);
     try {
-      const claimNumber = `EXP-2026-${String(claims.length + 1).padStart(3, '0')}`;
-      const { error } = await supabase.from('claims').insert([{
-        claim_number: claimNumber, user_id: currentUser.id, user_name: currentUser.name,
-        office: userOffice?.name, currency: getUserReimburseCurrency(currentUser),
-        total_amount: reimbursementTotal, item_count: pendingExpenses.length,
-        status: 'pending_review', credit_card_statement: creditCardStatement?.name || null,
-        expenses: pendingExpenses
-      }]);
-      if (!error) { setExpenses([]); setCreditCardStatement(null); await loadClaims(); alert('✅ Submitted!'); }
-      else alert('❌ Failed');
+      // Check if resubmitting a returned claim
+      const returnedClaim = claims.find(c => c.user_id === currentUser.id && c.status === 'changes_requested');
+      
+      if (returnedClaim) {
+        // Update existing claim
+        const { error } = await supabase.from('claims').update({
+          total_amount: reimbursementTotal,
+          item_count: pendingExpenses.length,
+          status: 'pending_review',
+          expenses: pendingExpenses,
+          resubmitted_at: new Date().toISOString()
+        }).eq('id', returnedClaim.id);
+        
+        if (!error) { setExpenses([]); setCreditCardStatement(null); await loadClaims(); alert('✅ Claim resubmitted!'); }
+        else alert('❌ Failed');
+      } else {
+        // Create new claim
+        const claimNumber = `EXP-2026-${String(claims.length + 1).padStart(3, '0')}`;
+        const { error } = await supabase.from('claims').insert([{
+          claim_number: claimNumber, user_id: currentUser.id, user_name: currentUser.name,
+          office: userOffice?.name, currency: getUserReimburseCurrency(currentUser),
+          total_amount: reimbursementTotal, item_count: pendingExpenses.length,
+          status: 'pending_review', credit_card_statement: creditCardStatement?.name || null,
+          expenses: pendingExpenses
+        }]);
+        if (!error) { setExpenses([]); setCreditCardStatement(null); await loadClaims(); alert('✅ Submitted!'); }
+        else alert('❌ Failed');
+      }
     } catch { alert('❌ Failed'); }
     setLoading(false);
   };
+
+  // ============================================
+  // ADMIN ACTIONS
+  // ============================================
+  const handleRequestChanges = async (claimId, comment) => {
+    setLoading(true);
+    await supabase.from('claims').update({ 
+      status: 'changes_requested', 
+      reviewed_by: currentUser.name,
+      admin_comment: comment,
+      reviewed_at: new Date().toISOString()
+    }).eq('id', claimId);
+    await loadClaims();
+    setSelectedClaim(null);
+    setShowRequestChanges(false);
+    setChangeRequestComment('');
+    setLoading(false);
+    alert('✅ Sent back to employee for changes');
+  };
+
+  const handleApprove = async (id) => { 
+    setLoading(true); 
+    await supabase.from('claims').update({ status: 'approved', reviewed_by: currentUser.name, reviewed_at: new Date().toISOString() }).eq('id', id); 
+    await loadClaims(); 
+    setSelectedClaim(null); 
+    setLoading(false); 
+  };
+  
+  const handleReject = async (id) => { 
+    setLoading(true); 
+    await supabase.from('claims').update({ status: 'rejected', reviewed_by: currentUser.name, reviewed_at: new Date().toISOString() }).eq('id', id); 
+    await loadClaims(); 
+    setSelectedClaim(null); 
+    setLoading(false); 
+  };
+
+  // ============================================
+  // EDIT CLAIM MODAL (Admin)
+  // ============================================
+  const EditClaimModal = ({ claim, onClose }) => {
+    const [editedExpenses, setEditedExpenses] = useState(claim.expenses || []);
+    const [saving, setSaving] = useState(false);
+
+    const updateExpense = (idx, field, value) => {
+      setEditedExpenses(prev => prev.map((e, i) => i === idx ? { ...e, [field]: value } : e));
+    };
+
+    const deleteExpense = (idx) => {
+      setEditedExpenses(prev => prev.filter((_, i) => i !== idx));
+    };
+
+    const handleSaveEdits = async () => {
+      setSaving(true);
+      const newTotal = editedExpenses.reduce((sum, e) => sum + parseFloat(e.reimbursementAmount || e.amount || 0), 0);
+      await supabase.from('claims').update({
+        expenses: editedExpenses,
+        total_amount: newTotal,
+        item_count: editedExpenses.length,
+        edited_by: currentUser.name,
+        edited_at: new Date().toISOString()
+      }).eq('id', claim.id);
+      await loadClaims();
+      setSaving(false);
+      onClose();
+      alert('✅ Changes saved');
+    };
+
+    return (
+      <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50">
+        <div className="bg-white rounded-2xl max-w-4xl w-full max-h-[90vh] overflow-hidden shadow-2xl">
+          <div className="bg-gradient-to-r from-purple-600 to-indigo-600 text-white p-5 flex justify-between items-center">
+            <div>
+              <h2 className="text-lg font-bold">✏️ Edit Claim</h2>
+              <p className="text-purple-200 text-sm">{claim.user_name} • {claim.claim_number}</p>
+            </div>
+            <button onClick={onClose} className="w-8 h-8 rounded-full bg-white/20">✕</button>
+          </div>
+
+          <div className="p-6 overflow-y-auto max-h-[calc(90vh-180px)]">
+            <div className="space-y-4">
+              {editedExpenses.map((exp, idx) => (
+                <div key={idx} className="border-2 border-slate-200 rounded-xl p-4">
+                  <div className="flex justify-between items-start mb-3">
+                    <span className="bg-blue-100 text-blue-700 font-bold px-3 py-1 rounded-lg">{exp.ref}</span>
+                    <button onClick={() => deleteExpense(idx)} className="text-red-500 hover:text-red-700 text-sm">🗑️ Delete</button>
+                  </div>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-500 mb-1">Merchant</label>
+                      <input type="text" className="w-full p-2 border rounded-lg text-sm" value={exp.merchant} onChange={e => updateExpense(idx, 'merchant', e.target.value)} />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-500 mb-1">Amount ({claim.currency})</label>
+                      <input type="number" step="0.01" className="w-full p-2 border rounded-lg text-sm" value={exp.reimbursementAmount || exp.amount} onChange={e => updateExpense(idx, 'reimbursementAmount', parseFloat(e.target.value))} />
+                    </div>
+                    <div className="col-span-2">
+                      <label className="block text-xs font-semibold text-slate-500 mb-1">Description</label>
+                      <input type="text" className="w-full p-2 border rounded-lg text-sm" value={exp.description} onChange={e => updateExpense(idx, 'description', e.target.value)} />
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            <div className="mt-6 bg-slate-100 p-4 rounded-xl">
+              <div className="flex justify-between items-center">
+                <span className="font-bold">New Total:</span>
+                <span className="font-bold text-xl text-blue-700">
+                  {claim.currency} {editedExpenses.reduce((sum, e) => sum + parseFloat(e.reimbursementAmount || e.amount || 0), 0).toFixed(2)}
+                </span>
+              </div>
+            </div>
+          </div>
+
+          <div className="p-4 border-t bg-slate-50 flex gap-3">
+            <button onClick={onClose} className="flex-1 py-3 rounded-xl border-2 border-slate-300 font-semibold text-slate-600">Cancel</button>
+            <button onClick={handleSaveEdits} disabled={saving} className="flex-[2] py-3 rounded-xl bg-gradient-to-r from-purple-600 to-indigo-600 text-white font-semibold disabled:opacity-50">
+              {saving ? '⏳ Saving...' : '💾 Save Changes'}
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  // ============================================
+  // REQUEST CHANGES MODAL
+  // ============================================
+  const RequestChangesModal = ({ claim, onClose }) => (
+    <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50">
+      <div className="bg-white rounded-2xl max-w-md w-full shadow-2xl">
+        <div className="bg-gradient-to-r from-amber-500 to-orange-500 text-white p-5 flex justify-between items-center">
+          <h2 className="text-lg font-bold">📝 Request Changes</h2>
+          <button onClick={onClose} className="w-8 h-8 rounded-full bg-white/20">✕</button>
+        </div>
+        <div className="p-6">
+          <p className="text-slate-600 mb-4">Send this claim back to <strong>{claim.user_name}</strong> for corrections:</p>
+          <textarea
+            className="w-full p-3 border-2 border-slate-200 rounded-xl focus:border-amber-500 outline-none resize-none"
+            rows={4}
+            placeholder="Describe what needs to be corrected..."
+            value={changeRequestComment}
+            onChange={(e) => setChangeRequestComment(e.target.value)}
+          />
+        </div>
+        <div className="p-4 border-t bg-slate-50 flex gap-3">
+          <button onClick={onClose} className="flex-1 py-3 rounded-xl border-2 border-slate-300 font-semibold text-slate-600">Cancel</button>
+          <button 
+            onClick={() => handleRequestChanges(claim.id, changeRequestComment)} 
+            disabled={!changeRequestComment.trim() || loading}
+            className="flex-[2] py-3 rounded-xl bg-gradient-to-r from-amber-500 to-orange-500 text-white font-semibold disabled:opacity-50"
+          >
+            Send Back 📤
+          </button>
+        </div>
+      </div>
+    </div>
+  );
 
   // ============================================
   // TABS
   // ============================================
   const MyExpensesTab = () => {
     const myClaims = claims.filter(c => c.user_id === currentUser.id);
+    const returnedClaims = myClaims.filter(c => c.status === 'changes_requested');
     const userReimburseCurrency = getUserReimburseCurrency(currentUser);
     const groupedExpenses = pendingExpenses.reduce((acc, exp) => { if (!acc[exp.category]) acc[exp.category] = []; acc[exp.category].push(exp); return acc; }, {});
 
     return (
       <div className="space-y-4">
+        {/* Returned Claims Alert */}
+        {returnedClaims.length > 0 && (
+          <div className="bg-amber-50 border-2 border-amber-400 rounded-xl p-4">
+            <h3 className="font-bold text-amber-800 mb-2">⚠️ Changes Requested</h3>
+            {returnedClaims.map(claim => (
+              <div key={claim.id} className="bg-white rounded-lg p-3 mb-2">
+                <p className="font-semibold">{claim.claim_number}</p>
+                <p className="text-sm text-amber-700 mt-1">"{claim.admin_comment}"</p>
+                <p className="text-xs text-slate-500 mt-1">From: {claim.reviewed_by}</p>
+              </div>
+            ))}
+            <p className="text-sm text-amber-700 mt-2">Your expenses have been loaded for editing. Make corrections and resubmit.</p>
+          </div>
+        )}
+
         <div className="grid grid-cols-2 gap-4">
           <div className="bg-white rounded-2xl shadow-lg p-6 text-center">
             <div className="text-4xl font-bold text-slate-800">{pendingExpenses.length}</div>
@@ -1024,7 +1325,7 @@ export default function BerkeleyExpenseSystem() {
             <div className="space-y-2">
               {Object.entries(groupedExpenses).sort().map(([cat, exps]) => (
                 <div key={cat}>
-                  <p className="text-xs font-semibold text-slate-500 mb-2">{EXPENSE_CATEGORIES[cat].icon} {cat}. {EXPENSE_CATEGORIES[cat].name}</p>
+                  <p className="text-xs font-semibold text-slate-500 mb-2">{EXPENSE_CATEGORIES[cat]?.icon} {cat}. {EXPENSE_CATEGORIES[cat]?.name}</p>
                   {exps.map(exp => (
                     <div key={exp.id} className="flex items-center justify-between p-3 rounded-xl bg-slate-50 border mb-2">
                       <div className="flex-1">
@@ -1046,10 +1347,10 @@ export default function BerkeleyExpenseSystem() {
         </div>
 
         <div className="bg-white rounded-2xl shadow-lg p-6">
-          <h3 className="font-bold text-slate-800 mb-4">📁 Submitted ({myClaims.length})</h3>
-          {myClaims.length === 0 ? <p className="text-center text-slate-400 py-8">None yet</p> : (
+          <h3 className="font-bold text-slate-800 mb-4">📁 My Claims ({myClaims.length})</h3>
+          {myClaims.filter(c => c.status !== 'changes_requested').length === 0 ? <p className="text-center text-slate-400 py-8">None yet</p> : (
             <div className="space-y-2">
-              {myClaims.map(claim => (
+              {myClaims.filter(c => c.status !== 'changes_requested').map(claim => (
                 <div key={claim.id} className="flex items-center justify-between p-4 rounded-xl bg-slate-50 border">
                   <div>
                     <span className="font-semibold">{claim.claim_number}</span>
@@ -1073,13 +1374,11 @@ export default function BerkeleyExpenseSystem() {
     const visibleClaims = getVisibleClaims();
     const pendingClaims = visibleClaims.filter(c => c.status === 'pending_review');
 
-    const handleApprove = async (id) => { setLoading(true); await supabase.from('claims').update({ status: 'approved', reviewed_by: currentUser.name }).eq('id', id); await loadClaims(); setSelectedClaim(null); setLoading(false); };
-    const handleReject = async (id) => { setLoading(true); await supabase.from('claims').update({ status: 'rejected', reviewed_by: currentUser.name }).eq('id', id); await loadClaims(); setSelectedClaim(null); setLoading(false); };
-
     return (
       <div className="space-y-4">
-        <div className="grid grid-cols-3 gap-4">
+        <div className="grid grid-cols-4 gap-4">
           <div className="bg-white rounded-2xl shadow-lg p-5 text-center"><div className="text-3xl font-bold text-amber-500">{pendingClaims.length}</div><div className="text-xs text-slate-500">Pending</div></div>
+          <div className="bg-white rounded-2xl shadow-lg p-5 text-center"><div className="text-3xl font-bold text-orange-500">{visibleClaims.filter(c => c.status === 'changes_requested').length}</div><div className="text-xs text-slate-500">Returned</div></div>
           <div className="bg-white rounded-2xl shadow-lg p-5 text-center"><div className="text-3xl font-bold text-green-500">{visibleClaims.filter(c => c.status === 'approved').length}</div><div className="text-xs text-slate-500">Approved</div></div>
           <div className="bg-white rounded-2xl shadow-lg p-5 text-center"><div className="text-3xl font-bold text-red-500">{visibleClaims.filter(c => c.status === 'rejected').length}</div><div className="text-xs text-slate-500">Rejected</div></div>
         </div>
@@ -1101,6 +1400,7 @@ export default function BerkeleyExpenseSystem() {
           )}
         </div>
 
+        {/* Selected Claim Detail */}
         {selectedClaim && (
           <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50" onClick={() => setSelectedClaim(null)}>
             <div className="bg-white rounded-2xl max-w-2xl w-full max-h-[90vh] overflow-auto" onClick={e => e.stopPropagation()}>
@@ -1113,7 +1413,9 @@ export default function BerkeleyExpenseSystem() {
                   <div className="bg-slate-50 rounded-xl p-4"><div className="text-sm text-slate-500">Total</div><div className="text-2xl font-bold">{formatCurrency(selectedClaim.total_amount, selectedClaim.currency)}</div></div>
                   <div className="bg-slate-50 rounded-xl p-4"><div className="text-sm text-slate-500">Items</div><div className="text-2xl font-bold">{selectedClaim.item_count}</div></div>
                 </div>
+                
                 <button onClick={() => handleDownloadPDF(selectedClaim)} className="w-full bg-green-600 text-white py-3 rounded-xl font-semibold mb-4">📥 Download PDF</button>
+                
                 {selectedClaim.expenses?.map((exp, i) => (
                   <div key={i} className="flex justify-between py-2 border-b">
                     <span><span className="bg-blue-100 text-blue-700 text-xs px-2 py-0.5 rounded mr-2">{exp.ref}</span>{exp.merchant}</span>
@@ -1121,15 +1423,25 @@ export default function BerkeleyExpenseSystem() {
                   </div>
                 ))}
               </div>
+              
               {selectedClaim.status === 'pending_review' && (
-                <div className="p-4 border-t bg-slate-50 flex gap-3">
-                  <button onClick={() => handleReject(selectedClaim.id)} disabled={loading} className="flex-1 py-3 rounded-xl bg-red-500 text-white font-semibold disabled:opacity-50">Reject</button>
-                  <button onClick={() => handleApprove(selectedClaim.id)} disabled={loading} className="flex-[2] py-3 rounded-xl bg-green-600 text-white font-semibold disabled:opacity-50">Approve ✓</button>
+                <div className="p-4 border-t bg-slate-50 space-y-3">
+                  <div className="flex gap-3">
+                    <button onClick={() => { setEditingClaim(selectedClaim); setSelectedClaim(null); }} className="flex-1 py-3 rounded-xl bg-purple-500 text-white font-semibold">✏️ Edit</button>
+                    <button onClick={() => { setShowRequestChanges(true); }} className="flex-1 py-3 rounded-xl bg-amber-500 text-white font-semibold">📝 Request Changes</button>
+                  </div>
+                  <div className="flex gap-3">
+                    <button onClick={() => handleReject(selectedClaim.id)} disabled={loading} className="flex-1 py-3 rounded-xl bg-red-500 text-white font-semibold disabled:opacity-50">Reject</button>
+                    <button onClick={() => handleApprove(selectedClaim.id)} disabled={loading} className="flex-[2] py-3 rounded-xl bg-green-600 text-white font-semibold disabled:opacity-50">Approve ✓</button>
+                  </div>
                 </div>
               )}
             </div>
           </div>
         )}
+
+        {editingClaim && <EditClaimModal claim={editingClaim} onClose={() => setEditingClaim(null)} />}
+        {showRequestChanges && selectedClaim && <RequestChangesModal claim={selectedClaim} onClose={() => setShowRequestChanges(false)} />}
       </div>
     );
   };
@@ -1140,12 +1452,9 @@ export default function BerkeleyExpenseSystem() {
     <div className="min-h-screen bg-gradient-to-br from-slate-100 to-slate-200">
       <header className="bg-gradient-to-r from-slate-900 to-slate-800 text-white px-4 py-3 shadow-lg sticky top-0 z-40">
         <div className="max-w-3xl mx-auto flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 bg-gradient-to-br from-blue-600 to-indigo-600 rounded-xl flex items-center justify-center font-bold shadow-lg">B</div>
-            <div>
-              <div className="font-semibold text-sm">Berkeley Expenses</div>
-              <div className="text-xs text-slate-400">{userOffice?.name} • {getUserReimburseCurrency(currentUser)}</div>
-            </div>
+          <div>
+            <div className="font-semibold text-sm">Berkeley Expenses</div>
+            <div className="text-xs text-slate-400">{userOffice?.name} • {getUserReimburseCurrency(currentUser)}</div>
           </div>
           <div className="flex items-center gap-3">
             <div className="text-right hidden sm:block">
