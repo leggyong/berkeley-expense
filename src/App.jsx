@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 
 /*
  * BERKELEY INTERNATIONAL EXPENSE MANAGEMENT SYSTEM
- * Version: 2.5 - Draft Persistence + Status Display + PDF Fix
+ * Version: 2.7 - Duplicate Check + Per Pax in PDF
  */
 const SUPABASE_URL = 'https://wlhoyjsicvkncfjbexoi.supabase.co';
 const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IndsaG95anNpY3ZrbmNmamJleG9pIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzAyNzIyMzcsImV4cCI6MjA4NTg0ODIzN30.AB-W5DjcmCl6fnWiQ2reD0rgDIJiMCGymc994fSJplw';
@@ -379,7 +379,15 @@ const StatementAnnotator = ({ image, expenses, existingAnnotations = [], onSave,
   );
 };
 export default function BerkeleyExpenseSystem() {
-  const [currentUser, setCurrentUser] = useState(null);
+  // Try to restore user from localStorage on initial load
+  const [currentUser, setCurrentUser] = useState(() => {
+    try {
+      const saved = localStorage.getItem('berkeley_current_user');
+      return saved ? JSON.parse(saved) : null;
+    } catch (e) {
+      return null;
+    }
+  });
   const [expenses, setExpenses] = useState([]);
   const [claims, setClaims] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -507,7 +515,13 @@ export default function BerkeleyExpenseSystem() {
       const isCNY = exp.currency === 'CNY';
       // Admin notes shown in amber color
       const adminNotesHTML = exp.adminNotes ? `<br><span style="color:#d97706;font-style:italic;">Notes: ${exp.adminNotes}</span>` : '';
-      receiptsHTML += `<div class="page receipt-page"><div class="receipt-header"><div class="receipt-ref">${exp.ref}</div><div class="receipt-info"><strong>${exp.merchant}</strong><br>Date: ${formatShortDate(exp.date)}<br>Original: ${formatCurrency(exp.amount, exp.currency)}<br>${exp.isForeignCurrency ? `Reimburse: ${formatCurrency(exp.reimbursementAmount, reimburseCurrency)}<br>` : ''}${exp.description || ''}${adminNotesHTML}</div></div>${imgs.map((img, idx) => `<div style="margin-bottom:10px;">${imgs.length > 1 && isCNY ? `<p style="font-size:10px;color:#666;margin-bottom:5px;">${idx === 0 ? '发票 Fapiao' : '小票 Xiaopiao'}</p>` : ''}<img src="${img}" class="receipt-img" /></div>`).join('')}${imgs.length === 0 ? '<div class="no-receipt">No receipt image</div>' : ''}${backchargeHTML}</div>`;
+      // Per pax calculation for entertaining expenses
+      const isEntertaining = ['E', 'F'].includes(exp.category);
+      const paxCount = parseInt(exp.numberOfPax) || 0;
+      const perPaxAmount = isEntertaining && paxCount > 0 ? (parseFloat(exp.reimbursementAmount || exp.amount) / paxCount) : 0;
+      const perPaxHTML = isEntertaining && paxCount > 0 ? `<br><span style="color:#6366f1;font-weight:bold;">👥 ${paxCount} pax • ${reimburseCurrency} ${perPaxAmount.toFixed(2)} per pax</span>` : '';
+      const attendeesHTML = exp.attendees ? `<br><span style="color:#059669;font-size:10px;">Attendees: ${exp.attendees.replace(/\n/g, ', ')}</span>` : '';
+      receiptsHTML += `<div class="page receipt-page"><div class="receipt-header"><div class="receipt-ref">${exp.ref}</div><div class="receipt-info"><strong>${exp.merchant}</strong><br>Date: ${formatShortDate(exp.date)}<br>Original: ${formatCurrency(exp.amount, exp.currency)}<br>${exp.isForeignCurrency ? `Reimburse: ${formatCurrency(exp.reimbursementAmount, reimburseCurrency)}<br>` : ''}${exp.description || ''}${perPaxHTML}${attendeesHTML}${adminNotesHTML}</div></div>${imgs.map((img, idx) => `<div style="margin-bottom:10px;">${imgs.length > 1 && isCNY ? `<p style="font-size:10px;color:#666;margin-bottom:5px;">${idx === 0 ? '发票 Fapiao' : '小票 Xiaopiao'}</p>` : ''}<img src="${img}" class="receipt-img" /></div>`).join('')}${imgs.length === 0 ? '<div class="no-receipt">No receipt image</div>' : ''}${backchargeHTML}</div>`;
     }
 
     // Detail tables with admin notes in description column
@@ -712,7 +726,18 @@ export default function BerkeleyExpenseSystem() {
   // LOGIN - No password hint shown
   if (!currentUser) {
     const handleSelectEmployee = (e) => { const user = EMPLOYEES.find(emp => emp.id === parseInt(e.target.value)); if (user) { setSelectedEmployee(user); setLoginStep('password'); setLoginError(''); setPasswordInput(''); } };
-    const handleLogin = () => { if (passwordInput === selectedEmployee.password) { setCurrentUser(selectedEmployee); setLoginStep('select'); setSelectedEmployee(null); setPasswordInput(''); setLoginError(''); } else { setLoginError('Incorrect password.'); } };
+    const handleLogin = () => { 
+      if (passwordInput === selectedEmployee.password) { 
+        setCurrentUser(selectedEmployee);
+        localStorage.setItem('berkeley_current_user', JSON.stringify(selectedEmployee));
+        setLoginStep('select'); 
+        setSelectedEmployee(null); 
+        setPasswordInput(''); 
+        setLoginError(''); 
+      } else { 
+        setLoginError('Incorrect password.'); 
+      } 
+    };
     return (
       <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 flex items-center justify-center p-4">
         <div className="bg-white rounded-3xl shadow-2xl p-8 max-w-md w-full">
@@ -731,7 +756,7 @@ export default function BerkeleyExpenseSystem() {
               <div className="flex gap-3 pt-2"><button onClick={() => { setLoginStep('select'); setSelectedEmployee(null); }} className="flex-1 py-3 rounded-xl border-2 border-slate-300 font-semibold text-slate-600">← Back</button><button onClick={handleLogin} className="flex-[2] py-3 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 text-white font-semibold shadow-lg">Login 🔐</button></div>
             </div>
           )}
-          <p className="text-center text-xs text-slate-400 mt-8">v2.5</p>
+          <p className="text-center text-xs text-slate-400 mt-8">v2.7</p>
         </div>
       </div>
     );
@@ -743,7 +768,7 @@ export default function BerkeleyExpenseSystem() {
     const [receiptPreview2, setReceiptPreview2] = useState(editExpense?.receiptPreview2 || null);
     const [showFullImage, setShowFullImage] = useState(null);
     const userReimburseCurrency = getUserReimburseCurrency(currentUser);
-    const [formData, setFormData] = useState(editExpense ? { merchant: editExpense.merchant || '', amount: editExpense.amount || '', currency: editExpense.currency || userOffice?.currency || 'SGD', date: editExpense.date || new Date().toISOString().split('T')[0], category: editExpense.category || 'C', subcategory: editExpense.subcategory || 'Taxis', description: editExpense.description || '', attendees: editExpense.attendees || '', reimbursementAmount: editExpense.reimbursementAmount || '', hasBackcharge: editExpense.hasBackcharge || false, backcharges: editExpense.backcharges || [] } : { merchant: '', amount: '', currency: userOffice?.currency || 'SGD', date: new Date().toISOString().split('T')[0], category: 'C', subcategory: 'Taxis', description: '', attendees: '', reimbursementAmount: '', hasBackcharge: false, backcharges: [] });
+    const [formData, setFormData] = useState(editExpense ? { merchant: editExpense.merchant || '', amount: editExpense.amount || '', currency: editExpense.currency || userOffice?.currency || 'SGD', date: editExpense.date || new Date().toISOString().split('T')[0], category: editExpense.category || 'C', subcategory: editExpense.subcategory || 'Taxis', description: editExpense.description || '', attendees: editExpense.attendees || '', numberOfPax: editExpense.numberOfPax || '', reimbursementAmount: editExpense.reimbursementAmount || '', hasBackcharge: editExpense.hasBackcharge || false, backcharges: editExpense.backcharges || [] } : { merchant: '', amount: '', currency: userOffice?.currency || 'SGD', date: new Date().toISOString().split('T')[0], category: 'C', subcategory: 'Taxis', description: '', attendees: '', numberOfPax: '', reimbursementAmount: '', hasBackcharge: false, backcharges: [] });
     const isForeignCurrency = formData.currency !== userReimburseCurrency;
     const isCNY = formData.currency === 'CNY';
     const handleFileChange = (e, isSecond = false) => { const file = e.target.files[0]; if (file) { const reader = new FileReader(); reader.onloadend = () => { if (isSecond) setReceiptPreview2(reader.result); else setReceiptPreview(reader.result); }; reader.readAsDataURL(file); if (!isSecond) setStep(2); } };
@@ -752,13 +777,52 @@ export default function BerkeleyExpenseSystem() {
     const removeBackcharge = (idx) => setFormData(prev => ({ ...prev, backcharges: prev.backcharges.filter((_, i) => i !== idx) }));
     const backchargeTotal = formData.backcharges.reduce((sum, bc) => sum + (parseFloat(bc.percentage) || 0), 0);
     const backchargeValid = !formData.hasBackcharge || (formData.backcharges.length > 0 && backchargeTotal >= 99.5 && backchargeTotal <= 100.5);
+    
+    // Check for duplicate invoice
+    const checkDuplicate = () => {
+      const checkDate = formData.date;
+      const checkAmount = parseFloat(formData.amount);
+      const checkCurrency = formData.currency;
+      
+      // Check in current pending expenses
+      const duplicateInPending = expenses.filter(e => e.id !== editExpense?.id).find(e => 
+        e.date === checkDate && 
+        parseFloat(e.amount) === checkAmount && 
+        e.currency === checkCurrency
+      );
+      if (duplicateInPending) return { found: true, where: 'pending expenses', ref: duplicateInPending.ref };
+      
+      // Check in submitted claims
+      for (const claim of claims) {
+        if (claim.expenses) {
+          const duplicateInClaim = claim.expenses.find(e => 
+            e.date === checkDate && 
+            parseFloat(e.amount) === checkAmount && 
+            e.currency === checkCurrency
+          );
+          if (duplicateInClaim) return { found: true, where: `claim ${claim.claim_number}`, ref: duplicateInClaim.ref };
+        }
+      }
+      return { found: false };
+    };
+    
     const handleSave = () => {
+      // Check for duplicates
+      const duplicate = checkDuplicate();
+      if (duplicate.found) {
+        const proceed = window.confirm(`⚠️ Possible duplicate detected!\n\nAn expense with the same date (${formData.date}), amount (${formData.currency} ${formData.amount}), and currency was found in ${duplicate.where} (${duplicate.ref}).\n\nDo you still want to save this expense?`);
+        if (!proceed) return;
+      }
+      
       if (editExpense) { setExpenses(prev => prev.map(e => e.id === editExpense.id ? { ...e, ...formData, amount: parseFloat(formData.amount), reimbursementAmount: isForeignCurrency ? parseFloat(formData.reimbursementAmount) : parseFloat(formData.amount), receiptPreview: receiptPreview || e.receiptPreview, receiptPreview2: isCNY ? (receiptPreview2 || e.receiptPreview2) : null, isForeignCurrency } : e)); }
       else { const ref = getNextRef(formData.category); setExpenses(prev => [...prev, { id: Date.now(), ref, ...formData, amount: parseFloat(formData.amount), reimbursementAmount: isForeignCurrency ? parseFloat(formData.reimbursementAmount) : parseFloat(formData.amount), receiptPreview, receiptPreview2: isCNY ? receiptPreview2 : null, status: 'draft', isForeignCurrency, isOld: isOlderThan2Months(formData.date), createdAt: new Date().toISOString() }]); }
       onClose();
     };
     const needsAttendees = EXPENSE_CATEGORIES[formData.category]?.requiresAttendees;
-    const canSave = formData.merchant && formData.amount && formData.date && formData.description && (!needsAttendees || formData.attendees) && (!isForeignCurrency || formData.reimbursementAmount) && backchargeValid;
+    const paxCount = parseInt(formData.numberOfPax) || 0;
+    const attendeeLines = formData.attendees ? formData.attendees.split('\n').filter(line => line.trim().length > 0) : [];
+    const attendeePaxMatch = !needsAttendees || (paxCount > 0 && paxCount === attendeeLines.length);
+    const canSave = formData.merchant && formData.amount && formData.date && formData.description && (!needsAttendees || (formData.attendees && formData.numberOfPax)) && (!isForeignCurrency || formData.reimbursementAmount) && backchargeValid && attendeePaxMatch;
 
     return (
       <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-50">
@@ -782,7 +846,34 @@ export default function BerkeleyExpenseSystem() {
                 <div className="grid grid-cols-2 gap-4"><input type="date" className="p-3 border-2 border-slate-200 rounded-xl" value={formData.date} onChange={e => setFormData(prev => ({ ...prev, date: e.target.value }))} /><select className="p-3 border-2 border-slate-200 rounded-xl bg-white" value={formData.category} onChange={e => setFormData(prev => ({ ...prev, category: e.target.value, subcategory: EXPENSE_CATEGORIES[e.target.value].subcategories[0] }))}>{Object.entries(EXPENSE_CATEGORIES).map(([key, val]) => <option key={key} value={key}>{val.icon} {key}. {val.name}</option>)}</select></div>
                 <select className="w-full p-3 border-2 border-slate-200 rounded-xl bg-white" value={formData.subcategory} onChange={e => setFormData(prev => ({ ...prev, subcategory: e.target.value }))}>{EXPENSE_CATEGORIES[formData.category].subcategories.map(sub => <option key={sub} value={sub}>{sub}</option>)}</select>
                 <input type="text" className="w-full p-3 border-2 border-slate-200 rounded-xl" placeholder="Description *" value={formData.description} onChange={e => setFormData(prev => ({ ...prev, description: e.target.value }))} />
-                {needsAttendees && (<textarea className="w-full p-3 border-2 border-slate-200 rounded-xl resize-none" rows={2} placeholder="Attendees (Name & Company) *" value={formData.attendees} onChange={e => setFormData(prev => ({ ...prev, attendees: e.target.value }))} />)}
+                {needsAttendees && (
+                  <div className="space-y-3">
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Number of Pax *</label>
+                      <input type="number" min="1" className="w-full p-3 border-2 border-slate-200 rounded-xl" placeholder="e.g. 4" value={formData.numberOfPax} onChange={e => setFormData(prev => ({ ...prev, numberOfPax: e.target.value }))} />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Attendees *</label>
+                      <textarea className="w-full p-3 border-2 border-slate-200 rounded-xl resize-none" rows={3} placeholder="Enter each attendee on a new line:&#10;John Smith - Berkeley&#10;Jane Doe - ABC Corp&#10;Mike Lee - XYZ Ltd" value={formData.attendees} onChange={e => setFormData(prev => ({ ...prev, attendees: e.target.value }))} />
+                      <p className="text-xs text-slate-400 mt-1">Format: Name - Company (one per line)</p>
+                    </div>
+                    {formData.numberOfPax && formData.attendees && (() => {
+                      const paxCount = parseInt(formData.numberOfPax) || 0;
+                      const attendeeLines = formData.attendees.split('\n').filter(line => line.trim().length > 0);
+                      const attendeeCount = attendeeLines.length;
+                      const isMatch = paxCount === attendeeCount;
+                      return (
+                        <div className={`p-3 rounded-xl text-sm ${isMatch ? 'bg-green-50 border border-green-300 text-green-700' : 'bg-amber-50 border border-amber-300 text-amber-700'}`}>
+                          {isMatch ? (
+                            <span>✅ {attendeeCount} attendees listed matches {paxCount} pax</span>
+                          ) : (
+                            <span>⚠️ You entered {paxCount} pax but listed {attendeeCount} attendee{attendeeCount !== 1 ? 's' : ''}. Please check.</span>
+                          )}
+                        </div>
+                      );
+                    })()}
+                  </div>
+                )}
                 <div className="bg-blue-50 border-2 border-blue-200 rounded-xl p-4">
                   <label className="flex items-center gap-2 cursor-pointer mb-3"><input type="checkbox" checked={formData.hasBackcharge} onChange={e => setFormData(prev => ({ ...prev, hasBackcharge: e.target.checked, backcharges: e.target.checked ? prev.backcharges : [] }))} className="w-5 h-5" /><span className="font-semibold text-blue-800">📊 Backcharge to Development(s)</span></label>
                   {formData.hasBackcharge && (<div className="space-y-3">{formData.backcharges.map((bc, idx) => (<div key={idx} className="flex gap-2 items-center"><select className="flex-1 p-2 border rounded-lg text-sm bg-white" value={bc.development} onChange={e => updateBackcharge(idx, 'development', e.target.value)}><option value="">Select development</option>{DEVELOPMENTS.map(dev => <option key={dev} value={dev}>{dev}</option>)}</select><input type="number" step="0.1" className="w-20 p-2 border rounded-lg text-center text-sm" placeholder="%" value={bc.percentage} onChange={e => updateBackcharge(idx, 'percentage', e.target.value)} /><span className="text-sm">%</span><button onClick={() => removeBackcharge(idx)} className="text-red-500 p-1">✕</button></div>))}<button onClick={addBackcharge} className="text-blue-600 text-sm font-medium">+ Add Development</button>{formData.backcharges.length > 0 && (<div className={`text-sm font-medium p-2 rounded ${backchargeValid ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>Total: {backchargeTotal.toFixed(1)}% {backchargeValid ? '✓' : '(~100% required)'}</div>)}</div>)}
@@ -968,7 +1059,15 @@ export default function BerkeleyExpenseSystem() {
       <header className="bg-gradient-to-r from-slate-900 to-slate-800 text-white px-4 py-3 shadow-lg sticky top-0 z-40">
         <div className="max-w-3xl mx-auto flex items-center justify-between">
           <div><div className="font-semibold text-sm">Berkeley Expenses</div><div className="text-xs text-slate-400">{userOffice?.name} • {getUserReimburseCurrency(currentUser)}</div></div>
-          <div className="flex items-center gap-3"><div className="text-right hidden sm:block"><div className="text-sm font-medium">{currentUser.name.split(' ').slice(0, 2).join(' ')}</div><div className="text-xs text-slate-400 capitalize">{currentUser.role}</div></div><button onClick={() => { setCurrentUser(null); setExpenses([]); setAnnotatedStatements([]); setStatementAnnotations([]); setStatementImages([]); setActiveTab('my_expenses'); }} className="bg-white/10 px-3 py-2 rounded-lg text-xs font-medium">Logout</button></div>
+          <div className="flex items-center gap-3"><div className="text-right hidden sm:block"><div className="text-sm font-medium">{currentUser.name.split(' ').slice(0, 2).join(' ')}</div><div className="text-xs text-slate-400 capitalize">{currentUser.role}</div></div><button onClick={() => { 
+              localStorage.removeItem('berkeley_current_user');
+              setCurrentUser(null); 
+              setExpenses([]); 
+              setAnnotatedStatements([]); 
+              setStatementAnnotations([]); 
+              setStatementImages([]); 
+              setActiveTab('my_expenses'); 
+            }} className="bg-white/10 px-3 py-2 rounded-lg text-xs font-medium">Logout</button></div>
         </div>
       </header>
       {canReview && (<div className="bg-white border-b sticky top-14 z-30"><div className="max-w-3xl mx-auto flex"><button onClick={() => setActiveTab('my_expenses')} className={`flex-1 py-3 text-sm font-semibold border-b-2 ${activeTab === 'my_expenses' ? 'border-blue-600 text-blue-600' : 'border-transparent text-slate-500'}`}>📋 My Expenses</button><button onClick={() => setActiveTab('review')} className={`flex-1 py-3 text-sm font-semibold border-b-2 ${activeTab === 'review' ? 'border-blue-600 text-blue-600' : 'border-transparent text-slate-500'}`}>👀 Review{getReviewableClaims().length > 0 && <span className="ml-2 bg-amber-500 text-white text-xs px-2 py-0.5 rounded-full">{getReviewableClaims().length}</span>}</button></div></div>)}
