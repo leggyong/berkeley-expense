@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 
 /*
  * BERKELEY INTERNATIONAL EXPENSE MANAGEMENT SYSTEM
- * Version: 3.2 - Cathy Direct Submit + PDF Fixes + Backcharge Report + Mobile Gallery
+ * Version: 3.3 - PDF 1-page receipts + Mobile fixes + Cross-device sync
  */
 const SUPABASE_URL = 'https://wlhoyjsicvkncfjbexoi.supabase.co';
 const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IndsaG95anNpY3ZrbmNmamJleG9pIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzAyNzIyMzcsImV4cCI6MjA4NTg0ODIzN30.AB-W5DjcmCl6fnWiQ2reD0rgDIJiMCGymc994fSJplw';
@@ -375,49 +375,46 @@ const StatementAnnotator = ({ image, expenses, existingAnnotations = [], onSave,
 
   return (
     <div className="fixed inset-0 bg-black/90 flex flex-col z-[100]">
-      <div className="bg-gradient-to-r from-amber-500 to-orange-500 text-white p-4 flex justify-between items-center shrink-0">
-        <div><h2 className="text-lg font-bold">📝 Annotate Statement</h2><p className="text-amber-100 text-sm">Tap label → tap image. Drag corners to resize.</p></div>
+      <div className="bg-gradient-to-r from-amber-500 to-orange-500 text-white p-3 flex justify-between items-center shrink-0">
+        <div><h2 className="text-base font-bold">📝 Annotate Statement</h2><p className="text-amber-100 text-xs">Select label → tap on statement</p></div>
         <button onClick={onCancel} className="w-8 h-8 rounded-full bg-white/20">✕</button>
       </div>
-      <div className="flex-1 overflow-auto p-4">
-        <div className="max-w-4xl mx-auto">
-          <div className="bg-white rounded-xl p-4 mb-4">
-            <p className="font-semibold mb-3 text-sm">Select expense to place:</p>
-            <div className="flex flex-wrap gap-2">
-              {foreignExpenses.map(exp => {
-                const isPlaced = annotations.some(a => a.ref === exp.ref);
-                const isSelected = selectedLabel === exp.ref;
-                const reimburseCurrency = exp.reimbursementAmount ? 'SGD' : exp.currency;
-                return (
-                  <button key={exp.ref} onClick={() => setSelectedLabel(isSelected ? null : exp.ref)}
-                    className={`px-3 py-2 rounded-lg text-sm font-medium text-left ${isSelected ? 'bg-orange-500 text-white ring-2 ring-orange-300' : isPlaced ? 'bg-green-100 text-green-700 border-2 border-green-400' : 'bg-slate-100 text-slate-700'}`}>
-                    <div className="font-bold">{exp.ref} - {exp.merchant}</div>
-                    <div className={`text-xs ${isSelected ? 'text-orange-100' : isPlaced ? 'text-green-600' : 'text-slate-500'}`}>
-                      {exp.currency} {parseFloat(exp.amount).toFixed(2)} → SGD {parseFloat(exp.reimbursementAmount || exp.amount).toFixed(2)}
-                    </div>
-                    {isPlaced && <span className="ml-2 text-xs" onClick={(e) => { e.stopPropagation(); removeAnnotation(exp.ref); }}>✕</span>}
-                  </button>
-                );
-              })}
-            </div>
-            {untaggedExpenses.length > 0 && <div className="mt-3 bg-amber-50 border border-amber-300 rounded-lg p-2"><p className="text-amber-800 text-sm">⚠️ Untagged: {untaggedExpenses.map(e => e.ref).join(', ')}</p></div>}
-            {selectedLabel && <p className="mt-3 text-orange-600 font-medium text-sm">👆 Tap image to place {selectedLabel}</p>}
-          </div>
-          <div className="bg-white rounded-xl p-2 overflow-auto">
-            {imageLoaded && (
-              <canvas ref={canvasRef}
-                onMouseDown={handleStart} onMouseMove={handleMove} onMouseUp={handleEnd} onMouseLeave={handleEnd}
-                onTouchStart={handleStart} onTouchMove={handleMove} onTouchEnd={handleEnd}
-                className={`border-2 ${selectedLabel ? 'border-orange-400' : 'border-slate-300'} rounded-lg touch-none`}
-                style={{ cursor: dragging ? 'move' : resizing ? 'nwse-resize' : selectedLabel ? 'crosshair' : 'default' }}
-              />
-            )}
-          </div>
+      <div className="bg-white p-3 shrink-0 max-h-[35vh] overflow-auto">
+        <p className="font-semibold mb-2 text-sm">Select expense to place:</p>
+        <div className="flex flex-wrap gap-2">
+          {foreignExpenses.map(exp => {
+            const isPlaced = annotations.some(a => a.ref === exp.ref);
+            const isSelected = selectedLabel === exp.ref;
+            return (
+              <button key={exp.ref} onClick={() => setSelectedLabel(isSelected ? null : exp.ref)}
+                className={`px-2 py-1.5 rounded-lg text-xs font-medium text-left ${isSelected ? 'bg-orange-500 text-white ring-2 ring-orange-300' : isPlaced ? 'bg-green-100 text-green-700 border-2 border-green-400' : 'bg-slate-100 text-slate-700'}`}>
+                <div className="font-bold">{exp.ref} - {exp.merchant}</div>
+                <div className={`text-[10px] ${isSelected ? 'text-orange-100' : isPlaced ? 'text-green-600' : 'text-slate-500'}`}>
+                  {exp.currency} {parseFloat(exp.amount).toFixed(2)} → SGD {parseFloat(exp.reimbursementAmount || exp.amount).toFixed(2)}
+                </div>
+                {isPlaced && <span className="ml-1 text-xs" onClick={(e) => { e.stopPropagation(); removeAnnotation(exp.ref); }}>✕</span>}
+              </button>
+            );
+          })}
         </div>
+        {untaggedExpenses.length > 0 && <div className="mt-2 bg-amber-50 border border-amber-300 rounded-lg p-2"><p className="text-amber-800 text-xs">⚠️ Untagged: {untaggedExpenses.map(e => e.ref).join(', ')}</p></div>}
+        {selectedLabel && <p className="mt-2 text-orange-600 font-medium text-xs">👆 Tap image to place {selectedLabel}</p>}
       </div>
-      <div className="bg-slate-100 p-4 flex gap-3 justify-end shrink-0">
-        <button onClick={onCancel} className="px-6 py-3 rounded-xl border-2 border-slate-300 font-semibold">Cancel</button>
-        <button onClick={handleSave} className="px-6 py-3 rounded-xl bg-green-600 text-white font-semibold">Save ✓</button>
+      <div className="flex-1 overflow-auto bg-slate-800 p-2" style={{ WebkitOverflowScrolling: 'touch' }}>
+        {imageLoaded && (
+          <canvas ref={canvasRef}
+            onMouseDown={handleStart} onMouseMove={handleMove} onMouseUp={handleEnd} onMouseLeave={handleEnd}
+            onTouchStart={(e) => { if (selectedLabel) { e.preventDefault(); handleStart(e); } else { const pos = getPos(e); const found = findAnnotationAt(pos); if (found) { e.preventDefault(); handleStart(e); } } }}
+            onTouchMove={(e) => { if (dragging || resizing) { e.preventDefault(); handleMove(e); } }}
+            onTouchEnd={handleEnd}
+            className={`border-2 ${selectedLabel ? 'border-orange-400' : 'border-slate-500'} rounded-lg`}
+            style={{ cursor: dragging ? 'move' : resizing ? 'nwse-resize' : selectedLabel ? 'crosshair' : 'default', display: 'block' }}
+          />
+        )}
+      </div>
+      <div className="bg-slate-100 p-3 flex gap-3 justify-end shrink-0">
+        <button onClick={onCancel} className="px-4 py-2 rounded-xl border-2 border-slate-300 font-semibold text-sm">Cancel</button>
+        <button onClick={handleSave} className="px-4 py-2 rounded-xl bg-green-600 text-white font-semibold text-sm">Save ✓</button>
       </div>
     </div>
   );
@@ -460,55 +457,90 @@ export default function BerkeleyExpenseSystem() {
   const [passwordInput, setPasswordInput] = useState('');
   const [loginError, setLoginError] = useState('');
 
-  // Load draft expenses from localStorage when user logs in
+  // Load draft expenses from database when user logs in
   useEffect(() => {
-    if (currentUser) {
-      const savedExpenses = localStorage.getItem(`draft_expenses_${currentUser.id}`);
-      if (savedExpenses) {
+    const loadDrafts = async () => {
+      if (currentUser) {
         try {
-          setExpenses(JSON.parse(savedExpenses));
-        } catch (e) {
-          console.error('Failed to load saved expenses');
+          // Try to load from Supabase first
+          const { data, error } = await supabase.from('user_drafts').select('*').eq('user_id', currentUser.id);
+          if (!error && data && data.length > 0) {
+            const draft = data[0];
+            if (draft.expenses) setExpenses(JSON.parse(draft.expenses));
+            if (draft.statements) setAnnotatedStatements(JSON.parse(draft.statements));
+          } else {
+            // Fallback to localStorage for migration
+            const savedExpenses = localStorage.getItem(`draft_expenses_${currentUser.id}`);
+            if (savedExpenses) {
+              try {
+                setExpenses(JSON.parse(savedExpenses));
+              } catch (e) {
+                console.error('Failed to load saved expenses');
+              }
+            }
+            const savedStatements = localStorage.getItem(`draft_statements_${currentUser.id}`);
+            if (savedStatements) {
+              try {
+                setAnnotatedStatements(JSON.parse(savedStatements));
+              } catch (e) {
+                console.error('Failed to load saved statements');
+              }
+            }
+          }
+        } catch (err) {
+          console.error('Error loading drafts:', err);
         }
       }
-      const savedStatements = localStorage.getItem(`draft_statements_${currentUser.id}`);
-      if (savedStatements) {
-        try {
-          setAnnotatedStatements(JSON.parse(savedStatements));
-        } catch (e) {
-          console.error('Failed to load saved statements');
-        }
-      }
-    }
+    };
+    loadDrafts();
   }, [currentUser]);
 
-  // Save draft expenses to localStorage whenever they change
+  // Save draft expenses to database whenever they change (debounced)
   useEffect(() => {
-    try {
-      if (currentUser && expenses && expenses.length > 0) {
-        localStorage.setItem(`draft_expenses_${currentUser.id}`, JSON.stringify(expenses));
+    const saveDrafts = async () => {
+      try {
+        if (currentUser) {
+          // Also save to localStorage as backup
+          if (expenses && expenses.length > 0) {
+            localStorage.setItem(`draft_expenses_${currentUser.id}`, JSON.stringify(expenses));
+          }
+          
+          // Save to Supabase for cross-device sync
+          const draftData = {
+            user_id: currentUser.id,
+            expenses: JSON.stringify(expenses || []),
+            statements: JSON.stringify(annotatedStatements || []),
+            updated_at: new Date().toISOString()
+          };
+          
+          // Check if draft exists
+          const { data: existing } = await supabase.from('user_drafts').select('id').eq('user_id', currentUser.id);
+          if (existing && existing.length > 0) {
+            await supabase.from('user_drafts').update(draftData).eq('user_id', currentUser.id);
+          } else {
+            await supabase.from('user_drafts').insert([draftData]);
+          }
+        }
+      } catch (err) {
+        console.error('Failed to save drafts:', err);
       }
-    } catch (err) {
-      console.error('Failed to save expenses to localStorage:', err);
-    }
-  }, [expenses, currentUser]);
+    };
+    
+    // Debounce saves to avoid too many requests
+    const timeout = setTimeout(saveDrafts, 1000);
+    return () => clearTimeout(timeout);
+  }, [expenses, annotatedStatements, currentUser]);
 
-  // Save annotated statements to localStorage
-  useEffect(() => {
-    try {
-      if (currentUser && annotatedStatements && annotatedStatements.length > 0) {
-        localStorage.setItem(`draft_statements_${currentUser.id}`, JSON.stringify(annotatedStatements));
-      }
-    } catch (err) {
-      console.error('Failed to save statements to localStorage:', err);
-    }
-  }, [annotatedStatements, currentUser]);
-
-  // Clear localStorage after successful submit
-  const clearDraftStorage = () => {
+  // Clear drafts after successful submit
+  const clearDraftStorage = async () => {
     if (currentUser) {
       localStorage.removeItem(`draft_expenses_${currentUser.id}`);
       localStorage.removeItem(`draft_statements_${currentUser.id}`);
+      try {
+        await supabase.from('user_drafts').delete().eq('user_id', currentUser.id);
+      } catch (err) {
+        console.error('Failed to clear drafts from database:', err);
+      }
     }
   };
 
@@ -596,20 +628,21 @@ export default function BerkeleyExpenseSystem() {
 
     let receiptsHTML = '';
     for (const exp of expenseList) {
-      const backchargeHTML = exp.hasBackcharge && exp.backcharges?.length > 0 ? `<div style="margin-top:8px;padding:8px;background:#e3f2fd;border-radius:4px;"><span style="color:#1565c0;font-weight:bold;">📊 Backcharges:</span><br>${exp.backcharges.map(bc => `<span style="color:#1976d2;">${bc.development}: ${bc.percentage}%</span>`).join(' | ')}</div>` : '';
       const imgs = [exp.receiptPreview, exp.receiptPreview2].filter(Boolean);
       const isCNY = exp.currency === 'CNY';
       // Admin notes shown in amber color
       const adminNotesHTML = exp.adminNotes ? `<br><span style="color:#d97706;font-style:italic;">Notes: ${exp.adminNotes}</span>` : '';
       // Duplicate warning
-      const duplicateHTML = exp.isPotentialDuplicate ? `<br><span style="background:#fef2f2;color:#dc2626;padding:2px 6px;border-radius:4px;font-weight:bold;font-size:10px;">⚠️ POTENTIAL DUPLICATE${exp.duplicateInfo ? ` - ${exp.duplicateInfo}` : ''}</span>` : '';
+      const duplicateHTML = exp.isPotentialDuplicate ? `<br><span style="background:#fef2f2;color:#dc2626;padding:2px 6px;border-radius:4px;font-weight:bold;font-size:9px;">⚠️ DUPLICATE${exp.duplicateInfo ? ` - ${exp.duplicateInfo}` : ''}</span>` : '';
       // Per pax calculation for entertaining expenses
       const isEntertaining = ['E', 'F'].includes(exp.category);
       const paxCount = parseInt(exp.numberOfPax) || 0;
       const perPaxAmount = isEntertaining && paxCount > 0 ? (parseFloat(exp.reimbursementAmount || exp.amount) / paxCount) : 0;
-      const perPaxHTML = isEntertaining && paxCount > 0 ? `<br><span style="color:#6366f1;font-weight:bold;">👥 ${paxCount} pax • ${reimburseCurrency} ${perPaxAmount.toFixed(2)} per pax</span>` : '';
-      const attendeesHTML = exp.attendees ? `<br><span style="color:#059669;font-size:10px;">Attendees: ${exp.attendees.replace(/\n/g, ', ')}</span>` : '';
-      receiptsHTML += `<div class="page receipt-page"><div class="receipt-header"><div class="receipt-ref">${exp.ref}</div><div class="receipt-info"><strong>${exp.merchant}</strong><br>Date: ${formatShortDate(exp.date)}<br>Original: ${formatCurrency(exp.amount, exp.currency)}<br>${exp.isForeignCurrency ? `Reimburse: ${formatCurrency(exp.reimbursementAmount, reimburseCurrency)}<br>` : ''}${exp.description || ''}${duplicateHTML}${perPaxHTML}${attendeesHTML}${adminNotesHTML}</div></div>${imgs.map((img, idx) => `<div style="margin-bottom:10px;">${imgs.length > 1 && isCNY ? `<p style="font-size:10px;color:#666;margin-bottom:5px;">${idx === 0 ? '发票 Fapiao' : '小票 Xiaopiao'}</p>` : ''}<img src="${img}" class="receipt-img" /></div>`).join('')}${imgs.length === 0 ? '<div class="no-receipt">No receipt image</div>' : ''}${backchargeHTML}</div>`;
+      const perPaxHTML = isEntertaining && paxCount > 0 ? `<br><span style="color:#6366f1;font-weight:bold;font-size:9px;">👥 ${paxCount} pax • ${reimburseCurrency} ${perPaxAmount.toFixed(2)} per pax</span>` : '';
+      const attendeesHTML = exp.attendees ? `<br><span style="color:#059669;font-size:9px;">Attendees: ${exp.attendees.replace(/\n/g, ', ')}</span>` : '';
+      // Backcharge inline on same page
+      const backchargeHTML = exp.hasBackcharge && exp.backcharges?.length > 0 ? `<div class="backcharge-inline"><strong style="color:#1565c0;">📊 Backcharges:</strong> ${exp.backcharges.map(bc => `${bc.development}: ${bc.percentage}%`).join(' | ')}</div>` : '';
+      receiptsHTML += `<div class="page receipt-page"><div class="receipt-header"><div class="receipt-ref">${exp.ref}</div><div class="receipt-info"><strong>${exp.merchant}</strong><br>Date: ${formatShortDate(exp.date)} | Original: ${formatCurrency(exp.amount, exp.currency)}${exp.isForeignCurrency ? ` | Reimburse: ${formatCurrency(exp.reimbursementAmount, reimburseCurrency)}` : ''}<br>${exp.description || ''}${duplicateHTML}${perPaxHTML}${attendeesHTML}${adminNotesHTML}</div></div>${imgs.map((img, idx) => `<div>${imgs.length > 1 && isCNY ? `<p style="font-size:9px;color:#666;margin:2px 0;">${idx === 0 ? '发票 Fapiao' : '小票 Xiaopiao'}</p>` : ''}<img src="${img}" class="receipt-img" /></div>`).join('')}${imgs.length === 0 ? '<div class="no-receipt">No receipt image</div>' : ''}${backchargeHTML}</div>`;
     }
 
     // Detail tables with admin notes in description column
@@ -641,7 +674,7 @@ export default function BerkeleyExpenseSystem() {
     const statementsArray = Array.isArray(statementImgs) ? statementImgs : (statementImgs ? [statementImgs] : []);
     const statementsHTML = statementsArray.map((img, idx) => `<div class="page statement-page"><div class="statement-container"><div class="statement-header-inline">💳 Credit Card Statement ${statementsArray.length > 1 ? `(${idx + 1} of ${statementsArray.length})` : ''}</div><img src="${img}" class="statement-img" /></div></div>`).join('');
 
-    const html = `<!DOCTYPE html><html><head><title>Expense Claim - ${claimNumber || 'Draft'}</title><style>*{margin:0;padding:0;box-sizing:border-box;}body{font-family:Arial,sans-serif;font-size:10px;color:#000;}@page{margin:10mm;size:A4;}.page{page-break-after:always;padding:8mm 10mm;}.page:last-child{page-break-after:avoid;}.header{text-align:center;margin-bottom:15px;border-bottom:2px solid #000;padding-bottom:10px;}.header h1{font-size:16px;font-weight:bold;margin-bottom:3px;}.header .company{font-size:11px;color:#666;}.info-box{border:1px solid #000;margin-bottom:15px;}.info-row{display:flex;border-bottom:1px solid #000;}.info-row:last-child{border-bottom:none;}.info-cell{flex:1;padding:5px 8px;border-right:1px solid #000;}.info-cell:last-child{border-right:none;}.info-label{font-size:9px;color:#666;}.info-value{font-weight:bold;}.expenses-section{border:1px solid #000;margin-bottom:15px;}.section-header{background:#f0f0f0;padding:5px 8px;font-weight:bold;border-bottom:1px solid #000;font-size:11px;}.category-header{background:#f8f8f8;padding:4px 8px;font-weight:bold;font-size:10px;border-bottom:1px solid #ccc;text-decoration:underline;}.expense-row{display:flex;border-bottom:1px solid #ddd;}.col-cat{width:25px;padding:3px 5px;font-weight:bold;}.col-name{width:100px;padding:3px 5px;text-decoration:underline;}.col-detail{flex:1;padding:3px 5px;}.col-amount{width:80px;padding:3px 5px;text-align:right;}.sub-row{display:flex;padding-left:125px;border-bottom:1px solid #eee;}.total-row{display:flex;background:#f0f0f0;border-top:2px solid #000;padding:8px;}.total-row .label{flex:1;font-weight:bold;font-size:11px;}.total-row .amount{width:100px;text-align:right;font-weight:bold;font-size:11px;border:1px solid #000;padding:3px 8px;}.signature-section{margin-top:20px;}.sig-row{display:flex;margin-bottom:15px;gap:20px;}.sig-field{flex:1;}.sig-label{font-size:9px;margin-bottom:3px;}.sig-line{border-bottom:1px solid #000;height:20px;}.receipt-page{padding:8mm 10mm;page-break-inside:avoid;}.receipt-header{background:#333;color:white;padding:10px;margin-bottom:8px;display:flex;align-items:center;}.receipt-ref{font-size:24px;font-weight:bold;margin-right:15px;min-width:45px;}.receipt-info{font-size:10px;line-height:1.5;}.receipt-img{max-width:100%;max-height:220mm;object-fit:contain;display:block;margin:0 auto;}.no-receipt{background:#f5f5f5;padding:30px;text-align:center;color:#999;}.statement-page{padding:5mm;page-break-inside:avoid;}.statement-container{}.statement-header-inline{background:#ff9800;color:white;padding:6px 10px;font-size:11px;font-weight:bold;text-align:center;margin:0 0 2px 0;}.statement-img{max-width:100%;max-height:270mm;object-fit:contain;display:block;margin:0 auto;}.detail-title{font-size:14px;text-align:center;margin-bottom:15px;font-weight:bold;}.detail-info{margin-bottom:10px;}.detail-note{font-style:italic;margin-bottom:15px;font-size:9px;text-decoration:underline;}.detail-table{width:100%;border-collapse:collapse;font-size:9px;}.detail-table th,.detail-table td{border:1px solid #999;padding:4px;text-align:center;}.detail-table th{background:#e0e0e0;font-weight:bold;}.detail-table td.desc{text-align:left;color:#1976d2;}.subtotal-row{background:#fff3cd;}.subtotal-row td{font-weight:bold;}.backcharge-section{margin-top:15px;border:2px solid #9c27b0;}.backcharge-header{background:#9c27b0;color:white;padding:8px;font-weight:bold;font-size:12px;}.backcharge-table{width:100%;border-collapse:collapse;font-size:10px;}.backcharge-table th,.backcharge-table td{border:1px solid #999;padding:6px;text-align:left;}.backcharge-table th{background:#e1bee7;}.backcharge-table .amount{text-align:right;font-weight:bold;}@media print{.page{padding:8mm;}body{-webkit-print-color-adjust:exact;print-color-adjust:exact;}}</style></head><body>
+    const html = `<!DOCTYPE html><html><head><title>Expense Claim - ${claimNumber || 'Draft'}</title><style>*{margin:0;padding:0;box-sizing:border-box;}body{font-family:Arial,sans-serif;font-size:10px;color:#000;}@page{margin:8mm;size:A4;}.page{page-break-after:always;padding:5mm 8mm;height:277mm;overflow:hidden;}.page:last-child{page-break-after:avoid;}.header{text-align:center;margin-bottom:15px;border-bottom:2px solid #000;padding-bottom:10px;}.header h1{font-size:16px;font-weight:bold;margin-bottom:3px;}.header .company{font-size:11px;color:#666;}.info-box{border:1px solid #000;margin-bottom:15px;}.info-row{display:flex;border-bottom:1px solid #000;}.info-row:last-child{border-bottom:none;}.info-cell{flex:1;padding:5px 8px;border-right:1px solid #000;}.info-cell:last-child{border-right:none;}.info-label{font-size:9px;color:#666;}.info-value{font-weight:bold;}.expenses-section{border:1px solid #000;margin-bottom:15px;}.section-header{background:#f0f0f0;padding:5px 8px;font-weight:bold;border-bottom:1px solid #000;font-size:11px;}.category-header{background:#f8f8f8;padding:4px 8px;font-weight:bold;font-size:10px;border-bottom:1px solid #ccc;text-decoration:underline;}.expense-row{display:flex;border-bottom:1px solid #ddd;}.col-cat{width:25px;padding:3px 5px;font-weight:bold;}.col-name{width:100px;padding:3px 5px;text-decoration:underline;}.col-detail{flex:1;padding:3px 5px;}.col-amount{width:80px;padding:3px 5px;text-align:right;}.sub-row{display:flex;padding-left:125px;border-bottom:1px solid #eee;}.total-row{display:flex;background:#f0f0f0;border-top:2px solid #000;padding:8px;}.total-row .label{flex:1;font-weight:bold;font-size:11px;}.total-row .amount{width:100px;text-align:right;font-weight:bold;font-size:11px;border:1px solid #000;padding:3px 8px;}.signature-section{margin-top:20px;}.sig-row{display:flex;margin-bottom:15px;gap:20px;}.sig-field{flex:1;}.sig-label{font-size:9px;margin-bottom:3px;}.sig-line{border-bottom:1px solid #000;height:20px;}.receipt-page{padding:5mm 8mm;}.receipt-header{background:#333;color:white;padding:8px;margin-bottom:5px;display:flex;align-items:flex-start;}.receipt-ref{font-size:20px;font-weight:bold;margin-right:12px;min-width:40px;}.receipt-info{font-size:9px;line-height:1.4;}.receipt-img{max-width:100%;max-height:200mm;object-fit:contain;display:block;margin:0 auto;}.no-receipt{background:#f5f5f5;padding:20px;text-align:center;color:#999;}.backcharge-inline{background:#e3f2fd;border:1px solid #1976d2;padding:6px 8px;margin-top:5px;border-radius:4px;font-size:9px;}.statement-page{padding:5mm;}.statement-container{}.statement-header-inline{background:#ff9800;color:white;padding:5px 10px;font-size:11px;font-weight:bold;text-align:center;margin:0;}.statement-img{max-width:100%;max-height:265mm;object-fit:contain;display:block;margin:0 auto;}.detail-title{font-size:14px;text-align:center;margin-bottom:15px;font-weight:bold;}.detail-info{margin-bottom:10px;}.detail-note{font-style:italic;margin-bottom:15px;font-size:9px;text-decoration:underline;}.detail-table{width:100%;border-collapse:collapse;font-size:9px;}.detail-table th,.detail-table td{border:1px solid #999;padding:4px;text-align:center;}.detail-table th{background:#e0e0e0;font-weight:bold;}.detail-table td.desc{text-align:left;color:#1976d2;}.subtotal-row{background:#fff3cd;}.subtotal-row td{font-weight:bold;}.backcharge-section{margin-top:15px;border:2px solid #9c27b0;}.backcharge-header{background:#9c27b0;color:white;padding:8px;font-weight:bold;font-size:12px;}.backcharge-table{width:100%;border-collapse:collapse;font-size:10px;}.backcharge-table th,.backcharge-table td{border:1px solid #999;padding:6px;text-align:left;}.backcharge-table th{background:#e1bee7;}.backcharge-table .amount{text-align:right;font-weight:bold;}@media print{.page{padding:5mm;}body{-webkit-print-color-adjust:exact;print-color-adjust:exact;}}</style></head><body>
     <div class="page"><div class="header"><h1>Motor & Expense Claim Form</h1><div class="company">${companyName}</div></div><div class="info-box"><div class="info-row"><div class="info-cell"><span class="info-label">Name</span><br><span class="info-value">${userName}</span></div><div class="info-cell"><span class="info-label">Month</span><br><span class="info-value">${claimMonth}</span></div></div><div class="info-row"><div class="info-cell"><span class="info-label">Claim Number</span><br><span class="info-value">${claimNumber || 'DRAFT'}</span></div><div class="info-cell"><span class="info-label">Reimbursement Currency</span><br><span class="info-value">${reimburseCurrency}</span></div></div></div><div class="expenses-section"><div class="section-header">Expenses claim</div><div class="category-header">Motor Vehicle Expenditure</div>${['A','B','C','D'].map(cat => { const c = EXPENSE_CATEGORIES[cat]; return `<div class="expense-row"><div class="col-cat">${cat}.</div><div class="col-name">${c.name}</div><div class="col-detail"></div><div class="col-amount"></div></div>${c.subcategories.map(sub => `<div class="sub-row"><div class="col-detail">${sub}</div><div class="col-amount">${reimburseCurrency} ${getSubcategoryTotal(cat,sub).toFixed(2)}</div></div>`).join('')}`; }).join('')}<div class="category-header">Business Expenditure</div>${['E','F','G','H','I','J'].map(cat => { const c = EXPENSE_CATEGORIES[cat]; return `<div class="expense-row"><div class="col-cat">${cat}.</div><div class="col-name">${c.name}</div><div class="col-detail"></div><div class="col-amount"></div></div>${c.subcategories.map(sub => `<div class="sub-row"><div class="col-detail">${sub}</div><div class="col-amount">${reimburseCurrency} ${getSubcategoryTotal(cat,sub).toFixed(2)}</div></div>`).join('')}`; }).join('')}</div><div class="total-row"><div class="label">Total expenses claimed</div><div class="amount">${reimburseCurrency} ${totalAmount.toFixed(2)}</div></div><div class="signature-section"><div class="sig-row"><div class="sig-field"><div class="sig-label">Signature of Claimant:</div><div class="sig-line" style="font-style:italic;padding-top:5px;">${userName}</div></div><div class="sig-field"><div class="sig-label">Date:</div><div class="sig-line" style="padding-top:5px;">${formatDate(submittedDate || new Date().toISOString())}</div></div></div><div class="sig-row"><div class="sig-field"><div class="sig-label">Authorised:</div><div class="sig-line" style="font-style:italic;padding-top:5px;">${level2ApprovedBy || ''}</div></div><div class="sig-field"><div class="sig-label">Date:</div><div class="sig-line" style="padding-top:5px;">${level2ApprovedAt ? formatDate(level2ApprovedAt) : ''}</div></div></div></div></div>
     ${travelDetailHTML}${entertainingDetailHTML}${otherDetailHTML}${backchargeReportHTML}${receiptsHTML}${statementsHTML}
     <script>window.onload=function(){window.print();setTimeout(function(){window.close();},500);};</script></body></html>`;
@@ -928,7 +961,7 @@ export default function BerkeleyExpenseSystem() {
               <div className="flex gap-3 pt-2"><button onClick={() => { setLoginStep('select'); setSelectedEmployee(null); }} className="flex-1 py-3 rounded-xl border-2 border-slate-300 font-semibold text-slate-600">← Back</button><button onClick={handleLogin} className="flex-[2] py-3 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 text-white font-semibold shadow-lg">Login 🔐</button></div>
             </div>
           )}
-          <p className="text-center text-xs text-slate-400 mt-8">v3.2</p>
+          <p className="text-center text-xs text-slate-400 mt-8">v3.3</p>
         </div>
       </div>
     );
@@ -1059,7 +1092,7 @@ export default function BerkeleyExpenseSystem() {
         <div className="bg-white rounded-2xl max-w-lg w-full max-h-[90vh] overflow-hidden shadow-2xl">
           <div className="bg-gradient-to-r from-blue-600 to-indigo-600 text-white p-5 flex justify-between items-center"><div><h2 className="text-lg font-bold">{editExpense ? '✏️ Edit' : '📸 Add'} Expense</h2><p className="text-blue-100 text-sm">Reimburse in {userReimburseCurrency}</p></div><button onClick={onClose} className="w-8 h-8 rounded-full bg-white/20">✕</button></div>
           <div className="p-6 overflow-y-auto max-h-[calc(90vh-180px)]">
-            {step === 1 && (<label className="block border-3 border-dashed border-slate-300 rounded-2xl p-8 text-center cursor-pointer hover:border-blue-500"><input type="file" accept="image/*" onChange={(e) => handleFileChange(e, false)} className="hidden" /><div className="text-5xl mb-4">📸</div><p className="font-semibold">Take photo or choose from gallery</p></label>)}
+            {step === 1 && (<div className="space-y-3"><label className="block border-3 border-dashed border-blue-400 bg-blue-50 rounded-2xl p-6 text-center cursor-pointer hover:border-blue-500"><input type="file" accept="image/*" capture="environment" onChange={(e) => handleFileChange(e, false)} className="hidden" /><div className="text-4xl mb-2">📷</div><p className="font-semibold text-blue-700">Take Photo</p><p className="text-xs text-slate-500">Open camera</p></label><label className="block border-3 border-dashed border-green-400 bg-green-50 rounded-2xl p-6 text-center cursor-pointer hover:border-green-500"><input type="file" accept="image/*" onChange={(e) => handleFileChange(e, false)} className="hidden" /><div className="text-4xl mb-2">🖼️</div><p className="font-semibold text-green-700">Choose from Gallery</p><p className="text-xs text-slate-500">Select existing photo</p></label></div>)}
             {step === 2 && (
               <div className="space-y-4">
                 {isCNY ? (
@@ -1371,10 +1404,14 @@ export default function BerkeleyExpenseSystem() {
       printWindow.document.close();
     };
     
+    // Office admins who can generate backcharge reports: Ann Low (805), Cathy Liu (306), Caroline Zhu (102), Christine (1002), Cherry Lai (505)
+    const BACKCHARGE_REPORT_ADMINS = [805, 306, 102, 1002, 505];
+    const canGenerateBackchargeReport = BACKCHARGE_REPORT_ADMINS.includes(currentUser.id);
+    
     return (
       <div className="space-y-4">
-        {/* Backcharge Report Generator - for office admins */}
-        {(currentUser.role === 'admin' || currentUser.role === 'finance') && (
+        {/* Backcharge Report Generator - for specific office admins only */}
+        {canGenerateBackchargeReport && (
           <div className="bg-white rounded-2xl shadow-lg p-6 border-2 border-purple-300">
             <h3 className="font-bold mb-4 text-purple-700">📊 Backcharge Report Generator</h3>
             <p className="text-xs text-slate-500 mb-4">Select a date range to generate a report of all backcharges approved in your office during that period.</p>
