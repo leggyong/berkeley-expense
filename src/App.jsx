@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 
 /*
  * BERKELEY INTERNATIONAL EXPENSE MANAGEMENT SYSTEM
- * Version: 3.3 - PDF 1-page receipts + Mobile fixes + Cross-device sync
+ * Version: 3.4 - Auto-sync on focus + Manual sync button
  */
 const SUPABASE_URL = 'https://wlhoyjsicvkncfjbexoi.supabase.co';
 const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IndsaG95anNpY3ZrbmNmamJleG9pIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzAyNzIyMzcsImV4cCI6MjA4NTg0ODIzN30.AB-W5DjcmCl6fnWiQ2reD0rgDIJiMCGymc994fSJplw';
@@ -458,41 +458,68 @@ export default function BerkeleyExpenseSystem() {
   const [loginError, setLoginError] = useState('');
 
   // Load draft expenses from database when user logs in
-  useEffect(() => {
-    const loadDrafts = async () => {
-      if (currentUser) {
-        try {
-          // Try to load from Supabase first
-          const { data, error } = await supabase.from('user_drafts').select('*').eq('user_id', currentUser.id);
-          if (!error && data && data.length > 0) {
-            const draft = data[0];
-            if (draft.expenses) setExpenses(JSON.parse(draft.expenses));
-            if (draft.statements) setAnnotatedStatements(JSON.parse(draft.statements));
-          } else {
-            // Fallback to localStorage for migration
-            const savedExpenses = localStorage.getItem(`draft_expenses_${currentUser.id}`);
-            if (savedExpenses) {
-              try {
-                setExpenses(JSON.parse(savedExpenses));
-              } catch (e) {
-                console.error('Failed to load saved expenses');
-              }
-            }
-            const savedStatements = localStorage.getItem(`draft_statements_${currentUser.id}`);
-            if (savedStatements) {
-              try {
-                setAnnotatedStatements(JSON.parse(savedStatements));
-              } catch (e) {
-                console.error('Failed to load saved statements');
-              }
-            }
+  const loadDrafts = async () => {
+    if (!currentUser) return;
+    try {
+      console.log('Loading drafts for user:', currentUser.id);
+      const { data, error } = await supabase.from('user_drafts').select('*').eq('user_id', currentUser.id);
+      console.log('Drafts response:', data, error);
+      if (!error && data && data.length > 0) {
+        const draft = data[0];
+        if (draft.expenses) {
+          const parsed = JSON.parse(draft.expenses);
+          if (parsed && parsed.length > 0) {
+            setExpenses(parsed);
+            console.log('Loaded expenses from DB:', parsed.length);
           }
-        } catch (err) {
-          console.error('Error loading drafts:', err);
+        }
+        if (draft.statements) {
+          const parsed = JSON.parse(draft.statements);
+          if (parsed && parsed.length > 0) {
+            setAnnotatedStatements(parsed);
+          }
+        }
+      } else {
+        // Fallback to localStorage for migration
+        const savedExpenses = localStorage.getItem(`draft_expenses_${currentUser.id}`);
+        if (savedExpenses) {
+          try {
+            const parsed = JSON.parse(savedExpenses);
+            setExpenses(parsed);
+            console.log('Loaded expenses from localStorage:', parsed.length);
+          } catch (e) {
+            console.error('Failed to load saved expenses');
+          }
+        }
+        const savedStatements = localStorage.getItem(`draft_statements_${currentUser.id}`);
+        if (savedStatements) {
+          try {
+            setAnnotatedStatements(JSON.parse(savedStatements));
+          } catch (e) {
+            console.error('Failed to load saved statements');
+          }
         }
       }
-    };
+    } catch (err) {
+      console.error('Error loading drafts:', err);
+    }
+  };
+
+  useEffect(() => {
     loadDrafts();
+  }, [currentUser]);
+
+  // Auto-sync when window gets focus (user switches back to tab)
+  useEffect(() => {
+    const handleFocus = () => {
+      if (currentUser) {
+        console.log('Window focused, syncing drafts...');
+        loadDrafts();
+        loadClaims();
+      }
+    };
+    window.addEventListener('focus', handleFocus);
+    return () => window.removeEventListener('focus', handleFocus);
   }, [currentUser]);
 
   // Save draft expenses to database whenever they change (debounced)
@@ -503,6 +530,8 @@ export default function BerkeleyExpenseSystem() {
           // Also save to localStorage as backup
           if (expenses && expenses.length > 0) {
             localStorage.setItem(`draft_expenses_${currentUser.id}`, JSON.stringify(expenses));
+          } else {
+            localStorage.removeItem(`draft_expenses_${currentUser.id}`);
           }
           
           // Save to Supabase for cross-device sync
@@ -513,12 +542,16 @@ export default function BerkeleyExpenseSystem() {
             updated_at: new Date().toISOString()
           };
           
+          console.log('Saving drafts to DB:', expenses?.length || 0, 'expenses');
+          
           // Check if draft exists
           const { data: existing } = await supabase.from('user_drafts').select('id').eq('user_id', currentUser.id);
           if (existing && existing.length > 0) {
-            await supabase.from('user_drafts').update(draftData).eq('user_id', currentUser.id);
+            const { error } = await supabase.from('user_drafts').update(draftData).eq('user_id', currentUser.id);
+            if (error) console.error('Update draft error:', error);
           } else {
-            await supabase.from('user_drafts').insert([draftData]);
+            const { error } = await supabase.from('user_drafts').insert([draftData]);
+            if (error) console.error('Insert draft error:', error);
           }
         }
       } catch (err) {
@@ -530,6 +563,15 @@ export default function BerkeleyExpenseSystem() {
     const timeout = setTimeout(saveDrafts, 1000);
     return () => clearTimeout(timeout);
   }, [expenses, annotatedStatements, currentUser]);
+
+  // Manual sync function
+  const handleManualSync = async () => {
+    setLoading(true);
+    await loadDrafts();
+    await loadClaims();
+    setLoading(false);
+    alert('✅ Synced!');
+  };
 
   // Clear drafts after successful submit
   const clearDraftStorage = async () => {
@@ -961,7 +1003,7 @@ export default function BerkeleyExpenseSystem() {
               <div className="flex gap-3 pt-2"><button onClick={() => { setLoginStep('select'); setSelectedEmployee(null); }} className="flex-1 py-3 rounded-xl border-2 border-slate-300 font-semibold text-slate-600">← Back</button><button onClick={handleLogin} className="flex-[2] py-3 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 text-white font-semibold shadow-lg">Login 🔐</button></div>
             </div>
           )}
-          <p className="text-center text-xs text-slate-400 mt-8">v3.3</p>
+          <p className="text-center text-xs text-slate-400 mt-8">v3.4</p>
         </div>
       </div>
     );
@@ -1290,7 +1332,7 @@ export default function BerkeleyExpenseSystem() {
       <div className="space-y-4">
         {returnedClaims.length > 0 && (<div className="bg-amber-50 border-2 border-amber-400 rounded-xl p-4"><h3 className="font-bold text-amber-800 mb-2">⚠️ Changes Requested</h3>{returnedClaims.map(claim => (<div key={claim.id} className="bg-white rounded-lg p-3 mb-2"><p className="font-semibold">{claim.claim_number}</p><p className="text-sm text-amber-700">"{claim.admin_comment}"</p></div>))}</div>)}
         <div className="grid grid-cols-2 gap-4"><div className="bg-white rounded-2xl shadow-lg p-6 text-center"><div className="text-4xl font-bold text-slate-800">{pendingExpenses.length}</div><div className="text-sm text-slate-500">Pending</div></div><div className="bg-white rounded-2xl shadow-lg p-6 text-center"><div className="text-2xl font-bold text-green-600">{formatCurrency(reimbursementTotal, userReimburseCurrency)}</div><div className="text-sm text-slate-500">To Reimburse</div></div></div>
-        <div className="bg-white rounded-2xl shadow-lg p-6"><div className="flex flex-wrap gap-3"><button onClick={() => setShowAddExpense(true)} className="bg-blue-600 text-white px-6 py-3 rounded-xl font-semibold shadow-lg">📸 Add Receipt</button>{pendingExpenses.length > 0 && (<button onClick={() => setShowPreview(true)} className="border-2 border-green-500 text-green-600 px-6 py-3 rounded-xl font-semibold">📋 Preview ({pendingExpenses.length})</button>)}</div></div>
+        <div className="bg-white rounded-2xl shadow-lg p-6"><div className="flex flex-wrap gap-3"><button onClick={() => setShowAddExpense(true)} className="bg-blue-600 text-white px-6 py-3 rounded-xl font-semibold shadow-lg">📸 Add Receipt</button>{pendingExpenses.length > 0 && (<button onClick={() => setShowPreview(true)} className="border-2 border-green-500 text-green-600 px-6 py-3 rounded-xl font-semibold">📋 Preview ({pendingExpenses.length})</button>)}<button onClick={handleManualSync} disabled={loading} className="border-2 border-slate-300 text-slate-600 px-4 py-3 rounded-xl font-semibold">{loading ? '⏳' : '🔄'} Sync</button></div></div>
         <div className="bg-white rounded-2xl shadow-lg p-6">
           <h3 className="font-bold text-slate-800 mb-4">📋 Pending</h3>
           {pendingExpenses.length === 0 ? (<div className="text-center py-12 text-slate-400">📭 No pending</div>) : (
