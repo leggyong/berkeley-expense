@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 
 /*
  * BERKELEY INTERNATIONAL EXPENSE MANAGEMENT SYSTEM
- * Version: 3.1 - Cathy/Kareen Special Routing
+ * Version: 3.2 - Cathy Direct Submit + PDF Fixes + Backcharge Report + Mobile Gallery
  */
 const SUPABASE_URL = 'https://wlhoyjsicvkncfjbexoi.supabase.co';
 const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IndsaG95anNpY3ZrbmNmamJleG9pIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzAyNzIyMzcsImV4cCI6MjA4NTg0ODIzN30.AB-W5DjcmCl6fnWiQ2reD0rgDIJiMCGymc994fSJplw';
@@ -101,8 +101,8 @@ const SENIOR_STAFF_ROUTING = {
   1001: { level1: 1002, level2: 804, level1Name: 'Christine Mendoza Dimaranan', level2Name: 'Cathy He Zeqian' },
   // Kareen's claims go directly to Cathy as final (single-level approval)
   812: { level1: 804, level2: null, level1Name: 'Cathy He Zeqian', level2Name: null, singleLevel: true },
-  // Cathy's claims go to Kareen, who then emails to Chairman externally
-  804: { level1: 812, level2: null, level1Name: 'Kareen Ng Qiu Lin', level2Name: null, singleLevel: true, externalApproval: 'Chairman (via email)' },
+  // Cathy submits directly - Kareen downloads PDF and sends to Chairman (no review needed)
+  804: { level1: null, level2: null, level1Name: null, level2Name: null, selfSubmit: true, externalApproval: 'Chairman (via Kareen)' },
 };
 const EMPLOYEES = [
   { id: 101, name: 'Fang Yi', office: 'BEJ', role: 'employee', reimburseCurrency: 'CNY', password: 'berkeley123' },
@@ -448,6 +448,10 @@ export default function BerkeleyExpenseSystem() {
   const [activeTab, setActiveTab] = useState('my_expenses');
   const [editingExpense, setEditingExpense] = useState(null);
   const [editingClaim, setEditingClaim] = useState(null);
+  // Backcharge report date range
+  const [backchargeFromDate, setBackchargeFromDate] = useState('');
+  const [backchargeToDate, setBackchargeToDate] = useState('');
+  const [showBackchargeReport, setShowBackchargeReport] = useState(false);
   const [showRequestChanges, setShowRequestChanges] = useState(false);
   const [changeRequestComment, setChangeRequestComment] = useState('');
   const [viewingImage, setViewingImage] = useState(null);
@@ -615,13 +619,31 @@ export default function BerkeleyExpenseSystem() {
 
     const otherDetailHTML = otherExpenses.length > 0 ? `<div class="page"><h2 class="detail-title">Other Expense Detail</h2><div class="detail-info">Name: <strong>${userName}</strong></div><table class="detail-table"><thead><tr><th>Receipt No.</th><th colspan="3">G - Subscriptions</th><th>H - Computer</th><th>I - WIP</th><th>J - Other</th><th>Full Description</th></tr><tr><th></th><th>Professional</th><th>Non-Professional</th><th>Publications</th><th>Costs</th><th>Costs</th><th>Vatable</th><th></th></tr></thead><tbody>${otherExpenses.map((exp, idx) => `<tr><td>${idx+1}</td><td>${exp.subcategory === 'Professional' ? (exp.reimbursementAmount||exp.amount) : ''}</td><td>${exp.subcategory === 'Non-Professional' ? (exp.reimbursementAmount||exp.amount) : ''}</td><td>${exp.subcategory === 'Newspapers & Magazines' ? (exp.reimbursementAmount||exp.amount) : ''}</td><td>${exp.category === 'H' ? (exp.reimbursementAmount||exp.amount) : ''}</td><td>${exp.category === 'I' ? (exp.reimbursementAmount||exp.amount) : ''}</td><td>${exp.category === 'J' ? (exp.reimbursementAmount||exp.amount) : ''}</td><td class="desc">${exp.ref} - ${exp.description || ''}${exp.adminNotes ? `<br><span style="color:#d97706;">Notes: ${exp.adminNotes}</span>` : ''}</td></tr>`).join('')}<tr class="subtotal-row"><td><strong>SUBTOTAL</strong></td><td><strong>${othSub.professional||''}</strong></td><td><strong>${othSub.nonProfessional||''}</strong></td><td><strong>${othSub.publications||''}</strong></td><td><strong>${othSub.computer||''}</strong></td><td><strong>${othSub.wip||''}</strong></td><td><strong>${othSub.other||''}</strong></td><td><strong>TOTAL: ${reimburseCurrency} ${othTotal.toFixed(2)}</strong></td></tr></tbody></table></div>` : '';
 
+    // Backcharge Summary Report - aggregate by development
+    const backchargeExpenses = expenseList.filter(e => e.hasBackcharge && e.backcharges?.length > 0);
+    const backchargeSummary = {};
+    backchargeExpenses.forEach(exp => {
+      const expAmount = parseFloat(exp.reimbursementAmount || exp.amount) || 0;
+      exp.backcharges.forEach(bc => {
+        const dev = bc.development;
+        const pct = parseFloat(bc.percentage) || 0;
+        const amt = (expAmount * pct / 100);
+        if (!backchargeSummary[dev]) {
+          backchargeSummary[dev] = { total: 0, items: [] };
+        }
+        backchargeSummary[dev].total += amt;
+        backchargeSummary[dev].items.push({ ref: exp.ref, merchant: exp.merchant, date: exp.date, amount: amt, percentage: pct });
+      });
+    });
+    const backchargeReportHTML = Object.keys(backchargeSummary).length > 0 ? `<div class="page"><h2 class="detail-title">📊 Backcharge Summary Report</h2><div class="detail-info">Claimant: <strong>${userName}</strong> | Claim: <strong>${claimNumber || 'DRAFT'}</strong></div><div class="backcharge-section"><div class="backcharge-header">Expenses to be Backcharged by Development</div><table class="backcharge-table"><thead><tr><th>Development</th><th>Receipt Ref</th><th>Merchant</th><th>Date</th><th>%</th><th style="text-align:right;">Amount (${reimburseCurrency})</th></tr></thead><tbody>${Object.entries(backchargeSummary).map(([dev, data]) => data.items.map((item, idx) => `<tr><td>${idx === 0 ? `<strong>${dev}</strong>` : ''}</td><td>${item.ref}</td><td>${item.merchant}</td><td>${formatShortDate(item.date)}</td><td>${item.percentage}%</td><td class="amount">${item.amount.toFixed(2)}</td></tr>`).join('') + `<tr style="background:#e1bee7;"><td colspan="5"><strong>Subtotal: ${dev}</strong></td><td class="amount"><strong>${data.total.toFixed(2)}</strong></td></tr>`).join('')}<tr style="background:#9c27b0;color:white;"><td colspan="5"><strong>TOTAL BACKCHARGES</strong></td><td class="amount"><strong>${Object.values(backchargeSummary).reduce((sum, d) => sum + d.total, 0).toFixed(2)}</strong></td></tr></tbody></table></div></div>` : '';
+
     // Multiple statement pages
     const statementsArray = Array.isArray(statementImgs) ? statementImgs : (statementImgs ? [statementImgs] : []);
     const statementsHTML = statementsArray.map((img, idx) => `<div class="page statement-page"><div class="statement-container"><div class="statement-header-inline">💳 Credit Card Statement ${statementsArray.length > 1 ? `(${idx + 1} of ${statementsArray.length})` : ''}</div><img src="${img}" class="statement-img" /></div></div>`).join('');
 
-    const html = `<!DOCTYPE html><html><head><title>Expense Claim - ${claimNumber || 'Draft'}</title><style>*{margin:0;padding:0;box-sizing:border-box;}body{font-family:Arial,sans-serif;font-size:10px;color:#000;}.page{page-break-after:always;padding:12mm 15mm;min-height:100vh;}.page:last-child{page-break-after:avoid;}.header{text-align:center;margin-bottom:15px;border-bottom:2px solid #000;padding-bottom:10px;}.header h1{font-size:16px;font-weight:bold;margin-bottom:3px;}.header .company{font-size:11px;color:#666;}.info-box{border:1px solid #000;margin-bottom:15px;}.info-row{display:flex;border-bottom:1px solid #000;}.info-row:last-child{border-bottom:none;}.info-cell{flex:1;padding:5px 8px;border-right:1px solid #000;}.info-cell:last-child{border-right:none;}.info-label{font-size:9px;color:#666;}.info-value{font-weight:bold;}.expenses-section{border:1px solid #000;margin-bottom:15px;}.section-header{background:#f0f0f0;padding:5px 8px;font-weight:bold;border-bottom:1px solid #000;font-size:11px;}.category-header{background:#f8f8f8;padding:4px 8px;font-weight:bold;font-size:10px;border-bottom:1px solid #ccc;text-decoration:underline;}.expense-row{display:flex;border-bottom:1px solid #ddd;}.col-cat{width:25px;padding:3px 5px;font-weight:bold;}.col-name{width:100px;padding:3px 5px;text-decoration:underline;}.col-detail{flex:1;padding:3px 5px;}.col-amount{width:80px;padding:3px 5px;text-align:right;}.sub-row{display:flex;padding-left:125px;border-bottom:1px solid #eee;}.total-row{display:flex;background:#f0f0f0;border-top:2px solid #000;padding:8px;}.total-row .label{flex:1;font-weight:bold;font-size:11px;}.total-row .amount{width:100px;text-align:right;font-weight:bold;font-size:11px;border:1px solid #000;padding:3px 8px;}.signature-section{margin-top:20px;}.sig-row{display:flex;margin-bottom:15px;gap:20px;}.sig-field{flex:1;}.sig-label{font-size:9px;margin-bottom:3px;}.sig-line{border-bottom:1px solid #000;height:20px;}.receipt-page{padding:10mm;}.receipt-header{background:#333;color:white;padding:12px;margin-bottom:10px;display:flex;align-items:center;}.receipt-ref{font-size:28px;font-weight:bold;margin-right:20px;min-width:50px;}.receipt-info{font-size:11px;line-height:1.6;}.receipt-img{max-width:100%;max-height:180mm;object-fit:contain;display:block;margin:0 auto;}.no-receipt{background:#f5f5f5;padding:50px;text-align:center;color:#999;}.statement-page{padding:5mm;}.statement-container{}.statement-header-inline{background:#ff9800;color:white;padding:8px 12px;font-size:12px;font-weight:bold;text-align:center;margin:0;}.statement-img{max-width:100%;max-height:270mm;object-fit:contain;display:block;margin:0 auto;}.detail-title{font-size:14px;text-align:center;margin-bottom:15px;font-weight:bold;}.detail-info{margin-bottom:10px;}.detail-note{font-style:italic;margin-bottom:15px;font-size:9px;text-decoration:underline;}.detail-table{width:100%;border-collapse:collapse;font-size:9px;}.detail-table th,.detail-table td{border:1px solid #999;padding:4px;text-align:center;}.detail-table th{background:#e0e0e0;font-weight:bold;}.detail-table td.desc{text-align:left;color:#1976d2;}.subtotal-row{background:#fff3cd;}.subtotal-row td{font-weight:bold;}@media print{.page{padding:10mm;}body{-webkit-print-color-adjust:exact;print-color-adjust:exact;}}</style></head><body>
+    const html = `<!DOCTYPE html><html><head><title>Expense Claim - ${claimNumber || 'Draft'}</title><style>*{margin:0;padding:0;box-sizing:border-box;}body{font-family:Arial,sans-serif;font-size:10px;color:#000;}@page{margin:10mm;size:A4;}.page{page-break-after:always;padding:8mm 10mm;}.page:last-child{page-break-after:avoid;}.header{text-align:center;margin-bottom:15px;border-bottom:2px solid #000;padding-bottom:10px;}.header h1{font-size:16px;font-weight:bold;margin-bottom:3px;}.header .company{font-size:11px;color:#666;}.info-box{border:1px solid #000;margin-bottom:15px;}.info-row{display:flex;border-bottom:1px solid #000;}.info-row:last-child{border-bottom:none;}.info-cell{flex:1;padding:5px 8px;border-right:1px solid #000;}.info-cell:last-child{border-right:none;}.info-label{font-size:9px;color:#666;}.info-value{font-weight:bold;}.expenses-section{border:1px solid #000;margin-bottom:15px;}.section-header{background:#f0f0f0;padding:5px 8px;font-weight:bold;border-bottom:1px solid #000;font-size:11px;}.category-header{background:#f8f8f8;padding:4px 8px;font-weight:bold;font-size:10px;border-bottom:1px solid #ccc;text-decoration:underline;}.expense-row{display:flex;border-bottom:1px solid #ddd;}.col-cat{width:25px;padding:3px 5px;font-weight:bold;}.col-name{width:100px;padding:3px 5px;text-decoration:underline;}.col-detail{flex:1;padding:3px 5px;}.col-amount{width:80px;padding:3px 5px;text-align:right;}.sub-row{display:flex;padding-left:125px;border-bottom:1px solid #eee;}.total-row{display:flex;background:#f0f0f0;border-top:2px solid #000;padding:8px;}.total-row .label{flex:1;font-weight:bold;font-size:11px;}.total-row .amount{width:100px;text-align:right;font-weight:bold;font-size:11px;border:1px solid #000;padding:3px 8px;}.signature-section{margin-top:20px;}.sig-row{display:flex;margin-bottom:15px;gap:20px;}.sig-field{flex:1;}.sig-label{font-size:9px;margin-bottom:3px;}.sig-line{border-bottom:1px solid #000;height:20px;}.receipt-page{padding:8mm 10mm;page-break-inside:avoid;}.receipt-header{background:#333;color:white;padding:10px;margin-bottom:8px;display:flex;align-items:center;}.receipt-ref{font-size:24px;font-weight:bold;margin-right:15px;min-width:45px;}.receipt-info{font-size:10px;line-height:1.5;}.receipt-img{max-width:100%;max-height:220mm;object-fit:contain;display:block;margin:0 auto;}.no-receipt{background:#f5f5f5;padding:30px;text-align:center;color:#999;}.statement-page{padding:5mm;page-break-inside:avoid;}.statement-container{}.statement-header-inline{background:#ff9800;color:white;padding:6px 10px;font-size:11px;font-weight:bold;text-align:center;margin:0 0 2px 0;}.statement-img{max-width:100%;max-height:270mm;object-fit:contain;display:block;margin:0 auto;}.detail-title{font-size:14px;text-align:center;margin-bottom:15px;font-weight:bold;}.detail-info{margin-bottom:10px;}.detail-note{font-style:italic;margin-bottom:15px;font-size:9px;text-decoration:underline;}.detail-table{width:100%;border-collapse:collapse;font-size:9px;}.detail-table th,.detail-table td{border:1px solid #999;padding:4px;text-align:center;}.detail-table th{background:#e0e0e0;font-weight:bold;}.detail-table td.desc{text-align:left;color:#1976d2;}.subtotal-row{background:#fff3cd;}.subtotal-row td{font-weight:bold;}.backcharge-section{margin-top:15px;border:2px solid #9c27b0;}.backcharge-header{background:#9c27b0;color:white;padding:8px;font-weight:bold;font-size:12px;}.backcharge-table{width:100%;border-collapse:collapse;font-size:10px;}.backcharge-table th,.backcharge-table td{border:1px solid #999;padding:6px;text-align:left;}.backcharge-table th{background:#e1bee7;}.backcharge-table .amount{text-align:right;font-weight:bold;}@media print{.page{padding:8mm;}body{-webkit-print-color-adjust:exact;print-color-adjust:exact;}}</style></head><body>
     <div class="page"><div class="header"><h1>Motor & Expense Claim Form</h1><div class="company">${companyName}</div></div><div class="info-box"><div class="info-row"><div class="info-cell"><span class="info-label">Name</span><br><span class="info-value">${userName}</span></div><div class="info-cell"><span class="info-label">Month</span><br><span class="info-value">${claimMonth}</span></div></div><div class="info-row"><div class="info-cell"><span class="info-label">Claim Number</span><br><span class="info-value">${claimNumber || 'DRAFT'}</span></div><div class="info-cell"><span class="info-label">Reimbursement Currency</span><br><span class="info-value">${reimburseCurrency}</span></div></div></div><div class="expenses-section"><div class="section-header">Expenses claim</div><div class="category-header">Motor Vehicle Expenditure</div>${['A','B','C','D'].map(cat => { const c = EXPENSE_CATEGORIES[cat]; return `<div class="expense-row"><div class="col-cat">${cat}.</div><div class="col-name">${c.name}</div><div class="col-detail"></div><div class="col-amount"></div></div>${c.subcategories.map(sub => `<div class="sub-row"><div class="col-detail">${sub}</div><div class="col-amount">${reimburseCurrency} ${getSubcategoryTotal(cat,sub).toFixed(2)}</div></div>`).join('')}`; }).join('')}<div class="category-header">Business Expenditure</div>${['E','F','G','H','I','J'].map(cat => { const c = EXPENSE_CATEGORIES[cat]; return `<div class="expense-row"><div class="col-cat">${cat}.</div><div class="col-name">${c.name}</div><div class="col-detail"></div><div class="col-amount"></div></div>${c.subcategories.map(sub => `<div class="sub-row"><div class="col-detail">${sub}</div><div class="col-amount">${reimburseCurrency} ${getSubcategoryTotal(cat,sub).toFixed(2)}</div></div>`).join('')}`; }).join('')}</div><div class="total-row"><div class="label">Total expenses claimed</div><div class="amount">${reimburseCurrency} ${totalAmount.toFixed(2)}</div></div><div class="signature-section"><div class="sig-row"><div class="sig-field"><div class="sig-label">Signature of Claimant:</div><div class="sig-line" style="font-style:italic;padding-top:5px;">${userName}</div></div><div class="sig-field"><div class="sig-label">Date:</div><div class="sig-line" style="padding-top:5px;">${formatDate(submittedDate || new Date().toISOString())}</div></div></div><div class="sig-row"><div class="sig-field"><div class="sig-label">Authorised:</div><div class="sig-line" style="font-style:italic;padding-top:5px;">${level2ApprovedBy || ''}</div></div><div class="sig-field"><div class="sig-label">Date:</div><div class="sig-line" style="padding-top:5px;">${level2ApprovedAt ? formatDate(level2ApprovedAt) : ''}</div></div></div></div></div>
-    ${travelDetailHTML}${entertainingDetailHTML}${otherDetailHTML}${receiptsHTML}${statementsHTML}
+    ${travelDetailHTML}${entertainingDetailHTML}${otherDetailHTML}${backchargeReportHTML}${receiptsHTML}${statementsHTML}
     <script>window.onload=function(){window.print();setTimeout(function(){window.close();},500);};</script></body></html>`;
     printWindow.document.write(html);
     printWindow.document.close();
@@ -649,17 +671,21 @@ export default function BerkeleyExpenseSystem() {
     try {
       const returned = claims.find(c => c.user_id === currentUser.id && c.status === 'changes_requested');
       const workflow = getApprovalWorkflow(currentUser.id, currentUser.office);
+      const isSelfSubmit = workflow?.selfSubmit === true;
       
       if (returned) {
         const updateData = { 
           total_amount: reimbursementTotal, 
           item_count: pendingExpenses.length, 
-          status: 'pending_review', 
-          approval_level: 1, 
+          status: isSelfSubmit ? 'approved' : 'pending_review', 
+          approval_level: isSelfSubmit ? 2 : 1, 
           expenses: pendingExpenses,
           annotated_statement: annotatedStatements[0] || null
         };
-        // Only include annotated_statements if we have any
+        if (isSelfSubmit) {
+          updateData.level2_approved_by = workflow?.externalApproval || 'Self-Approved';
+          updateData.level2_approved_at = new Date().toISOString();
+        }
         if (annotatedStatements.length > 0) {
           updateData.annotated_statements = annotatedStatements;
         }
@@ -679,15 +705,20 @@ export default function BerkeleyExpenseSystem() {
           currency: getUserReimburseCurrency(currentUser), 
           total_amount: reimbursementTotal, 
           item_count: pendingExpenses.length,
-          status: 'pending_review', 
-          approval_level: 1,
+          status: isSelfSubmit ? 'approved' : 'pending_review', 
+          approval_level: isSelfSubmit ? 2 : 1,
           level1_approver: workflow?.level1, 
           level2_approver: workflow?.level2,
           annotated_statement: annotatedStatements[0] || null,
           expenses: pendingExpenses,
           submitted_at: new Date().toISOString()
         };
-        // Only include annotated_statements if we have any
+        if (isSelfSubmit) {
+          insertData.level1_approved_by = currentUser.name;
+          insertData.level1_approved_at = new Date().toISOString();
+          insertData.level2_approved_by = workflow?.externalApproval || 'Self-Approved';
+          insertData.level2_approved_at = new Date().toISOString();
+        }
         if (annotatedStatements.length > 0) {
           insertData.annotated_statements = annotatedStatements;
         }
@@ -703,7 +734,11 @@ export default function BerkeleyExpenseSystem() {
       setStatementImages([]);
       clearDraftStorage();
       await loadClaims(); 
-      alert('✅ Submitted!');
+      if (isSelfSubmit) {
+        alert(`✅ Saved! Please download the PDF and send to ${workflow?.externalApproval || 'Chairman'} for approval.`);
+      } else {
+        alert('✅ Submitted!');
+      }
     } catch (err) { 
       console.error('Submit error:', err); 
       alert(`❌ Failed to submit: ${err.message}`); 
@@ -893,7 +928,7 @@ export default function BerkeleyExpenseSystem() {
               <div className="flex gap-3 pt-2"><button onClick={() => { setLoginStep('select'); setSelectedEmployee(null); }} className="flex-1 py-3 rounded-xl border-2 border-slate-300 font-semibold text-slate-600">← Back</button><button onClick={handleLogin} className="flex-[2] py-3 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 text-white font-semibold shadow-lg">Login 🔐</button></div>
             </div>
           )}
-          <p className="text-center text-xs text-slate-400 mt-8">v3.1</p>
+          <p className="text-center text-xs text-slate-400 mt-8">v3.2</p>
         </div>
       </div>
     );
@@ -1024,7 +1059,7 @@ export default function BerkeleyExpenseSystem() {
         <div className="bg-white rounded-2xl max-w-lg w-full max-h-[90vh] overflow-hidden shadow-2xl">
           <div className="bg-gradient-to-r from-blue-600 to-indigo-600 text-white p-5 flex justify-between items-center"><div><h2 className="text-lg font-bold">{editExpense ? '✏️ Edit' : '📸 Add'} Expense</h2><p className="text-blue-100 text-sm">Reimburse in {userReimburseCurrency}</p></div><button onClick={onClose} className="w-8 h-8 rounded-full bg-white/20">✕</button></div>
           <div className="p-6 overflow-y-auto max-h-[calc(90vh-180px)]">
-            {step === 1 && (<label className="block border-3 border-dashed border-slate-300 rounded-2xl p-8 text-center cursor-pointer hover:border-blue-500"><input type="file" accept="image/*" capture="environment" onChange={(e) => handleFileChange(e, false)} className="hidden" /><div className="text-5xl mb-4">📸</div><p className="font-semibold">Take photo or upload receipt</p></label>)}
+            {step === 1 && (<label className="block border-3 border-dashed border-slate-300 rounded-2xl p-8 text-center cursor-pointer hover:border-blue-500"><input type="file" accept="image/*" onChange={(e) => handleFileChange(e, false)} className="hidden" /><div className="text-5xl mb-4">📸</div><p className="font-semibold">Take photo or choose from gallery</p></label>)}
             {step === 2 && (
               <div className="space-y-4">
                 {isCNY ? (
@@ -1163,7 +1198,7 @@ export default function BerkeleyExpenseSystem() {
             <div className="max-w-3xl mx-auto border-2 border-slate-300 rounded-xl p-6">
               <div className="text-center mb-6"><h1 className="text-xl font-bold">Motor & Expense Claim Form</h1><p className="text-sm text-slate-500">{getCompanyName(currentUser.office)}</p></div>
               <div className="grid grid-cols-2 gap-4 mb-6 text-sm"><div><span className="text-slate-500">Name:</span> <strong>{currentUser.name}</strong></div><div><span className="text-slate-500">Currency:</span> <strong className="text-green-700">{userReimburseCurrency}</strong></div></div>
-              {workflow && (<div className="bg-blue-50 border border-blue-200 rounded-xl p-4 mb-6 text-sm"><p className="font-semibold text-blue-800">Approval: {workflow.level1Name}{workflow.singleLevel ? (workflow.externalApproval ? ` → ${workflow.externalApproval}` : ' (Final)') : ` → ${workflow.level2Name}`}</p></div>)}
+              {workflow && (<div className="bg-blue-50 border border-blue-200 rounded-xl p-4 mb-6 text-sm"><p className="font-semibold text-blue-800">Approval: {workflow.selfSubmit ? `Direct Save → ${workflow.externalApproval || 'External'}` : workflow.singleLevel ? (workflow.externalApproval ? `${workflow.level1Name} → ${workflow.externalApproval}` : `${workflow.level1Name} (Final)`) : `${workflow.level1Name} → ${workflow.level2Name}`}</p></div>)}
               <table className="w-full text-sm"><tbody>{Object.keys(EXPENSE_CATEGORIES).map(cat => (<tr key={cat} className="border-b"><td className="py-2 font-bold text-blue-700 w-8">{cat}.</td><td className="py-2">{EXPENSE_CATEGORIES[cat].name}</td><td className="py-2 text-right font-medium">{userReimburseCurrency} {getCategoryTotal(cat).toFixed(2)}</td></tr>))}</tbody></table>
               <div className="bg-blue-50 p-4 rounded-xl mt-4 flex justify-between items-center"><span className="font-bold text-lg">Total</span><span className="font-bold text-2xl text-blue-700">{formatCurrency(reimbursementTotal, userReimburseCurrency)}</span></div>
               <h3 className="font-bold mt-6 mb-3">Receipts ({pendingExpenses.length})</h3>
@@ -1240,8 +1275,155 @@ export default function BerkeleyExpenseSystem() {
   const ReviewClaimsTab = () => {
     const reviewableClaims = getReviewableClaims();
     const claimsForSubmission = getClaimsForSubmission();
+    
+    // Get backcharge report data for office admin
+    const getBackchargeReport = () => {
+      if (!backchargeFromDate || !backchargeToDate) return null;
+      const fromDate = new Date(backchargeFromDate);
+      const toDate = new Date(backchargeToDate);
+      toDate.setHours(23, 59, 59, 999); // Include entire end day
+      
+      // Filter approved claims in the date range for this office
+      const officeApprovedClaims = claims.filter(c => {
+        if (c.status !== 'approved' && c.status !== 'submitted_to_finance') return false;
+        if (c.office_code !== currentUser.office) return false;
+        const approvedDate = c.level2_approved_at ? new Date(c.level2_approved_at) : null;
+        if (!approvedDate) return false;
+        return approvedDate >= fromDate && approvedDate <= toDate;
+      });
+      
+      // Aggregate backcharges by development
+      const backchargeSummary = {};
+      let grandTotal = 0;
+      
+      officeApprovedClaims.forEach(claim => {
+        const expenses = claim.expenses || [];
+        expenses.forEach(exp => {
+          if (exp.hasBackcharge && exp.backcharges?.length > 0) {
+            const expAmount = parseFloat(exp.reimbursementAmount || exp.amount) || 0;
+            exp.backcharges.forEach(bc => {
+              const dev = bc.development;
+              const pct = parseFloat(bc.percentage) || 0;
+              const amt = (expAmount * pct / 100);
+              if (!backchargeSummary[dev]) {
+                backchargeSummary[dev] = { total: 0, items: [] };
+              }
+              backchargeSummary[dev].total += amt;
+              backchargeSummary[dev].items.push({
+                claimNumber: claim.claim_number,
+                claimant: claim.user_name,
+                ref: exp.ref,
+                merchant: exp.merchant,
+                date: exp.date,
+                approvedDate: claim.level2_approved_at,
+                amount: amt,
+                percentage: pct
+              });
+              grandTotal += amt;
+            });
+          }
+        });
+      });
+      
+      return { summary: backchargeSummary, grandTotal, claimCount: officeApprovedClaims.length };
+    };
+    
+    const backchargeData = showBackchargeReport ? getBackchargeReport() : null;
+    
+    // Generate backcharge report PDF
+    const generateBackchargeReportPDF = () => {
+      if (!backchargeData) return;
+      const { summary, grandTotal } = backchargeData;
+      const office = OFFICES.find(o => o.code === currentUser.office);
+      const currency = office?.currency || 'SGD';
+      
+      const printWindow = window.open('', '_blank');
+      const html = `<!DOCTYPE html><html><head><title>Backcharge Report - ${office?.name}</title>
+      <style>
+        body{font-family:Arial,sans-serif;font-size:11px;padding:20mm;}
+        h1{text-align:center;color:#9c27b0;margin-bottom:5px;}
+        .subtitle{text-align:center;color:#666;margin-bottom:20px;}
+        table{width:100%;border-collapse:collapse;margin-top:15px;}
+        th,td{border:1px solid #999;padding:6px;text-align:left;}
+        th{background:#e1bee7;font-weight:bold;}
+        .dev-header{background:#9c27b0;color:white;font-weight:bold;}
+        .subtotal{background:#f3e5f5;font-weight:bold;}
+        .grand-total{background:#9c27b0;color:white;font-weight:bold;font-size:12px;}
+        .amount{text-align:right;}
+        @media print{body{padding:10mm;}}
+      </style></head><body>
+      <h1>📊 Backcharge Report</h1>
+      <div class="subtitle">${office?.name} | ${formatDate(backchargeFromDate)} to ${formatDate(backchargeToDate)}</div>
+      <table>
+        <thead><tr><th>Development</th><th>Claim #</th><th>Claimant</th><th>Ref</th><th>Merchant</th><th>Date</th><th>%</th><th class="amount">Amount (${currency})</th></tr></thead>
+        <tbody>
+        ${Object.entries(summary).map(([dev, data]) => 
+          `<tr class="dev-header"><td colspan="8">${dev}</td></tr>` +
+          data.items.map(item => `<tr><td></td><td>${item.claimNumber}</td><td>${item.claimant}</td><td>${item.ref}</td><td>${item.merchant}</td><td>${formatShortDate(item.date)}</td><td>${item.percentage}%</td><td class="amount">${item.amount.toFixed(2)}</td></tr>`).join('') +
+          `<tr class="subtotal"><td colspan="7">Subtotal: ${dev}</td><td class="amount">${data.total.toFixed(2)}</td></tr>`
+        ).join('')}
+        <tr class="grand-total"><td colspan="7">TOTAL BACKCHARGES</td><td class="amount">${grandTotal.toFixed(2)}</td></tr>
+        </tbody>
+      </table>
+      <script>window.onload=function(){window.print();setTimeout(function(){window.close();},500);};</script>
+      </body></html>`;
+      printWindow.document.write(html);
+      printWindow.document.close();
+    };
+    
     return (
       <div className="space-y-4">
+        {/* Backcharge Report Generator - for office admins */}
+        {(currentUser.role === 'admin' || currentUser.role === 'finance') && (
+          <div className="bg-white rounded-2xl shadow-lg p-6 border-2 border-purple-300">
+            <h3 className="font-bold mb-4 text-purple-700">📊 Backcharge Report Generator</h3>
+            <p className="text-xs text-slate-500 mb-4">Select a date range to generate a report of all backcharges approved in your office during that period.</p>
+            <div className="flex flex-wrap gap-3 items-end mb-4">
+              <div>
+                <label className="block text-xs text-slate-500 mb-1">From Date</label>
+                <input type="date" value={backchargeFromDate} onChange={(e) => setBackchargeFromDate(e.target.value)} className="border-2 rounded-lg px-3 py-2 text-sm" />
+              </div>
+              <div>
+                <label className="block text-xs text-slate-500 mb-1">To Date</label>
+                <input type="date" value={backchargeToDate} onChange={(e) => setBackchargeToDate(e.target.value)} className="border-2 rounded-lg px-3 py-2 text-sm" />
+              </div>
+              <button onClick={() => setShowBackchargeReport(true)} disabled={!backchargeFromDate || !backchargeToDate} className="bg-purple-600 text-white px-4 py-2 rounded-lg text-sm font-semibold disabled:opacity-50">Generate Report</button>
+            </div>
+            
+            {showBackchargeReport && backchargeData && (
+              <div className="border-2 border-purple-200 rounded-xl p-4 bg-purple-50">
+                <div className="flex justify-between items-center mb-3">
+                  <h4 className="font-bold text-purple-800">Report: {formatDate(backchargeFromDate)} - {formatDate(backchargeToDate)}</h4>
+                  <div className="flex gap-2">
+                    <button onClick={generateBackchargeReportPDF} className="bg-green-600 text-white px-3 py-1 rounded text-sm">📥 Download PDF</button>
+                    <button onClick={() => setShowBackchargeReport(false)} className="text-slate-500 text-sm">✕ Close</button>
+                  </div>
+                </div>
+                
+                {Object.keys(backchargeData.summary).length === 0 ? (
+                  <p className="text-center text-slate-500 py-4">No backcharges found in this period.</p>
+                ) : (
+                  <div className="space-y-3">
+                    {Object.entries(backchargeData.summary).map(([dev, data]) => (
+                      <div key={dev} className="bg-white rounded-lg p-3 border">
+                        <div className="flex justify-between items-center">
+                          <span className="font-semibold text-purple-700">{dev}</span>
+                          <span className="font-bold">{formatCurrency(data.total, OFFICES.find(o => o.code === currentUser.office)?.currency || 'SGD')}</span>
+                        </div>
+                        <div className="text-xs text-slate-500 mt-1">{data.items.length} expense(s)</div>
+                      </div>
+                    ))}
+                    <div className="bg-purple-700 text-white rounded-lg p-3 flex justify-between">
+                      <span className="font-bold">TOTAL BACKCHARGES</span>
+                      <span className="font-bold">{formatCurrency(backchargeData.grandTotal, OFFICES.find(o => o.code === currentUser.office)?.currency || 'SGD')}</span>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+        
         {/* For Submission Section - Office Admin sees approved claims to submit */}
         {claimsForSubmission.length > 0 && (
           <div className="bg-white rounded-2xl shadow-lg p-6 border-2 border-green-300">
