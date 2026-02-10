@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 
 /*
  * BERKELEY INTERNATIONAL EXPENSE MANAGEMENT SYSTEM
- * Version: 3.4 - Auto-sync on focus + Manual sync button
+ * Version: 3.5 - Fixed file upload and sync issues
  */
 const SUPABASE_URL = 'https://wlhoyjsicvkncfjbexoi.supabase.co';
 const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IndsaG95anNpY3ZrbmNmamJleG9pIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzAyNzIyMzcsImV4cCI6MjA4NTg0ODIzN30.AB-W5DjcmCl6fnWiQ2reD0rgDIJiMCGymc994fSJplw';
@@ -509,10 +509,17 @@ export default function BerkeleyExpenseSystem() {
     loadDrafts();
   }, [currentUser]);
 
+  // Refs to track modal state for focus handler
+  const modalOpenRef = useRef(false);
+  useEffect(() => {
+    modalOpenRef.current = showAddExpense || editingExpense || showPreview;
+  }, [showAddExpense, editingExpense, showPreview]);
+
   // Auto-sync when window gets focus (user switches back to tab)
+  // But NOT when a modal is open (file picker causes focus change)
   useEffect(() => {
     const handleFocus = () => {
-      if (currentUser) {
+      if (currentUser && !modalOpenRef.current) {
         console.log('Window focused, syncing drafts...');
         loadDrafts();
         loadClaims();
@@ -1003,7 +1010,7 @@ export default function BerkeleyExpenseSystem() {
               <div className="flex gap-3 pt-2"><button onClick={() => { setLoginStep('select'); setSelectedEmployee(null); }} className="flex-1 py-3 rounded-xl border-2 border-slate-300 font-semibold text-slate-600">← Back</button><button onClick={handleLogin} className="flex-[2] py-3 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 text-white font-semibold shadow-lg">Login 🔐</button></div>
             </div>
           )}
-          <p className="text-center text-xs text-slate-400 mt-8">v3.4</p>
+          <p className="text-center text-xs text-slate-400 mt-8">v3.5</p>
         </div>
       </div>
     );
@@ -1018,29 +1025,32 @@ export default function BerkeleyExpenseSystem() {
     const [formData, setFormData] = useState(editExpense ? { merchant: editExpense.merchant || '', amount: editExpense.amount || '', currency: editExpense.currency || userOffice?.currency || 'SGD', date: editExpense.date || new Date().toISOString().split('T')[0], category: editExpense.category || 'C', subcategory: editExpense.subcategory || 'Taxis', description: editExpense.description || '', attendees: editExpense.attendees || '', numberOfPax: editExpense.numberOfPax || '', reimbursementAmount: editExpense.reimbursementAmount || '', hasBackcharge: editExpense.hasBackcharge || false, backcharges: editExpense.backcharges || [] } : { merchant: '', amount: '', currency: userOffice?.currency || 'SGD', date: new Date().toISOString().split('T')[0], category: 'C', subcategory: 'Taxis', description: '', attendees: '', numberOfPax: '', reimbursementAmount: '', hasBackcharge: false, backcharges: [] });
     const isForeignCurrency = formData.currency !== userReimburseCurrency;
     const isCNY = formData.currency === 'CNY';
-    const handleFileChange = async (e, isSecond = false) => { 
-      const file = e.target.files[0]; 
-      if (file) { 
-        try {
-          // Compress image to reduce memory usage (critical for mobile)
-          const compressed = await compressImage(file, 1200, 0.7);
-          if (compressed) {
-            if (isSecond) setReceiptPreview2(compressed); 
-            else setReceiptPreview(compressed); 
-          }
-          if (!isSecond) setStep(2); 
-        } catch (err) {
-          console.error('Image processing error:', err);
-          // Fallback to direct read
-          const reader = new FileReader();
-          reader.onloadend = () => { 
-            if (isSecond) setReceiptPreview2(reader.result); 
-            else setReceiptPreview(reader.result); 
-          };
-          reader.readAsDataURL(file);
-          if (!isSecond) setStep(2);
+    const handleFileChange = (e, isSecond = false) => { 
+      const file = e.target.files?.[0]; 
+      if (!file) {
+        console.log('No file selected');
+        return;
+      }
+      
+      console.log('File selected:', file.name, file.size);
+      
+      // Read file as data URL
+      const reader = new FileReader();
+      reader.onload = (event) => { 
+        const result = event.target.result;
+        console.log('File read complete, data length:', result?.length);
+        if (isSecond) {
+          setReceiptPreview2(result); 
+        } else {
+          setReceiptPreview(result); 
+          setStep(2);
         }
-      } 
+      };
+      reader.onerror = () => {
+        console.error('FileReader error');
+        alert('Failed to read image. Please try again.');
+      };
+      reader.readAsDataURL(file);
     };
     const addBackcharge = () => setFormData(prev => ({ ...prev, backcharges: [...prev.backcharges, { development: '', percentage: '' }] }));
     const updateBackcharge = (idx, field, value) => setFormData(prev => ({ ...prev, backcharges: prev.backcharges.map((bc, i) => i === idx ? { ...bc, [field]: value } : bc) }));
