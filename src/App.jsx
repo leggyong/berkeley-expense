@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 
 /*
  * BERKELEY INTERNATIONAL EXPENSE MANAGEMENT SYSTEM
- * Version: 3.0 - Mobile Fix + Image Compression + Error Handling
+ * Version: 3.1 - Cathy/Kareen Special Routing
  */
 const SUPABASE_URL = 'https://wlhoyjsicvkncfjbexoi.supabase.co';
 const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IndsaG95anNpY3ZrbmNmamJleG9pIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzAyNzIyMzcsImV4cCI6MjA4NTg0ODIzN30.AB-W5DjcmCl6fnWiQ2reD0rgDIJiMCGymc994fSJplw';
@@ -99,6 +99,10 @@ const SENIOR_STAFF_ROUTING = {
   302: { level1: 306, level2: 804, level1Name: 'Cathy Liu Shikun', level2Name: 'Cathy He Zeqian' },
   502: { level1: 505, level2: 804, level1Name: 'Cherry Lai', level2Name: 'Cathy He Zeqian' },
   1001: { level1: 1002, level2: 804, level1Name: 'Christine Mendoza Dimaranan', level2Name: 'Cathy He Zeqian' },
+  // Kareen's claims go directly to Cathy as final (single-level approval)
+  812: { level1: 804, level2: null, level1Name: 'Cathy He Zeqian', level2Name: null, singleLevel: true },
+  // Cathy's claims go to Kareen, who then emails to Chairman externally
+  804: { level1: 812, level2: null, level1Name: 'Kareen Ng Qiu Lin', level2Name: null, singleLevel: true, externalApproval: 'Chairman (via email)' },
 };
 const EMPLOYEES = [
   { id: 101, name: 'Fang Yi', office: 'BEJ', role: 'employee', reimburseCurrency: 'CNY', password: 'berkeley123' },
@@ -711,18 +715,44 @@ export default function BerkeleyExpenseSystem() {
     setLoading(true);
     try {
       const level = claim.approval_level || 1;
+      // Check if this is a single-level approval workflow
+      const workflow = SENIOR_STAFF_ROUTING[claim.user_id];
+      const isSingleLevel = workflow?.singleLevel === true;
+      const externalNote = workflow?.externalApproval;
+      
       if (level === 1) {
-        const { error } = await supabase.from('claims').update({ 
-          status: 'pending_level2', 
-          approval_level: 2, 
-          level1_approved_by: currentUser.name, 
-          level1_approved_at: new Date().toISOString() 
-        }).eq('id', claim.id);
-        if (error) throw error;
-        await loadClaims();
-        setSelectedClaim(null);
-        alert('✅ Approved → Sent to Level 2 reviewer');
+        if (isSingleLevel) {
+          // Single-level approval - this is the final approval
+          const { error } = await supabase.from('claims').update({ 
+            status: 'approved', 
+            level1_approved_by: currentUser.name, 
+            level1_approved_at: new Date().toISOString(),
+            level2_approved_by: externalNote || currentUser.name,
+            level2_approved_at: new Date().toISOString()
+          }).eq('id', claim.id);
+          if (error) throw error;
+          await loadClaims();
+          setSelectedClaim(null);
+          if (externalNote) {
+            alert(`✅ Approved! Please download the PDF and email to ${externalNote} for signature.`);
+          } else {
+            alert('✅ Final Approval Complete!');
+          }
+        } else {
+          // Normal two-level approval - send to L2
+          const { error } = await supabase.from('claims').update({ 
+            status: 'pending_level2', 
+            approval_level: 2, 
+            level1_approved_by: currentUser.name, 
+            level1_approved_at: new Date().toISOString() 
+          }).eq('id', claim.id);
+          if (error) throw error;
+          await loadClaims();
+          setSelectedClaim(null);
+          alert('✅ Approved → Sent to Level 2 reviewer');
+        }
       } else {
+        // Level 2 approval - always final
         const { error } = await supabase.from('claims').update({ 
           status: 'approved', 
           level2_approved_by: currentUser.name, 
@@ -863,7 +893,7 @@ export default function BerkeleyExpenseSystem() {
               <div className="flex gap-3 pt-2"><button onClick={() => { setLoginStep('select'); setSelectedEmployee(null); }} className="flex-1 py-3 rounded-xl border-2 border-slate-300 font-semibold text-slate-600">← Back</button><button onClick={handleLogin} className="flex-[2] py-3 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 text-white font-semibold shadow-lg">Login 🔐</button></div>
             </div>
           )}
-          <p className="text-center text-xs text-slate-400 mt-8">v3.0</p>
+          <p className="text-center text-xs text-slate-400 mt-8">v3.1</p>
         </div>
       </div>
     );
@@ -1133,7 +1163,7 @@ export default function BerkeleyExpenseSystem() {
             <div className="max-w-3xl mx-auto border-2 border-slate-300 rounded-xl p-6">
               <div className="text-center mb-6"><h1 className="text-xl font-bold">Motor & Expense Claim Form</h1><p className="text-sm text-slate-500">{getCompanyName(currentUser.office)}</p></div>
               <div className="grid grid-cols-2 gap-4 mb-6 text-sm"><div><span className="text-slate-500">Name:</span> <strong>{currentUser.name}</strong></div><div><span className="text-slate-500">Currency:</span> <strong className="text-green-700">{userReimburseCurrency}</strong></div></div>
-              {workflow && (<div className="bg-blue-50 border border-blue-200 rounded-xl p-4 mb-6 text-sm"><p className="font-semibold text-blue-800">Approval: {workflow.level1Name} → {workflow.level2Name}</p></div>)}
+              {workflow && (<div className="bg-blue-50 border border-blue-200 rounded-xl p-4 mb-6 text-sm"><p className="font-semibold text-blue-800">Approval: {workflow.level1Name}{workflow.singleLevel ? (workflow.externalApproval ? ` → ${workflow.externalApproval}` : ' (Final)') : ` → ${workflow.level2Name}`}</p></div>)}
               <table className="w-full text-sm"><tbody>{Object.keys(EXPENSE_CATEGORIES).map(cat => (<tr key={cat} className="border-b"><td className="py-2 font-bold text-blue-700 w-8">{cat}.</td><td className="py-2">{EXPENSE_CATEGORIES[cat].name}</td><td className="py-2 text-right font-medium">{userReimburseCurrency} {getCategoryTotal(cat).toFixed(2)}</td></tr>))}</tbody></table>
               <div className="bg-blue-50 p-4 rounded-xl mt-4 flex justify-between items-center"><span className="font-bold text-lg">Total</span><span className="font-bold text-2xl text-blue-700">{formatCurrency(reimbursementTotal, userReimburseCurrency)}</span></div>
               <h3 className="font-bold mt-6 mb-3">Receipts ({pendingExpenses.length})</h3>
@@ -1242,7 +1272,7 @@ export default function BerkeleyExpenseSystem() {
           <h3 className="font-bold mb-4">📊 To Review ({reviewableClaims.length})</h3>
           {reviewableClaims.length === 0 ? <div className="text-center py-12 text-slate-400">✅ Nothing to review</div> : (<div className="space-y-2">{reviewableClaims.map(claim => (<div key={claim.id} onClick={() => setSelectedClaim(claim)} className="flex items-center justify-between p-4 rounded-xl bg-slate-50 border cursor-pointer hover:border-blue-300"><div><span className="font-semibold">{claim.user_name}</span><span className={`ml-2 text-xs px-2 py-0.5 rounded-full ${claim.approval_level === 2 ? 'bg-blue-100 text-blue-700' : 'bg-amber-100 text-amber-700'}`}>L{claim.approval_level || 1}</span><p className="text-sm text-slate-500">{claim.office}</p></div><span className="font-bold">{formatCurrency(claim.total_amount, claim.currency)}</span></div>))}</div>)}
         </div>
-        {selectedClaim && (<div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50" onClick={() => setSelectedClaim(null)}><div className="bg-white rounded-2xl max-w-2xl w-full max-h-[90vh] overflow-auto" onClick={e => e.stopPropagation()}><div className="p-6 border-b flex justify-between"><div><h2 className="text-xl font-bold">{selectedClaim.user_name}</h2><p className="text-sm text-slate-500">{selectedClaim.claim_number} • Level {selectedClaim.approval_level || 1}</p></div><button onClick={() => setSelectedClaim(null)} className="text-2xl text-slate-400">×</button></div><div className="p-6"><button onClick={() => handleDownloadPDF(selectedClaim)} className="w-full bg-green-600 text-white py-3 rounded-xl font-semibold mb-4">📥 Download PDF</button>{selectedClaim.expenses?.map((exp, i) => (<div key={i} className="py-3 border-b"><div className="flex justify-between items-start"><div className="flex-1"><div className="flex items-center gap-2 flex-wrap"><span className="bg-blue-100 text-blue-700 text-xs px-2 py-0.5 rounded font-bold">{exp.ref}</span><span className="font-semibold">{exp.merchant}</span>{exp.isPotentialDuplicate && <span className="bg-red-100 text-red-600 text-xs px-2 py-0.5 rounded">⚠️ Duplicate?</span>}{exp.numberOfPax && <span className="bg-purple-100 text-purple-600 text-xs px-2 py-0.5 rounded">👥 {exp.numberOfPax} pax</span>}</div><p className="text-xs text-slate-500 mt-1">{exp.description}</p>{exp.adminNotes && <p className="text-xs text-amber-600 mt-1 bg-amber-50 px-2 py-1 rounded">📝 Notes: {exp.adminNotes}</p>}</div><span className="font-bold text-green-700 ml-2">{formatCurrency(exp.reimbursementAmount || exp.amount, selectedClaim.currency)}</span></div></div>))}</div><div className="p-4 border-t bg-slate-50 space-y-3"><div className="flex gap-3"><button onClick={() => setEditingClaim(selectedClaim)} className="flex-1 py-3 rounded-xl bg-purple-500 text-white font-semibold">✏️ Edit / Add Notes</button><button onClick={() => setShowRequestChanges(true)} className="flex-1 py-3 rounded-xl bg-amber-500 text-white font-semibold">📝 Return</button></div><div className="flex gap-3"><button onClick={() => handleReject(selectedClaim.id)} disabled={loading} className="flex-1 py-3 rounded-xl bg-red-500 text-white font-semibold disabled:opacity-50">↩️ Reject</button><button onClick={() => handleApprove(selectedClaim)} disabled={loading} className="flex-[2] py-3 rounded-xl bg-green-600 text-white font-semibold disabled:opacity-50">{(selectedClaim.approval_level || 1) === 1 ? '✓ Approve → L2' : '✓ Final Approve'}</button></div></div></div></div>)}
+        {selectedClaim && (<div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50" onClick={() => setSelectedClaim(null)}><div className="bg-white rounded-2xl max-w-2xl w-full max-h-[90vh] overflow-auto" onClick={e => e.stopPropagation()}><div className="p-6 border-b flex justify-between"><div><h2 className="text-xl font-bold">{selectedClaim.user_name}</h2><p className="text-sm text-slate-500">{selectedClaim.claim_number} • Level {selectedClaim.approval_level || 1}</p></div><button onClick={() => setSelectedClaim(null)} className="text-2xl text-slate-400">×</button></div><div className="p-6"><button onClick={() => handleDownloadPDF(selectedClaim)} className="w-full bg-green-600 text-white py-3 rounded-xl font-semibold mb-4">📥 Download PDF</button>{selectedClaim.expenses?.map((exp, i) => (<div key={i} className="py-3 border-b"><div className="flex justify-between items-start"><div className="flex-1"><div className="flex items-center gap-2 flex-wrap"><span className="bg-blue-100 text-blue-700 text-xs px-2 py-0.5 rounded font-bold">{exp.ref}</span><span className="font-semibold">{exp.merchant}</span>{exp.isPotentialDuplicate && <span className="bg-red-100 text-red-600 text-xs px-2 py-0.5 rounded">⚠️ Duplicate?</span>}{exp.numberOfPax && <span className="bg-purple-100 text-purple-600 text-xs px-2 py-0.5 rounded">👥 {exp.numberOfPax} pax</span>}</div><p className="text-xs text-slate-500 mt-1">{exp.description}</p>{exp.adminNotes && <p className="text-xs text-amber-600 mt-1 bg-amber-50 px-2 py-1 rounded">📝 Notes: {exp.adminNotes}</p>}</div><span className="font-bold text-green-700 ml-2">{formatCurrency(exp.reimbursementAmount || exp.amount, selectedClaim.currency)}</span></div></div>))}</div><div className="p-4 border-t bg-slate-50 space-y-3"><div className="flex gap-3"><button onClick={() => setEditingClaim(selectedClaim)} className="flex-1 py-3 rounded-xl bg-purple-500 text-white font-semibold">✏️ Edit / Add Notes</button><button onClick={() => setShowRequestChanges(true)} className="flex-1 py-3 rounded-xl bg-amber-500 text-white font-semibold">📝 Return</button></div><div className="flex gap-3"><button onClick={() => handleReject(selectedClaim.id)} disabled={loading} className="flex-1 py-3 rounded-xl bg-red-500 text-white font-semibold disabled:opacity-50">↩️ Reject</button><button onClick={() => handleApprove(selectedClaim)} disabled={loading} className="flex-[2] py-3 rounded-xl bg-green-600 text-white font-semibold disabled:opacity-50">{(() => { const workflow = SENIOR_STAFF_ROUTING[selectedClaim.user_id]; const isSingleLevel = workflow?.singleLevel; const level = selectedClaim.approval_level || 1; if (level === 1 && isSingleLevel) return workflow?.externalApproval ? '✓ Approve (→ Chairman)' : '✓ Final Approve'; if (level === 1) return '✓ Approve → L2'; return '✓ Final Approve'; })()}</button></div></div></div></div>)}
         {editingClaim && <EditClaimModal claim={editingClaim} onClose={() => setEditingClaim(null)} />}
         {showRequestChanges && selectedClaim && (<div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50"><div className="bg-white rounded-2xl max-w-md w-full"><div className="bg-amber-500 text-white p-5"><h2 className="font-bold">📝 Request Changes</h2></div><div className="p-6"><textarea className="w-full p-3 border-2 rounded-xl" rows={4} placeholder="What needs fixing?" value={changeRequestComment} onChange={(e) => setChangeRequestComment(e.target.value)} /></div><div className="p-4 border-t flex gap-3"><button onClick={() => setShowRequestChanges(false)} className="flex-1 py-3 rounded-xl border-2 font-semibold">Cancel</button><button onClick={() => handleRequestChanges(selectedClaim.id, changeRequestComment)} disabled={!changeRequestComment.trim()} className="flex-[2] py-3 rounded-xl bg-amber-500 text-white font-semibold disabled:opacity-50">Send 📤</button></div></div></div>)}
       </div>
