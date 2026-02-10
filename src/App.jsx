@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 
 /*
  * BERKELEY INTERNATIONAL EXPENSE MANAGEMENT SYSTEM
- * Version: 2.4 - Admin Notes + Multi-Statement + Authorised Signature
+ * Version: 2.5 - Draft Persistence + Status Display + PDF Fix
  */
 const SUPABASE_URL = 'https://wlhoyjsicvkncfjbexoi.supabase.co';
 const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IndsaG95anNpY3ZrbmNmamJleG9pIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzAyNzIyMzcsImV4cCI6MjA4NTg0ODIzN30.AB-W5DjcmCl6fnWiQ2reD0rgDIJiMCGymc994fSJplw';
@@ -201,6 +201,26 @@ const canUserReviewClaim = (userId, claim) => {
   if (level === 2 && claim.level2_approver === userId) return true;
   return false;
 };
+
+const getApproverName = (approverId) => {
+  const emp = EMPLOYEES.find(e => e.id === approverId);
+  return emp ? emp.name.split(' ').slice(0, 2).join(' ') : 'Reviewer';
+};
+
+const getClaimStatusText = (claim) => {
+  if (claim.status === 'approved') return 'Approved';
+  if (claim.status === 'rejected') return 'Rejected';
+  if (claim.status === 'changes_requested') return 'Changes Requested';
+  if (claim.status === 'pending_review') {
+    const approverName = getApproverName(claim.level1_approver);
+    return `Pending ${approverName}'s Review`;
+  }
+  if (claim.status === 'pending_level2') {
+    const approverName = getApproverName(claim.level2_approver);
+    return `Pending ${approverName}'s Review`;
+  }
+  return claim.status;
+};
 const ImageViewer = ({ src, onClose }) => (
   <div className="fixed inset-0 bg-black/90 flex items-center justify-center z-[100] p-4" onClick={onClose}>
     <button onClick={onClose} className="absolute top-4 right-4 bg-white/20 hover:bg-white/40 text-white w-12 h-12 rounded-full text-2xl">✕</button>
@@ -384,6 +404,50 @@ export default function BerkeleyExpenseSystem() {
   const [passwordInput, setPasswordInput] = useState('');
   const [loginError, setLoginError] = useState('');
 
+  // Load draft expenses from localStorage when user logs in
+  useEffect(() => {
+    if (currentUser) {
+      const savedExpenses = localStorage.getItem(`draft_expenses_${currentUser.id}`);
+      if (savedExpenses) {
+        try {
+          setExpenses(JSON.parse(savedExpenses));
+        } catch (e) {
+          console.error('Failed to load saved expenses');
+        }
+      }
+      const savedStatements = localStorage.getItem(`draft_statements_${currentUser.id}`);
+      if (savedStatements) {
+        try {
+          setAnnotatedStatements(JSON.parse(savedStatements));
+        } catch (e) {
+          console.error('Failed to load saved statements');
+        }
+      }
+    }
+  }, [currentUser]);
+
+  // Save draft expenses to localStorage whenever they change
+  useEffect(() => {
+    if (currentUser && expenses.length > 0) {
+      localStorage.setItem(`draft_expenses_${currentUser.id}`, JSON.stringify(expenses));
+    }
+  }, [expenses, currentUser]);
+
+  // Save annotated statements to localStorage
+  useEffect(() => {
+    if (currentUser && annotatedStatements.length > 0) {
+      localStorage.setItem(`draft_statements_${currentUser.id}`, JSON.stringify(annotatedStatements));
+    }
+  }, [annotatedStatements, currentUser]);
+
+  // Clear localStorage after successful submit
+  const clearDraftStorage = () => {
+    if (currentUser) {
+      localStorage.removeItem(`draft_expenses_${currentUser.id}`);
+      localStorage.removeItem(`draft_statements_${currentUser.id}`);
+    }
+  };
+
   const loadClaims = async () => {
     setLoading(true);
     try {
@@ -455,9 +519,9 @@ export default function BerkeleyExpenseSystem() {
 
     // Multiple statement pages
     const statementsArray = Array.isArray(statementImgs) ? statementImgs : (statementImgs ? [statementImgs] : []);
-    const statementsHTML = statementsArray.map((img, idx) => `<div class="page statement-page"><div class="statement-header"><h2 style="font-size:14px;margin:0;">💳 Credit Card Statement ${statementsArray.length > 1 ? `(${idx + 1} of ${statementsArray.length})` : ''}</h2></div><img src="${img}" class="statement-img" /></div>`).join('');
+    const statementsHTML = statementsArray.map((img, idx) => `<div class="page statement-page"><div class="statement-container"><div class="statement-header-inline">💳 Credit Card Statement ${statementsArray.length > 1 ? `(${idx + 1} of ${statementsArray.length})` : ''}</div><img src="${img}" class="statement-img" /></div></div>`).join('');
 
-    const html = `<!DOCTYPE html><html><head><title>Expense Claim - ${claimNumber || 'Draft'}</title><style>*{margin:0;padding:0;box-sizing:border-box;}body{font-family:Arial,sans-serif;font-size:10px;color:#000;}.page{page-break-after:always;padding:12mm 15mm;min-height:100vh;}.page:last-child{page-break-after:avoid;}.header{text-align:center;margin-bottom:15px;border-bottom:2px solid #000;padding-bottom:10px;}.header h1{font-size:16px;font-weight:bold;margin-bottom:3px;}.header .company{font-size:11px;color:#666;}.info-box{border:1px solid #000;margin-bottom:15px;}.info-row{display:flex;border-bottom:1px solid #000;}.info-row:last-child{border-bottom:none;}.info-cell{flex:1;padding:5px 8px;border-right:1px solid #000;}.info-cell:last-child{border-right:none;}.info-label{font-size:9px;color:#666;}.info-value{font-weight:bold;}.expenses-section{border:1px solid #000;margin-bottom:15px;}.section-header{background:#f0f0f0;padding:5px 8px;font-weight:bold;border-bottom:1px solid #000;font-size:11px;}.category-header{background:#f8f8f8;padding:4px 8px;font-weight:bold;font-size:10px;border-bottom:1px solid #ccc;text-decoration:underline;}.expense-row{display:flex;border-bottom:1px solid #ddd;}.col-cat{width:25px;padding:3px 5px;font-weight:bold;}.col-name{width:100px;padding:3px 5px;text-decoration:underline;}.col-detail{flex:1;padding:3px 5px;}.col-amount{width:80px;padding:3px 5px;text-align:right;}.sub-row{display:flex;padding-left:125px;border-bottom:1px solid #eee;}.total-row{display:flex;background:#f0f0f0;border-top:2px solid #000;padding:8px;}.total-row .label{flex:1;font-weight:bold;font-size:11px;}.total-row .amount{width:100px;text-align:right;font-weight:bold;font-size:11px;border:1px solid #000;padding:3px 8px;}.signature-section{margin-top:20px;}.sig-row{display:flex;margin-bottom:15px;gap:20px;}.sig-field{flex:1;}.sig-label{font-size:9px;margin-bottom:3px;}.sig-line{border-bottom:1px solid #000;height:20px;}.receipt-page{padding:10mm;}.receipt-header{background:#333;color:white;padding:12px;margin-bottom:10px;display:flex;align-items:center;}.receipt-ref{font-size:28px;font-weight:bold;margin-right:20px;min-width:50px;}.receipt-info{font-size:11px;line-height:1.6;}.receipt-img{max-width:100%;max-height:180mm;object-fit:contain;display:block;margin:0 auto;}.no-receipt{background:#f5f5f5;padding:50px;text-align:center;color:#999;}.statement-page{padding:10mm;}.statement-header{background:#ff9800;color:white;padding:12px;margin-bottom:10px;text-align:center;}.statement-img{max-width:100%;max-height:250mm;object-fit:contain;display:block;margin:0 auto;}.detail-title{font-size:14px;text-align:center;margin-bottom:15px;font-weight:bold;}.detail-info{margin-bottom:10px;}.detail-note{font-style:italic;margin-bottom:15px;font-size:9px;text-decoration:underline;}.detail-table{width:100%;border-collapse:collapse;font-size:9px;}.detail-table th,.detail-table td{border:1px solid #999;padding:4px;text-align:center;}.detail-table th{background:#e0e0e0;font-weight:bold;}.detail-table td.desc{text-align:left;color:#1976d2;}.subtotal-row{background:#fff3cd;}.subtotal-row td{font-weight:bold;}@media print{.page{padding:10mm;}body{-webkit-print-color-adjust:exact;print-color-adjust:exact;}}</style></head><body>
+    const html = `<!DOCTYPE html><html><head><title>Expense Claim - ${claimNumber || 'Draft'}</title><style>*{margin:0;padding:0;box-sizing:border-box;}body{font-family:Arial,sans-serif;font-size:10px;color:#000;}.page{page-break-after:always;padding:12mm 15mm;min-height:100vh;}.page:last-child{page-break-after:avoid;}.header{text-align:center;margin-bottom:15px;border-bottom:2px solid #000;padding-bottom:10px;}.header h1{font-size:16px;font-weight:bold;margin-bottom:3px;}.header .company{font-size:11px;color:#666;}.info-box{border:1px solid #000;margin-bottom:15px;}.info-row{display:flex;border-bottom:1px solid #000;}.info-row:last-child{border-bottom:none;}.info-cell{flex:1;padding:5px 8px;border-right:1px solid #000;}.info-cell:last-child{border-right:none;}.info-label{font-size:9px;color:#666;}.info-value{font-weight:bold;}.expenses-section{border:1px solid #000;margin-bottom:15px;}.section-header{background:#f0f0f0;padding:5px 8px;font-weight:bold;border-bottom:1px solid #000;font-size:11px;}.category-header{background:#f8f8f8;padding:4px 8px;font-weight:bold;font-size:10px;border-bottom:1px solid #ccc;text-decoration:underline;}.expense-row{display:flex;border-bottom:1px solid #ddd;}.col-cat{width:25px;padding:3px 5px;font-weight:bold;}.col-name{width:100px;padding:3px 5px;text-decoration:underline;}.col-detail{flex:1;padding:3px 5px;}.col-amount{width:80px;padding:3px 5px;text-align:right;}.sub-row{display:flex;padding-left:125px;border-bottom:1px solid #eee;}.total-row{display:flex;background:#f0f0f0;border-top:2px solid #000;padding:8px;}.total-row .label{flex:1;font-weight:bold;font-size:11px;}.total-row .amount{width:100px;text-align:right;font-weight:bold;font-size:11px;border:1px solid #000;padding:3px 8px;}.signature-section{margin-top:20px;}.sig-row{display:flex;margin-bottom:15px;gap:20px;}.sig-field{flex:1;}.sig-label{font-size:9px;margin-bottom:3px;}.sig-line{border-bottom:1px solid #000;height:20px;}.receipt-page{padding:10mm;}.receipt-header{background:#333;color:white;padding:12px;margin-bottom:10px;display:flex;align-items:center;}.receipt-ref{font-size:28px;font-weight:bold;margin-right:20px;min-width:50px;}.receipt-info{font-size:11px;line-height:1.6;}.receipt-img{max-width:100%;max-height:180mm;object-fit:contain;display:block;margin:0 auto;}.no-receipt{background:#f5f5f5;padding:50px;text-align:center;color:#999;}.statement-page{padding:5mm;}.statement-container{position:relative;}.statement-header-inline{background:#ff9800;color:white;padding:8px 12px;font-size:12px;font-weight:bold;text-align:center;}.statement-img{max-width:100%;max-height:270mm;object-fit:contain;display:block;margin:0 auto;}.detail-title{font-size:14px;text-align:center;margin-bottom:15px;font-weight:bold;}.detail-info{margin-bottom:10px;}.detail-note{font-style:italic;margin-bottom:15px;font-size:9px;text-decoration:underline;}.detail-table{width:100%;border-collapse:collapse;font-size:9px;}.detail-table th,.detail-table td{border:1px solid #999;padding:4px;text-align:center;}.detail-table th{background:#e0e0e0;font-weight:bold;}.detail-table td.desc{text-align:left;color:#1976d2;}.subtotal-row{background:#fff3cd;}.subtotal-row td{font-weight:bold;}@media print{.page{padding:10mm;}body{-webkit-print-color-adjust:exact;print-color-adjust:exact;}}</style></head><body>
     <div class="page"><div class="header"><h1>Motor & Expense Claim Form</h1><div class="company">${companyName}</div></div><div class="info-box"><div class="info-row"><div class="info-cell"><span class="info-label">Name</span><br><span class="info-value">${userName}</span></div><div class="info-cell"><span class="info-label">Month</span><br><span class="info-value">${claimMonth}</span></div></div><div class="info-row"><div class="info-cell"><span class="info-label">Claim Number</span><br><span class="info-value">${claimNumber || 'DRAFT'}</span></div><div class="info-cell"><span class="info-label">Reimbursement Currency</span><br><span class="info-value">${reimburseCurrency}</span></div></div></div><div class="expenses-section"><div class="section-header">Expenses claim</div><div class="category-header">Motor Vehicle Expenditure</div>${['A','B','C','D'].map(cat => { const c = EXPENSE_CATEGORIES[cat]; return `<div class="expense-row"><div class="col-cat">${cat}.</div><div class="col-name">${c.name}</div><div class="col-detail"></div><div class="col-amount"></div></div>${c.subcategories.map(sub => `<div class="sub-row"><div class="col-detail">${sub}</div><div class="col-amount">${reimburseCurrency} ${getSubcategoryTotal(cat,sub).toFixed(2)}</div></div>`).join('')}`; }).join('')}<div class="category-header">Business Expenditure</div>${['E','F','G','H','I','J'].map(cat => { const c = EXPENSE_CATEGORIES[cat]; return `<div class="expense-row"><div class="col-cat">${cat}.</div><div class="col-name">${c.name}</div><div class="col-detail"></div><div class="col-amount"></div></div>${c.subcategories.map(sub => `<div class="sub-row"><div class="col-detail">${sub}</div><div class="col-amount">${reimburseCurrency} ${getSubcategoryTotal(cat,sub).toFixed(2)}</div></div>`).join('')}`; }).join('')}</div><div class="total-row"><div class="label">Total expenses claimed</div><div class="amount">${reimburseCurrency} ${totalAmount.toFixed(2)}</div></div><div class="signature-section"><div class="sig-row"><div class="sig-field"><div class="sig-label">Signature of Claimant:</div><div class="sig-line" style="font-style:italic;padding-top:5px;">${userName}</div></div><div class="sig-field"><div class="sig-label">Date:</div><div class="sig-line" style="padding-top:5px;">${formatDate(submittedDate || new Date().toISOString())}</div></div></div><div class="sig-row"><div class="sig-field"><div class="sig-label">Authorised:</div><div class="sig-line" style="font-style:italic;padding-top:5px;">${level2ApprovedBy || ''}</div></div><div class="sig-field"><div class="sig-label">Date:</div><div class="sig-line" style="padding-top:5px;">${level2ApprovedAt ? formatDate(level2ApprovedAt) : ''}</div></div></div></div></div>
     ${travelDetailHTML}${entertainingDetailHTML}${otherDetailHTML}${receiptsHTML}${statementsHTML}
     <script>window.onload=function(){window.print();setTimeout(function(){window.close();},500);};</script></body></html>`;
@@ -489,19 +553,26 @@ export default function BerkeleyExpenseSystem() {
       const workflow = getApprovalWorkflow(currentUser.id, currentUser.office);
       
       if (returned) {
-        const { error } = await supabase.from('claims').update({ 
+        const updateData = { 
           total_amount: reimbursementTotal, 
           item_count: pendingExpenses.length, 
           status: 'pending_review', 
           approval_level: 1, 
-          expenses: pendingExpenses, 
-          annotated_statements: annotatedStatements,
+          expenses: pendingExpenses,
           annotated_statement: annotatedStatements[0] || null
-        }).eq('id', returned.id);
-        if (error) throw error;
+        };
+        // Only include annotated_statements if we have any
+        if (annotatedStatements.length > 0) {
+          updateData.annotated_statements = annotatedStatements;
+        }
+        const { error } = await supabase.from('claims').update(updateData).eq('id', returned.id);
+        if (error) {
+          console.error('Update error:', error);
+          throw new Error(error.message || 'Update failed');
+        }
       } else {
         const claimNumber = `EXP-2026-${String(claims.length + 1).padStart(3, '0')}`;
-        const { error } = await supabase.from('claims').insert([{
+        const insertData = {
           claim_number: claimNumber, 
           user_id: currentUser.id, 
           user_name: currentUser.name,
@@ -514,22 +585,30 @@ export default function BerkeleyExpenseSystem() {
           approval_level: 1,
           level1_approver: workflow?.level1, 
           level2_approver: workflow?.level2,
-          annotated_statements: annotatedStatements,
           annotated_statement: annotatedStatements[0] || null,
           expenses: pendingExpenses,
           submitted_at: new Date().toISOString()
-        }]);
-        if (error) throw error;
+        };
+        // Only include annotated_statements if we have any
+        if (annotatedStatements.length > 0) {
+          insertData.annotated_statements = annotatedStatements;
+        }
+        const { error } = await supabase.from('claims').insert([insertData]);
+        if (error) {
+          console.error('Insert error:', error);
+          throw new Error(error.message || 'Insert failed');
+        }
       }
       setExpenses([]); 
       setAnnotatedStatements([]); 
       setStatementAnnotations([]); 
       setStatementImages([]);
+      clearDraftStorage();
       await loadClaims(); 
       alert('✅ Submitted!');
     } catch (err) { 
       console.error('Submit error:', err); 
-      alert('❌ Failed to submit'); 
+      alert(`❌ Failed to submit: ${err.message}`); 
     }
     setLoading(false);
   };
@@ -652,7 +731,7 @@ export default function BerkeleyExpenseSystem() {
               <div className="flex gap-3 pt-2"><button onClick={() => { setLoginStep('select'); setSelectedEmployee(null); }} className="flex-1 py-3 rounded-xl border-2 border-slate-300 font-semibold text-slate-600">← Back</button><button onClick={handleLogin} className="flex-[2] py-3 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 text-white font-semibold shadow-lg">Login 🔐</button></div>
             </div>
           )}
-          <p className="text-center text-xs text-slate-400 mt-8">v2.4</p>
+          <p className="text-center text-xs text-slate-400 mt-8">v2.5</p>
         </div>
       </div>
     );
@@ -845,7 +924,7 @@ export default function BerkeleyExpenseSystem() {
         </div>
         <div className="bg-white rounded-2xl shadow-lg p-6">
           <h3 className="font-bold text-slate-800 mb-4">📁 My Claims</h3>
-          {myClaims.filter(c => c.status !== 'changes_requested').length === 0 ? <p className="text-center text-slate-400 py-8">None</p> : (<div className="space-y-2">{myClaims.filter(c => c.status !== 'changes_requested').map(claim => (<div key={claim.id} className="flex items-center justify-between p-4 rounded-xl bg-slate-50 border"><div><span className="font-semibold">{claim.claim_number}</span><span className={`ml-2 text-xs px-2 py-0.5 rounded-full ${claim.status === 'approved' ? 'bg-green-100 text-green-700' : claim.status === 'rejected' ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-700'}`}>{claim.status === 'pending_level2' ? 'Level 2 Review' : claim.status}</span></div><div className="flex items-center gap-3"><span className="font-bold">{formatCurrency(claim.total_amount, claim.currency)}</span><button onClick={() => handleDownloadPDF(claim)} className="bg-green-100 text-green-700 px-3 py-2 rounded-lg text-sm">📥</button></div></div>))}</div>)}
+          {myClaims.filter(c => c.status !== 'changes_requested').length === 0 ? <p className="text-center text-slate-400 py-8">None</p> : (<div className="space-y-2">{myClaims.filter(c => c.status !== 'changes_requested').map(claim => (<div key={claim.id} className="flex items-center justify-between p-4 rounded-xl bg-slate-50 border"><div><span className="font-semibold">{claim.claim_number}</span><span className={`ml-2 text-xs px-2 py-0.5 rounded-full ${claim.status === 'approved' ? 'bg-green-100 text-green-700' : claim.status === 'rejected' ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-700'}`}>{getClaimStatusText(claim)}</span></div><div className="flex items-center gap-3"><span className="font-bold">{formatCurrency(claim.total_amount, claim.currency)}</span><button onClick={() => handleDownloadPDF(claim)} className="bg-green-100 text-green-700 px-3 py-2 rounded-lg text-sm">📥</button></div></div>))}</div>)}
         </div>
       </div>
     );
