@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 
 /*
  * BERKELEY INTERNATIONAL EXPENSE MANAGEMENT SYSTEM
- * Version: 2.8 - Admin Notes Fix + Duplicate Flag in PDF
+ * Version: 3.0 - Mobile Fix + Image Compression + Error Handling
  */
 const SUPABASE_URL = 'https://wlhoyjsicvkncfjbexoi.supabase.co';
 const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IndsaG95anNpY3ZrbmNmamJleG9pIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzAyNzIyMzcsImV4cCI6MjA4NTg0ODIzN30.AB-W5DjcmCl6fnWiQ2reD0rgDIJiMCGymc994fSJplw';
@@ -180,6 +180,41 @@ const EXPENSE_CATEGORIES = {
 
 const CURRENCIES = ['SGD', 'HKD', 'CNY', 'THB', 'AED', 'GBP', 'USD', 'EUR', 'MYR', 'JPY', 'SAR'];
 
+// Image compression utility - reduces large camera photos to reasonable size
+const compressImage = (file, maxWidth = 1200, quality = 0.7) => {
+  return new Promise((resolve) => {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const img = new Image();
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        let width = img.width;
+        let height = img.height;
+        
+        // Scale down if too large
+        if (width > maxWidth) {
+          height = (height * maxWidth) / width;
+          width = maxWidth;
+        }
+        
+        canvas.width = width;
+        canvas.height = height;
+        
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(img, 0, 0, width, height);
+        
+        // Convert to compressed JPEG
+        const compressed = canvas.toDataURL('image/jpeg', quality);
+        resolve(compressed);
+      };
+      img.onerror = () => resolve(e.target.result); // Fallback to original
+      img.src = e.target.result;
+    };
+    reader.onerror = () => resolve(null);
+    reader.readAsDataURL(file);
+  });
+};
+
 const formatCurrency = (amount, currency) => `${currency} ${parseFloat(amount || 0).toFixed(2)}`;
 const formatDate = (dateStr) => { if (!dateStr) return ''; const d = new Date(dateStr); return d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }); };
 const formatShortDate = (dateStr) => { if (!dateStr) return ''; const d = new Date(dateStr); return d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: '2-digit' }); };
@@ -208,7 +243,8 @@ const getApproverName = (approverId) => {
 };
 
 const getClaimStatusText = (claim) => {
-  if (claim.status === 'approved') return 'Approved';
+  if (claim.status === 'approved') return '✅ Approved';
+  if (claim.status === 'submitted_to_finance') return '📤 Submitted to Finance';
   if (claim.status === 'rejected') return 'Rejected';
   if (claim.status === 'changes_requested') return 'Changes Requested';
   if (claim.status === 'pending_review') {
@@ -347,11 +383,15 @@ const StatementAnnotator = ({ image, expenses, existingAnnotations = [], onSave,
               {foreignExpenses.map(exp => {
                 const isPlaced = annotations.some(a => a.ref === exp.ref);
                 const isSelected = selectedLabel === exp.ref;
+                const reimburseCurrency = exp.reimbursementAmount ? 'SGD' : exp.currency;
                 return (
                   <button key={exp.ref} onClick={() => setSelectedLabel(isSelected ? null : exp.ref)}
-                    className={`px-3 py-2 rounded-lg text-sm font-medium ${isSelected ? 'bg-orange-500 text-white ring-2 ring-orange-300' : isPlaced ? 'bg-green-100 text-green-700 border-2 border-green-400' : 'bg-slate-100 text-slate-700'}`}>
-                    {exp.ref} - {exp.merchant}
-                    {isPlaced && <span className="ml-2" onClick={(e) => { e.stopPropagation(); removeAnnotation(exp.ref); }}>✕</span>}
+                    className={`px-3 py-2 rounded-lg text-sm font-medium text-left ${isSelected ? 'bg-orange-500 text-white ring-2 ring-orange-300' : isPlaced ? 'bg-green-100 text-green-700 border-2 border-green-400' : 'bg-slate-100 text-slate-700'}`}>
+                    <div className="font-bold">{exp.ref} - {exp.merchant}</div>
+                    <div className={`text-xs ${isSelected ? 'text-orange-100' : isPlaced ? 'text-green-600' : 'text-slate-500'}`}>
+                      {exp.currency} {parseFloat(exp.amount).toFixed(2)} → SGD {parseFloat(exp.reimbursementAmount || exp.amount).toFixed(2)}
+                    </div>
+                    {isPlaced && <span className="ml-2 text-xs" onClick={(e) => { e.stopPropagation(); removeAnnotation(exp.ref); }}>✕</span>}
                   </button>
                 );
               })}
@@ -436,15 +476,23 @@ export default function BerkeleyExpenseSystem() {
 
   // Save draft expenses to localStorage whenever they change
   useEffect(() => {
-    if (currentUser && expenses.length > 0) {
-      localStorage.setItem(`draft_expenses_${currentUser.id}`, JSON.stringify(expenses));
+    try {
+      if (currentUser && expenses && expenses.length > 0) {
+        localStorage.setItem(`draft_expenses_${currentUser.id}`, JSON.stringify(expenses));
+      }
+    } catch (err) {
+      console.error('Failed to save expenses to localStorage:', err);
     }
   }, [expenses, currentUser]);
 
   // Save annotated statements to localStorage
   useEffect(() => {
-    if (currentUser && annotatedStatements.length > 0) {
-      localStorage.setItem(`draft_statements_${currentUser.id}`, JSON.stringify(annotatedStatements));
+    try {
+      if (currentUser && annotatedStatements && annotatedStatements.length > 0) {
+        localStorage.setItem(`draft_statements_${currentUser.id}`, JSON.stringify(annotatedStatements));
+      }
+    } catch (err) {
+      console.error('Failed to save statements to localStorage:', err);
     }
   }, [annotatedStatements, currentUser]);
 
@@ -483,6 +531,36 @@ export default function BerkeleyExpenseSystem() {
   const foreignCurrencyExpenses = pendingExpenses.filter(e => e.isForeignCurrency);
   const hasForeignCurrency = foreignCurrencyExpenses.length > 0;
   const getNextRef = (category) => `${category}${pendingExpenses.filter(e => e.category === category).length + 1}`;
+  
+  // Sort expenses by date and reassign ref numbers within each category
+  const sortAndReassignRefs = (expenseList) => {
+    try {
+      if (!expenseList || !Array.isArray(expenseList) || expenseList.length === 0) {
+        return expenseList || [];
+      }
+      
+      // Sort all expenses by date (oldest first)
+      const sorted = [...expenseList].sort((a, b) => {
+        const dateA = a?.date ? new Date(a.date) : new Date();
+        const dateB = b?.date ? new Date(b.date) : new Date();
+        return dateA - dateB;
+      });
+      
+      // Track count per category
+      const categoryCount = {};
+      
+      // Reassign refs based on sorted order
+      return sorted.map(exp => {
+        if (!exp) return exp;
+        const cat = exp.category || 'C';
+        categoryCount[cat] = (categoryCount[cat] || 0) + 1;
+        return { ...exp, ref: `${cat}${categoryCount[cat]}` };
+      });
+    } catch (err) {
+      console.error('sortAndReassignRefs error:', err);
+      return expenseList || [];
+    }
+  };
   const getReviewableClaims = () => {
     if (!currentUser) return [];
     return claims.filter(c => (c.status === 'pending_review' || c.status === 'pending_level2') && canUserReviewClaim(currentUser.id, c));
@@ -727,6 +805,31 @@ export default function BerkeleyExpenseSystem() {
     }
     setLoading(false);
   };
+
+  // Mark claim as submitted to finance (by L1 admin)
+  const handleMarkSubmitted = async (claimId) => {
+    setLoading(true);
+    try {
+      const { error } = await supabase.from('claims').update({ 
+        status: 'submitted_to_finance',
+        submitted_to_finance_by: currentUser.name,
+        submitted_to_finance_at: new Date().toISOString()
+      }).eq('id', claimId);
+      if (error) throw error;
+      await loadClaims();
+      alert('✅ Marked as submitted');
+    } catch (err) {
+      console.error('Mark submitted error:', err);
+      alert('❌ Failed');
+    }
+    setLoading(false);
+  };
+
+  // Get claims ready for submission (approved, L1 admin sees their office's claims)
+  const getClaimsForSubmission = () => {
+    if (!currentUser) return [];
+    return claims.filter(c => c.status === 'approved' && c.level1_approver === currentUser.id);
+  };
   // LOGIN - No password hint shown
   if (!currentUser) {
     const handleSelectEmployee = (e) => { const user = EMPLOYEES.find(emp => emp.id === parseInt(e.target.value)); if (user) { setSelectedEmployee(user); setLoginStep('password'); setLoginError(''); setPasswordInput(''); } };
@@ -760,7 +863,7 @@ export default function BerkeleyExpenseSystem() {
               <div className="flex gap-3 pt-2"><button onClick={() => { setLoginStep('select'); setSelectedEmployee(null); }} className="flex-1 py-3 rounded-xl border-2 border-slate-300 font-semibold text-slate-600">← Back</button><button onClick={handleLogin} className="flex-[2] py-3 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 text-white font-semibold shadow-lg">Login 🔐</button></div>
             </div>
           )}
-          <p className="text-center text-xs text-slate-400 mt-8">v2.8</p>
+          <p className="text-center text-xs text-slate-400 mt-8">v3.0</p>
         </div>
       </div>
     );
@@ -775,7 +878,30 @@ export default function BerkeleyExpenseSystem() {
     const [formData, setFormData] = useState(editExpense ? { merchant: editExpense.merchant || '', amount: editExpense.amount || '', currency: editExpense.currency || userOffice?.currency || 'SGD', date: editExpense.date || new Date().toISOString().split('T')[0], category: editExpense.category || 'C', subcategory: editExpense.subcategory || 'Taxis', description: editExpense.description || '', attendees: editExpense.attendees || '', numberOfPax: editExpense.numberOfPax || '', reimbursementAmount: editExpense.reimbursementAmount || '', hasBackcharge: editExpense.hasBackcharge || false, backcharges: editExpense.backcharges || [] } : { merchant: '', amount: '', currency: userOffice?.currency || 'SGD', date: new Date().toISOString().split('T')[0], category: 'C', subcategory: 'Taxis', description: '', attendees: '', numberOfPax: '', reimbursementAmount: '', hasBackcharge: false, backcharges: [] });
     const isForeignCurrency = formData.currency !== userReimburseCurrency;
     const isCNY = formData.currency === 'CNY';
-    const handleFileChange = (e, isSecond = false) => { const file = e.target.files[0]; if (file) { const reader = new FileReader(); reader.onloadend = () => { if (isSecond) setReceiptPreview2(reader.result); else setReceiptPreview(reader.result); }; reader.readAsDataURL(file); if (!isSecond) setStep(2); } };
+    const handleFileChange = async (e, isSecond = false) => { 
+      const file = e.target.files[0]; 
+      if (file) { 
+        try {
+          // Compress image to reduce memory usage (critical for mobile)
+          const compressed = await compressImage(file, 1200, 0.7);
+          if (compressed) {
+            if (isSecond) setReceiptPreview2(compressed); 
+            else setReceiptPreview(compressed); 
+          }
+          if (!isSecond) setStep(2); 
+        } catch (err) {
+          console.error('Image processing error:', err);
+          // Fallback to direct read
+          const reader = new FileReader();
+          reader.onloadend = () => { 
+            if (isSecond) setReceiptPreview2(reader.result); 
+            else setReceiptPreview(reader.result); 
+          };
+          reader.readAsDataURL(file);
+          if (!isSecond) setStep(2);
+        }
+      } 
+    };
     const addBackcharge = () => setFormData(prev => ({ ...prev, backcharges: [...prev.backcharges, { development: '', percentage: '' }] }));
     const updateBackcharge = (idx, field, value) => setFormData(prev => ({ ...prev, backcharges: prev.backcharges.map((bc, i) => i === idx ? { ...bc, [field]: value } : bc) }));
     const removeBackcharge = (idx) => setFormData(prev => ({ ...prev, backcharges: prev.backcharges.filter((_, i) => i !== idx) }));
@@ -811,19 +937,51 @@ export default function BerkeleyExpenseSystem() {
     };
     
     const handleSave = () => {
-      // Check for duplicates
-      const duplicate = checkDuplicate();
-      if (duplicate.found) {
-        const proceed = window.confirm(`⚠️ Possible duplicate detected!\n\nAn expense with the same date (${formData.date}), amount (${formData.currency} ${formData.amount}), and currency was found in ${duplicate.where} (${duplicate.ref}).\n\nDo you still want to save this expense?`);
-        if (!proceed) return;
+      try {
+        // Check for duplicates
+        const duplicate = checkDuplicate();
+        if (duplicate.found) {
+          const proceed = window.confirm(`⚠️ Possible duplicate detected!\n\nAn expense with the same date (${formData.date}), amount (${formData.currency} ${formData.amount}), and currency was found in ${duplicate.where} (${duplicate.ref}).\n\nDo you still want to save this expense?`);
+          if (!proceed) return;
+        }
+        
+        const isPotentialDuplicate = duplicate.found;
+        const duplicateInfo = duplicate.found ? `Matches ${duplicate.where} (${duplicate.ref})` : null;
+        
+        if (editExpense) { 
+          // Update existing expense then sort
+          setExpenses(prev => {
+            const prevList = prev || [];
+            const updated = prevList.map(e => e.id === editExpense.id ? { ...e, ...formData, amount: parseFloat(formData.amount), reimbursementAmount: isForeignCurrency ? parseFloat(formData.reimbursementAmount) : parseFloat(formData.amount), receiptPreview: receiptPreview || e.receiptPreview, receiptPreview2: isCNY ? (receiptPreview2 || e.receiptPreview2) : null, isForeignCurrency, isPotentialDuplicate, duplicateInfo } : e);
+            return sortAndReassignRefs(updated);
+          });
+        } else { 
+          // Add new expense then sort
+          setExpenses(prev => {
+            const prevList = prev || [];
+            const newExpense = { 
+              id: Date.now(), 
+              ref: 'temp', // Will be reassigned by sort
+              ...formData, 
+              amount: parseFloat(formData.amount) || 0, 
+              reimbursementAmount: isForeignCurrency ? (parseFloat(formData.reimbursementAmount) || 0) : (parseFloat(formData.amount) || 0), 
+              receiptPreview: receiptPreview || null, 
+              receiptPreview2: isCNY ? (receiptPreview2 || null) : null, 
+              status: 'draft', 
+              isForeignCurrency: isForeignCurrency || false, 
+              isOld: isOlderThan2Months(formData.date), 
+              createdAt: new Date().toISOString(), 
+              isPotentialDuplicate: isPotentialDuplicate || false, 
+              duplicateInfo: duplicateInfo || null
+            };
+            return sortAndReassignRefs([...prevList, newExpense]);
+          });
+        }
+        onClose();
+      } catch (err) {
+        console.error('handleSave error:', err);
+        alert('❌ Error saving expense. Please try again.');
       }
-      
-      const isPotentialDuplicate = duplicate.found;
-      const duplicateInfo = duplicate.found ? `Matches ${duplicate.where} (${duplicate.ref})` : null;
-      
-      if (editExpense) { setExpenses(prev => prev.map(e => e.id === editExpense.id ? { ...e, ...formData, amount: parseFloat(formData.amount), reimbursementAmount: isForeignCurrency ? parseFloat(formData.reimbursementAmount) : parseFloat(formData.amount), receiptPreview: receiptPreview || e.receiptPreview, receiptPreview2: isCNY ? (receiptPreview2 || e.receiptPreview2) : null, isForeignCurrency, isPotentialDuplicate, duplicateInfo } : e)); }
-      else { const ref = getNextRef(formData.category); setExpenses(prev => [...prev, { id: Date.now(), ref, ...formData, amount: parseFloat(formData.amount), reimbursementAmount: isForeignCurrency ? parseFloat(formData.reimbursementAmount) : parseFloat(formData.amount), receiptPreview, receiptPreview2: isCNY ? receiptPreview2 : null, status: 'draft', isForeignCurrency, isOld: isOlderThan2Months(formData.date), createdAt: new Date().toISOString(), isPotentialDuplicate, duplicateInfo }]); }
-      onClose();
     };
     const needsAttendees = EXPENSE_CATEGORIES[formData.category]?.requiresAttendees;
     const paxCount = parseInt(formData.numberOfPax) || 0;
@@ -897,12 +1055,20 @@ export default function BerkeleyExpenseSystem() {
   // Multi-Statement Upload Modal
   const StatementUploadModal = () => {
     const [localStatements, setLocalStatements] = useState([...statementImages]);
-    const handleAddStatement = (e) => { 
+    const handleAddStatement = async (e) => { 
       const file = e.target.files[0]; 
       if (file && file.type.startsWith('image/')) { 
-        const reader = new FileReader(); 
-        reader.onloadend = () => setLocalStatements(prev => [...prev, reader.result]); 
-        reader.readAsDataURL(file); 
+        try {
+          const compressed = await compressImage(file, 1400, 0.8);
+          if (compressed) {
+            setLocalStatements(prev => [...prev, compressed]);
+          }
+        } catch (err) {
+          console.error('Statement image error:', err);
+          const reader = new FileReader(); 
+          reader.onloadend = () => setLocalStatements(prev => [...prev, reader.result]); 
+          reader.readAsDataURL(file);
+        }
       } 
     };
     const removeStatement = (idx) => setLocalStatements(prev => prev.filter((_, i) => i !== idx));
@@ -1030,7 +1196,7 @@ export default function BerkeleyExpenseSystem() {
         <div className="bg-white rounded-2xl shadow-lg p-6">
           <h3 className="font-bold text-slate-800 mb-4">📋 Pending</h3>
           {pendingExpenses.length === 0 ? (<div className="text-center py-12 text-slate-400">📭 No pending</div>) : (
-            <div className="space-y-2">{Object.entries(groupedExpenses).sort().map(([cat, exps]) => (<div key={cat}><p className="text-xs font-semibold text-slate-500 mb-2">{EXPENSE_CATEGORIES[cat]?.icon} {cat}. {EXPENSE_CATEGORIES[cat]?.name}</p>{exps.map(exp => (<div key={exp.id} className="flex items-center justify-between p-3 rounded-xl bg-slate-50 border mb-2"><div className="flex-1"><div className="flex items-center gap-2"><span className="bg-blue-100 text-blue-700 text-xs font-bold px-2 py-1 rounded">{exp.ref}</span><span className="font-semibold text-sm">{exp.merchant}</span>{exp.isForeignCurrency && <span className="text-amber-600 text-xs">💳</span>}{exp.receiptPreview2 && <span className="text-slate-500 text-xs">📑</span>}</div><p className="text-xs text-slate-500 mt-1">{exp.description}</p></div><div className="flex items-center gap-2"><span className="font-bold text-green-700">{formatCurrency(exp.reimbursementAmount || exp.amount, userReimburseCurrency)}</span><button onClick={() => setEditingExpense(exp)} className="text-blue-500 p-2">✏️</button><button onClick={() => setExpenses(prev => prev.filter(e => e.id !== exp.id))} className="text-red-500 p-2">🗑️</button></div></div>))}</div>))}</div>
+            <div className="space-y-2">{Object.entries(groupedExpenses).sort().map(([cat, exps]) => (<div key={cat}><p className="text-xs font-semibold text-slate-500 mb-2">{EXPENSE_CATEGORIES[cat]?.icon} {cat}. {EXPENSE_CATEGORIES[cat]?.name}</p>{exps.map(exp => (<div key={exp.id} className="flex items-center justify-between p-3 rounded-xl bg-slate-50 border mb-2"><div className="flex-1"><div className="flex items-center gap-2"><span className="bg-blue-100 text-blue-700 text-xs font-bold px-2 py-1 rounded">{exp.ref}</span><span className="font-semibold text-sm">{exp.merchant}</span>{exp.isForeignCurrency && <span className="text-amber-600 text-xs">💳</span>}{exp.receiptPreview2 && <span className="text-slate-500 text-xs">📑</span>}</div><p className="text-xs text-slate-500 mt-1">{exp.description}</p></div><div className="flex items-center gap-2"><span className="font-bold text-green-700">{formatCurrency(exp.reimbursementAmount || exp.amount, userReimburseCurrency)}</span><button onClick={() => setEditingExpense(exp)} className="text-blue-500 p-2">✏️</button><button onClick={() => setExpenses(prev => sortAndReassignRefs(prev.filter(e => e.id !== exp.id)))} className="text-red-500 p-2">🗑️</button></div></div>))}</div>))}</div>
           )}
         </div>
         <div className="bg-white rounded-2xl shadow-lg p-6">
@@ -1043,8 +1209,35 @@ export default function BerkeleyExpenseSystem() {
 
   const ReviewClaimsTab = () => {
     const reviewableClaims = getReviewableClaims();
+    const claimsForSubmission = getClaimsForSubmission();
     return (
       <div className="space-y-4">
+        {/* For Submission Section - Office Admin sees approved claims to submit */}
+        {claimsForSubmission.length > 0 && (
+          <div className="bg-white rounded-2xl shadow-lg p-6 border-2 border-green-300">
+            <h3 className="font-bold mb-4 text-green-700">📤 For Submission ({claimsForSubmission.length})</h3>
+            <p className="text-xs text-slate-500 mb-4">These claims have been fully approved. Mark as submitted after processing payment.</p>
+            <div className="space-y-2">
+              {claimsForSubmission.map(claim => (
+                <div key={claim.id} className="flex items-center justify-between p-4 rounded-xl bg-green-50 border border-green-200">
+                  <div className="flex-1">
+                    <div className="flex items-center gap-2">
+                      <span className="font-semibold">{claim.user_name}</span>
+                      <span className="bg-green-100 text-green-700 text-xs px-2 py-0.5 rounded-full">Approved</span>
+                    </div>
+                    <p className="text-sm text-slate-500">{claim.claim_number} • {claim.office}</p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="font-bold text-green-700">{formatCurrency(claim.total_amount, claim.currency)}</span>
+                    <button onClick={() => handleDownloadPDF(claim)} className="bg-blue-100 text-blue-700 px-3 py-2 rounded-lg text-sm">📥</button>
+                    <button onClick={() => handleMarkSubmitted(claim.id)} disabled={loading} className="bg-green-600 text-white px-3 py-2 rounded-lg text-sm font-semibold disabled:opacity-50">✓ Submitted</button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+        
         <div className="bg-white rounded-2xl shadow-lg p-6">
           <h3 className="font-bold mb-4">📊 To Review ({reviewableClaims.length})</h3>
           {reviewableClaims.length === 0 ? <div className="text-center py-12 text-slate-400">✅ Nothing to review</div> : (<div className="space-y-2">{reviewableClaims.map(claim => (<div key={claim.id} onClick={() => setSelectedClaim(claim)} className="flex items-center justify-between p-4 rounded-xl bg-slate-50 border cursor-pointer hover:border-blue-300"><div><span className="font-semibold">{claim.user_name}</span><span className={`ml-2 text-xs px-2 py-0.5 rounded-full ${claim.approval_level === 2 ? 'bg-blue-100 text-blue-700' : 'bg-amber-100 text-amber-700'}`}>L{claim.approval_level || 1}</span><p className="text-sm text-slate-500">{claim.office}</p></div><span className="font-bold">{formatCurrency(claim.total_amount, claim.currency)}</span></div>))}</div>)}
@@ -1056,7 +1249,7 @@ export default function BerkeleyExpenseSystem() {
     );
   };
 
-  const canReview = currentUser.role === 'admin' || currentUser.role === 'manager' || currentUser.role === 'finance' || getReviewableClaims().length > 0;
+  const canReview = currentUser.role === 'admin' || currentUser.role === 'manager' || currentUser.role === 'finance' || getReviewableClaims().length > 0 || getClaimsForSubmission().length > 0;
   
   // Handle multi-statement annotation
   const handleStatementAnnotationSave = (annotatedImage, annotations) => { 
