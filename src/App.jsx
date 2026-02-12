@@ -1,42 +1,72 @@
-import React, { useState, useEffect, useRef } from 'react';
+﻿import React, { useState, useEffect, useRef } from 'react';
 
 /*
  * BERKELEY INTERNATIONAL EXPENSE MANAGEMENT SYSTEM
- * Version: 3.5 - Fixed file upload and sync issues
+ * Version: 3.6 - ORIGINAL CODE + SYNC FIX ONLY
+ * - No external icon libraries (Uses original Emojis)
+ * - Full Employee List preserved
+ * - Database Connector fixed to support .eq() filtering
  */
+
 const SUPABASE_URL = 'https://wlhoyjsicvkncfjbexoi.supabase.co';
 const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IndsaG95anNpY3ZrbmNmamJleG9pIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzAyNzIyMzcsImV4cCI6MjA4NTg0ODIzN30.AB-W5DjcmCl6fnWiQ2reD0rgDIJiMCGymc994fSJplw';
 
+// --- THE FIX IS HERE ---
+// This new connector understands the ".eq()" command your app is sending
 const supabase = {
-  from: (table) => ({
-    select: async (columns = '*') => {
-      const res = await fetch(`${SUPABASE_URL}/rest/v1/${table}?select=${columns}`, {
-        headers: { 'apikey': SUPABASE_ANON_KEY, 'Authorization': `Bearer ${SUPABASE_ANON_KEY}` }
-      });
-      const data = await res.json();
-      return { data, error: res.ok ? null : data };
-    },
-    insert: async (rows) => {
-      const res = await fetch(`${SUPABASE_URL}/rest/v1/${table}`, {
-        method: 'POST',
-        headers: { 'apikey': SUPABASE_ANON_KEY, 'Authorization': `Bearer ${SUPABASE_ANON_KEY}`, 'Content-Type': 'application/json', 'Prefer': 'return=representation' },
-        body: JSON.stringify(rows)
-      });
-      const data = await res.json();
-      return { data, error: res.ok ? null : data };
-    },
-    update: (updates) => ({
-      eq: async (column, value) => {
-        const res = await fetch(`${SUPABASE_URL}/rest/v1/${table}?${column}=eq.${value}`, {
-          method: 'PATCH',
-          headers: { 'apikey': SUPABASE_ANON_KEY, 'Authorization': `Bearer ${SUPABASE_ANON_KEY}`, 'Content-Type': 'application/json', 'Prefer': 'return=representation' },
-          body: JSON.stringify(updates)
-        });
-        const data = await res.json();
-        return { data, error: res.ok ? null : data };
-      }
-    })
-  })
+  from: (table) => {
+    const headers = { 
+      'apikey': SUPABASE_ANON_KEY, 
+      'Authorization': `Bearer ${SUPABASE_ANON_KEY}`, 
+      'Content-Type': 'application/json', 
+      'Prefer': 'return=representation' 
+    };
+    
+    return {
+      // 1. SELECT with chaining support (.select().eq())
+      select: (columns = '*') => {
+        let url = `${SUPABASE_URL}/rest/v1/${table}?select=${columns}`;
+        const query = {
+          eq: (col, val) => { url += `&${col}=eq.${val}`; return query; },
+          then: async (resolve) => {
+            try {
+              const res = await fetch(url, { headers });
+              const data = await res.json();
+              resolve({ data, error: res.ok ? null : data });
+            } catch (e) { resolve({ data: null, error: e }); }
+          }
+        };
+        return query;
+      },
+      // 2. INSERT
+      insert: async (rows) => {
+        try {
+          const res = await fetch(`${SUPABASE_URL}/rest/v1/${table}`, { method: 'POST', headers, body: JSON.stringify(rows) });
+          const data = await res.json();
+          return { data, error: res.ok ? null : data };
+        } catch (e) { return { error: e }; }
+      },
+      // 3. UPDATE with chaining (.update().eq())
+      update: (updates) => ({
+        eq: async (col, val) => {
+          try {
+            const res = await fetch(`${SUPABASE_URL}/rest/v1/${table}?${col}=eq.${val}`, { method: 'PATCH', headers, body: JSON.stringify(updates) });
+            const data = await res.json();
+            return { data, error: res.ok ? null : data };
+          } catch (e) { return { error: e }; }
+        }
+      }),
+      // 4. DELETE with chaining (.delete().eq())
+      delete: () => ({
+        eq: async (col, val) => {
+          try {
+            await fetch(`${SUPABASE_URL}/rest/v1/${table}?${col}=eq.${val}`, { method: 'DELETE', headers });
+            return { error: null };
+          } catch (e) { return { error: e }; }
+        }
+      })
+    };
+  }
 };
 
 const OFFICES = [
@@ -99,11 +129,10 @@ const SENIOR_STAFF_ROUTING = {
   302: { level1: 306, level2: 804, level1Name: 'Cathy Liu Shikun', level2Name: 'Cathy He Zeqian' },
   502: { level1: 505, level2: 804, level1Name: 'Cherry Lai', level2Name: 'Cathy He Zeqian' },
   1001: { level1: 1002, level2: 804, level1Name: 'Christine Mendoza Dimaranan', level2Name: 'Cathy He Zeqian' },
-  // Kareen's claims go directly to Cathy as final (single-level approval)
   812: { level1: 804, level2: null, level1Name: 'Cathy He Zeqian', level2Name: null, singleLevel: true },
-  // Cathy submits directly - Kareen downloads PDF and sends to Chairman (no review needed)
   804: { level1: null, level2: null, level1Name: null, level2Name: null, selfSubmit: true, externalApproval: 'Chairman (via Kareen)' },
 };
+
 const EMPLOYEES = [
   { id: 101, name: 'Fang Yi', office: 'BEJ', role: 'employee', reimburseCurrency: 'CNY', password: 'berkeley123' },
   { id: 102, name: 'Caroline Zhu Yunshu', office: 'BEJ', role: 'admin', reimburseCurrency: 'CNY', password: 'berkeley123' },
@@ -166,7 +195,7 @@ const EMPLOYEES = [
   { id: 1005, name: 'Yasseen Jebara', office: 'DXB', role: 'employee', reimburseCurrency: 'AED', password: 'berkeley123' },
   { id: 1006, name: 'Adham Abu-Salim', office: 'DXB', role: 'employee', reimburseCurrency: 'AED', password: 'berkeley123' },
   { id: 1007, name: 'Olivia Rebecca Wyatt', office: 'DXB', role: 'employee', reimburseCurrency: 'AED', password: 'berkeley123' },
-  { id: 1008, name: 'Keisha Latoya Whitehorne', office: 'DXB', role: 'employee', reimburseCurrency: 'AED', password: 'berkeley123' },
+  { id: 1008, name: 'Keisha Latoya Whitehorne', office: 'DXB', role: 'employee', reimburseCurrency: 'AED', password: 'berkeley123' }
 ];
 
 const EXPENSE_CATEGORIES = {
@@ -1010,7 +1039,7 @@ export default function BerkeleyExpenseSystem() {
               <div className="flex gap-3 pt-2"><button onClick={() => { setLoginStep('select'); setSelectedEmployee(null); }} className="flex-1 py-3 rounded-xl border-2 border-slate-300 font-semibold text-slate-600">← Back</button><button onClick={handleLogin} className="flex-[2] py-3 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 text-white font-semibold shadow-lg">Login 🔐</button></div>
             </div>
           )}
-          <p className="text-center text-xs text-slate-400 mt-8">v3.5</p>
+          <p className="text-center text-xs text-slate-400 mt-8">v3.6</p>
         </div>
       </div>
     );
