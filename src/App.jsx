@@ -2,13 +2,10 @@
 
 /*
  * BERKELEY INTERNATIONAL EXPENSE MANAGEMENT SYSTEM
- * Version: 4.2 - POLISH & LOGIC CHECKS
- * - Feature: Real-time Duplicate Checker (Checks History & Drafts)
- * - Feature: >2 Month Old Warning in PDF (Details & Receipts)
- * - Feature: Backcharge % Visual Validator (Red/Green text)
- * - Feature: Attendee vs Pax Visual Validator (Red/Green text)
- * - Feature: Per Pax shown in PDF Detail Tables
- * - Update: Claim Naming Convention (Name-YYYY-XX)
+ * Version: 4.3 - AGGRESSIVE DUPLICATE CHECKER
+ * - Feature: "Popup Blocker" on Save if duplicate detected
+ * - Fix: Duplicate check now scans current Drafts AND History (fixes missing red box)
+ * - Retained: All previous fixes (Upload, PDF, etc.)
  */
 
 const SUPABASE_URL = 'https://wlhoyjsicvkncfjbexoi.supabase.co';
@@ -905,13 +902,13 @@ export default function BerkeleyExpenseSystem() {
               <div className="flex gap-3 pt-2"><button onClick={() => { setLoginStep('select'); setSelectedEmployee(null); }} className="flex-1 py-3 rounded-xl border-2 border-slate-300 font-semibold text-slate-600">← Back</button><button onClick={handleLogin} className="flex-[2] py-3 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 text-white font-semibold shadow-lg">Login 🔐</button></div>
             </div>
           )}
-          <p className="text-center text-xs text-slate-400 mt-8">v4.2</p>
+          <p className="text-center text-xs text-slate-400 mt-8">v4.3 (Aggressive Dup Check)</p>
         </div>
       </div>
     );
   }
 
-  const AddExpenseModal = ({ editExpense = null, existingClaims = [], onClose }) => {
+  const AddExpenseModal = ({ editExpense = null, existingClaims = [], expenses = [], onClose }) => {
     const [step, setStep] = useState(editExpense ? 2 : 1);
     const [receiptPreview, setReceiptPreview] = useState(editExpense?.receiptPreview || null);
     const [receiptPreview2, setReceiptPreview2] = useState(editExpense?.receiptPreview2 || null);
@@ -922,21 +919,31 @@ export default function BerkeleyExpenseSystem() {
     const isCNY = formData.currency === 'CNY';
     const [duplicateWarning, setDuplicateWarning] = useState(null);
 
-    // Duplicate Check Effect
+    // Duplicate Check Effect (Scans Drafts AND History)
     useEffect(() => {
         if (!formData.amount || !formData.date || !formData.currency) return;
-        // Check history
-        const found = existingClaims.flatMap(c => c.expenses || []).find(e => 
+        
+        // 1. Scan Past Claims (History)
+        const foundInHistory = existingClaims.flatMap(c => c.expenses || []).find(e => 
             e.amount === parseFloat(formData.amount) && 
             e.date === formData.date && 
             e.currency === formData.currency &&
             e.id !== editExpense?.id
         );
-        // Check current drafts (if needed, though handled by editExpense mostly)
-        // Ignoring current draft check for simplicity as React state updates handle it
-        if (found) setDuplicateWarning(`⚠️ Possible Duplicate: Found matching amount/date in history.`);
-        else setDuplicateWarning(null);
-    }, [formData.amount, formData.date, formData.currency, existingClaims, editExpense]);
+
+        // 2. Scan Current Drafts (Pending)
+        const foundInDrafts = expenses.filter(e => e.id !== editExpense?.id).find(e => 
+            parseFloat(e.amount) === parseFloat(formData.amount) && 
+            e.date === formData.date && 
+            e.currency === formData.currency
+        );
+
+        if (foundInHistory || foundInDrafts) {
+            setDuplicateWarning(`⚠️ Possible Duplicate: Found matching amount/date in ${foundInHistory ? 'History' : 'Current Drafts'}.`);
+        } else {
+            setDuplicateWarning(null);
+        }
+    }, [formData.amount, formData.date, formData.currency, existingClaims, expenses, editExpense]);
 
     const handleFileChange = (e, isSecond = false) => { 
       const file = e.target.files?.[0]; 
@@ -961,6 +968,12 @@ export default function BerkeleyExpenseSystem() {
     const attendeePaxMatch = !needsAttendees || (paxCount > 0 && paxCount === attendeeCount);
 
     const handleSave = () => {
+      // BLOCKER POPUP logic
+      if (duplicateWarning) {
+        const confirmSave = window.confirm("⚠️ DUPLICATE DETECTED\n\nWe found another expense with the same Date, Amount, and Currency.\n\nAre you sure you want to save this?");
+        if (!confirmSave) return;
+      }
+
       try {
         if (editExpense) { 
           setExpenses(prev => {
@@ -1203,7 +1216,7 @@ export default function BerkeleyExpenseSystem() {
       </header>
       {canReview && (<div className="bg-white border-b sticky top-14 z-30"><div className="max-w-3xl mx-auto flex"><button onClick={() => setActiveTab('my_expenses')} className={`flex-1 py-3 text-sm font-semibold border-b-2 ${activeTab === 'my_expenses' ? 'border-blue-600 text-blue-600' : 'border-transparent text-slate-500'}`}>📋 My Expenses</button><button onClick={() => setActiveTab('review')} className={`flex-1 py-3 text-sm font-semibold border-b-2 ${activeTab === 'review' ? 'border-blue-600 text-blue-600' : 'border-transparent text-slate-500'}`}>👀 Review{getReviewableClaims().length > 0 && <span className="ml-2 bg-amber-500 text-white text-xs px-2 py-0.5 rounded-full">{getReviewableClaims().length}</span>}</button></div></div>)}
       <main className="max-w-3xl mx-auto p-4 pb-20">{canReview && activeTab === 'review' ? <ReviewClaimsTab /> : <MyExpensesTab />}</main>
-      {(showAddExpense || editingExpense) && <AddExpenseModal editExpense={editingExpense} existingClaims={claims} onClose={() => { setShowAddExpense(false); setEditingExpense(null); }} />}
+      {(showAddExpense || editingExpense) && <AddExpenseModal editExpense={editingExpense} existingClaims={claims} expenses={expenses} onClose={() => { setShowAddExpense(false); setEditingExpense(null); }} />}
       {showPreview && <PreviewClaimModal />}
       {showStatementUpload && (
         <StatementUploadModal 
