@@ -2,10 +2,10 @@
 
 /*
  * BERKELEY INTERNATIONAL EXPENSE MANAGEMENT SYSTEM
- * Version: 4.4 - STATEMENT GALLERY & SUBMISSION GUARD
- * - Feature: Tap existing statements in upload modal to re-annotate
- * - Feature: Submission blocker for untagged foreign/CC expenses
- * - Retained: Aggressive Duplicate Checker & v4.3 logic
+ * Version: 4.3 - AGGRESSIVE DUPLICATE CHECKER
+ * - Feature: "Popup Blocker" on Save if duplicate detected
+ * - Fix: Duplicate check now scans current Drafts AND History (fixes missing red box)
+ * - Retained: All previous fixes (Upload, PDF, etc.)
  */
 
 const SUPABASE_URL = 'https://wlhoyjsicvkncfjbexoi.supabase.co';
@@ -421,7 +421,7 @@ const StatementAnnotator = ({ image, expenses, existingAnnotations = [], onSave,
   );
 };
 
-const StatementUploadModal = ({ existingImages, onClose, onContinue, onEditExisting }) => {
+const StatementUploadModal = ({ existingImages, onClose, onContinue }) => {
     const [localStatements, setLocalStatements] = useState([...existingImages]);
     const [isProcessing, setIsProcessing] = useState(false);
     const fileInputRef = useRef(null);
@@ -431,13 +431,11 @@ const StatementUploadModal = ({ existingImages, onClose, onContinue, onEditExist
       const file = e.target.files[0]; 
       if (!file) return;
       setIsProcessing(true);
-      const reader = new FileReader();
-      reader.onload = (event) => {
-        setLocalStatements(prev => [...prev, event.target.result]);
-        setIsProcessing(false);
-      };
-      reader.onerror = () => { alert("Failed to read file."); setIsProcessing(false); };
-      reader.readAsDataURL(file);
+      try {
+        const previewUrl = URL.createObjectURL(file);
+        setLocalStatements(prev => [...prev, previewUrl]);
+      } catch (err) { alert("Failed to read file."); }
+      setIsProcessing(false);
       if (fileInputRef.current) fileInputRef.current.value = '';
     };
 
@@ -447,30 +445,24 @@ const StatementUploadModal = ({ existingImages, onClose, onContinue, onEditExist
     return (
       <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50">
         <div className="bg-white rounded-2xl max-w-lg w-full shadow-2xl max-h-[90vh] overflow-hidden flex flex-col">
-          <div className="bg-amber-500 text-white p-5 shrink-0">
-            <h2 className="text-lg font-bold">💳 Credit Card Statements</h2>
-            <p className="text-amber-100 text-sm">Tap an existing page to re-annotate or upload more</p>
-          </div>
-          <div className="p-6 overflow-y-auto flex-1 bg-slate-50">
-            <div className="grid grid-cols-2 gap-4 mb-4">
+          <div className="bg-amber-500 text-white p-5 shrink-0"><h2 className="text-lg font-bold">💳 Upload Credit Card Statements</h2><p className="text-amber-100 text-sm">You can upload multiple statements</p></div>
+          <div className="p-6 overflow-y-auto flex-1">
+            <div className="grid grid-cols-2 gap-3 mb-4">
               {localStatements.map((img, idx) => (
-                <div key={idx} className="relative group border-2 border-white rounded-xl overflow-hidden shadow-md hover:ring-4 hover:ring-amber-300 transition-all cursor-pointer" onClick={() => onEditExisting(idx, localStatements)}>
-                  <img src={img} alt={`Statement ${idx + 1}`} className="w-full h-32 object-cover" />
-                  <button onClick={(e) => { e.stopPropagation(); removeStatement(idx); }} className="absolute top-1 right-1 bg-red-500 text-white w-7 h-7 rounded-full text-xs shadow-lg">✕</button>
-                  <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity">
-                    <span className="text-white font-bold text-xs uppercase">Edit Tags</span>
-                  </div>
-                  <div className="absolute bottom-0 left-0 right-0 bg-amber-600 text-white text-[10px] font-bold text-center py-1 uppercase tracking-tighter">Page {idx + 1}</div>
+                <div key={idx} className="relative border-2 border-green-400 rounded-lg overflow-hidden">
+                  <img src={img} alt={`Statement ${idx + 1}`} className="w-full h-24 object-cover" />
+                  <button onClick={() => removeStatement(idx)} className="absolute top-1 right-1 bg-red-500 text-white w-6 h-6 rounded-full text-xs">✕</button>
+                  <div className="absolute bottom-0 left-0 right-0 bg-green-600 text-white text-xs text-center py-1">Statement {idx + 1}</div>
                 </div>
               ))}
-              <div onClick={triggerFileSelect} className="border-3 border-dashed border-slate-300 rounded-xl p-4 text-center cursor-pointer hover:border-amber-400 flex flex-col items-center justify-center h-32 bg-white transition-colors">
-                {isProcessing ? <span className="text-sm font-semibold text-amber-600 animate-pulse">Loading...</span> : <><span className="text-4xl">➕</span><span className="text-xs text-slate-500 mt-1 font-bold">Upload New</span></>}
+              <div onClick={triggerFileSelect} className="border-2 border-dashed border-slate-300 rounded-lg p-4 text-center cursor-pointer hover:border-amber-400 flex flex-col items-center justify-center min-h-[96px] bg-slate-50">
+                {isProcessing ? <span className="text-sm font-semibold text-amber-600 animate-pulse">Loading...</span> : <><span className="text-3xl">➕</span><span className="text-xs text-slate-500 mt-1">Add Statement</span></>}
               </div>
               <input type="file" accept="image/*" className="hidden" ref={fileInputRef} onChange={handleFileSelect} disabled={isProcessing} />
             </div>
-            {localStatements.length === 0 && (<div className="text-center py-12 text-slate-400"><p className="text-4xl mb-2">📄</p><p className="font-bold">No statements yet</p><p className="text-sm">Click the box above to add one</p></div>)}
+            {localStatements.length === 0 && (<div className="text-center py-8 text-slate-400"><p>📄 No statements uploaded yet</p><p className="text-sm">Tap the + box to add one</p></div>)}
           </div>
-          <div className="p-4 border-t bg-white flex gap-3 shrink-0"><button onClick={onClose} className="flex-1 py-3 rounded-xl border-2 border-slate-200 font-bold text-slate-500">Cancel</button><button onClick={handleContinueInternal} disabled={localStatements.length === 0 || isProcessing} className="flex-[2] py-3 rounded-xl bg-green-600 text-white font-bold shadow-lg disabled:opacity-50 tracking-tight">{isProcessing ? 'Processing...' : `Save & Preview (${localStatements.length}) →`}</button></div>
+          <div className="p-4 border-t flex gap-3 shrink-0"><button onClick={onClose} className="flex-1 py-3 rounded-xl border-2 font-semibold">Cancel</button><button onClick={handleContinueInternal} disabled={localStatements.length === 0 || isProcessing} className="flex-[2] py-3 rounded-xl bg-green-600 text-white font-semibold disabled:opacity-50">{isProcessing ? 'Please wait...' : `Annotate (${localStatements.length}) →`}</button></div>
         </div>
       </div>
     );
@@ -690,13 +682,6 @@ export default function BerkeleyExpenseSystem() {
     setDownloading(false);
   };
   const handleSubmitClaim = async () => {
-    // SUBMISSION GUARD
-    const untaggedRefs = foreignCurrencyExpenses.filter(e => !statementAnnotations.some(a => a.ref === e.ref)).map(e => e.ref);
-    if (untaggedRefs.length > 0) {
-      alert(`⚠️ SUBMISSION BLOCKED\n\nYou have ${untaggedRefs.length} expenses marked as CC/Foreign Currency that have not been annotated on a statement.\n\nMissing: ${untaggedRefs.join(', ')}`);
-      return;
-    }
-
     setLoading(true);
     try {
       const returned = claims.find(c => c.user_id === currentUser.id && c.status === 'changes_requested');
@@ -719,8 +704,10 @@ export default function BerkeleyExpenseSystem() {
         const { error } = await supabase.from('claims').update(updateData).eq('id', returned.id);
         if (error) throw new Error(error.message);
       } else {
+        // --- NEW CLAIM NUMBER LOGIC: FirstName-YYYY-XX ---
         const year = new Date().getFullYear();
         const firstName = currentUser.name.trim().split(' ')[0];
+        // Count claims submitted by this user in this year (check created_at or submitted_at)
         const userClaimsThisYear = claims.filter(c => c.user_id === currentUser.id && new Date(c.created_at).getFullYear() === year);
         const count = userClaimsThisYear.length + 1;
         const claimNumber = `${firstName}-${year}-${String(count).padStart(2, '0')}`;
@@ -915,7 +902,7 @@ export default function BerkeleyExpenseSystem() {
               <div className="flex gap-3 pt-2"><button onClick={() => { setLoginStep('select'); setSelectedEmployee(null); }} className="flex-1 py-3 rounded-xl border-2 border-slate-300 font-semibold text-slate-600">← Back</button><button onClick={handleLogin} className="flex-[2] py-3 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 text-white font-semibold shadow-lg">Login 🔐</button></div>
             </div>
           )}
-          <p className="text-center text-xs text-slate-400 mt-8">v4.4 (Gallery & Submission Guard)</p>
+          <p className="text-center text-xs text-slate-400 mt-8">v4.3 (Aggressive Dup Check)</p>
         </div>
       </div>
     );
@@ -932,12 +919,30 @@ export default function BerkeleyExpenseSystem() {
     const isCNY = formData.currency === 'CNY';
     const [duplicateWarning, setDuplicateWarning] = useState(null);
 
+    // Duplicate Check Effect (Scans Drafts AND History)
     useEffect(() => {
         if (!formData.amount || !formData.date || !formData.currency) return;
-        const foundInHistory = existingClaims.flatMap(c => c.expenses || []).find(e => e.amount === parseFloat(formData.amount) && e.date === formData.date && e.currency === formData.currency && e.id !== editExpense?.id);
-        const foundInDrafts = expenses.filter(e => e.id !== editExpense?.id).find(e => parseFloat(e.amount) === parseFloat(formData.amount) && e.date === formData.date && e.currency === formData.currency);
-        if (foundInHistory || foundInDrafts) setDuplicateWarning(`⚠️ Possible Duplicate: Found matching amount/date in ${foundInHistory ? 'History' : 'Current Drafts'}.`);
-        else setDuplicateWarning(null);
+        
+        // 1. Scan Past Claims (History)
+        const foundInHistory = existingClaims.flatMap(c => c.expenses || []).find(e => 
+            e.amount === parseFloat(formData.amount) && 
+            e.date === formData.date && 
+            e.currency === formData.currency &&
+            e.id !== editExpense?.id
+        );
+
+        // 2. Scan Current Drafts (Pending)
+        const foundInDrafts = expenses.filter(e => e.id !== editExpense?.id).find(e => 
+            parseFloat(e.amount) === parseFloat(formData.amount) && 
+            e.date === formData.date && 
+            e.currency === formData.currency
+        );
+
+        if (foundInHistory || foundInDrafts) {
+            setDuplicateWarning(`⚠️ Possible Duplicate: Found matching amount/date in ${foundInHistory ? 'History' : 'Current Drafts'}.`);
+        } else {
+            setDuplicateWarning(null);
+        }
     }, [formData.amount, formData.date, formData.currency, existingClaims, expenses, editExpense]);
 
     const handleFileChange = (e, isSecond = false) => { 
@@ -955,6 +960,7 @@ export default function BerkeleyExpenseSystem() {
     const removeBackcharge = (idx) => setFormData(prev => ({ ...prev, backcharges: prev.backcharges.filter((_, i) => i !== idx) }));
     const backchargeTotal = formData.backcharges.reduce((sum, bc) => sum + (parseFloat(bc.percentage) || 0), 0);
     const backchargeValid = !formData.hasBackcharge || (formData.backcharges.length > 0 && backchargeTotal >= 99.5 && backchargeTotal <= 100.5);
+    
     const needsAttendees = EXPENSE_CATEGORIES[formData.category]?.requiresAttendees;
     const paxCount = parseInt(formData.numberOfPax) || 0;
     const attendeeLines = formData.attendees ? formData.attendees.split('\n').filter(line => line.trim().length > 0) : [];
@@ -962,7 +968,12 @@ export default function BerkeleyExpenseSystem() {
     const attendeePaxMatch = !needsAttendees || (paxCount > 0 && paxCount === attendeeCount);
 
     const handleSave = () => {
-      if (duplicateWarning) { if (!window.confirm("⚠️ DUPLICATE DETECTED\n\nAre you sure you want to save this?")) return; }
+      // BLOCKER POPUP logic
+      if (duplicateWarning) {
+        const confirmSave = window.confirm("⚠️ DUPLICATE DETECTED\n\nWe found another expense with the same Date, Amount, and Currency.\n\nAre you sure you want to save this?");
+        if (!confirmSave) return;
+      }
+
       try {
         if (editExpense) { 
           setExpenses(prev => {
@@ -976,8 +987,9 @@ export default function BerkeleyExpenseSystem() {
           });
         }
         onClose();
-      } catch (err) { alert('❌ Error saving expense.'); }
+      } catch (err) { alert('❌ Error saving expense. Please try again.'); }
     };
+    
     const canSave = formData.merchant && formData.amount && formData.date && formData.description && (!needsAttendees || (formData.attendees && formData.numberOfPax)) && (!isForeignCurrency || formData.reimbursementAmount) && backchargeValid && attendeePaxMatch;
 
     return (
@@ -1006,17 +1018,24 @@ export default function BerkeleyExpenseSystem() {
                 {needsAttendees && (
                   <div className="space-y-3">
                     <div><label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Number of Pax *</label><input type="number" min="1" className="w-full p-3 border-2 border-slate-200 rounded-xl" placeholder="e.g. 4" value={formData.numberOfPax} onChange={e => setFormData(prev => ({ ...prev, numberOfPax: e.target.value }))} /></div>
-                    <div><label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Attendees *</label><textarea className="w-full p-3 border-2 border-slate-200 rounded-xl resize-none" rows={3} placeholder="Enter each attendee on a new line" value={formData.attendees} onChange={e => setFormData(prev => ({ ...prev, attendees: e.target.value }))} /></div>
+                    <div><label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Attendees *</label><textarea className="w-full p-3 border-2 border-slate-200 rounded-xl resize-none" rows={3} placeholder="Enter each attendee on a new line:&#10;John Smith - Berkeley&#10;Jane Doe - ABC Corp" value={formData.attendees} onChange={e => setFormData(prev => ({ ...prev, attendees: e.target.value }))} /></div>
+                    <div className={`text-xs font-bold text-center p-2 rounded ${attendeePaxMatch ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
+                      {attendeePaxMatch ? `✅ Pax Check Passed (${paxCount} pax = ${attendeeCount} names)` : `⚠️ Pax Mismatch: ${paxCount} pax indicated vs ${attendeeCount} names listed`}
+                    </div>
                   </div>
                 )}
                 <div className="bg-blue-50 border-2 border-blue-200 rounded-xl p-4">
                   <label className="flex items-center gap-2 cursor-pointer mb-3"><input type="checkbox" checked={formData.hasBackcharge} onChange={e => setFormData(prev => ({ ...prev, hasBackcharge: e.target.checked, backcharges: e.target.checked ? prev.backcharges : [] }))} className="w-5 h-5" /><span className="font-semibold text-blue-800">📊 Backcharge to Development(s)</span></label>
-                  {formData.hasBackcharge && (<div className="space-y-3">{formData.backcharges.map((bc, idx) => (<div key={idx} className="flex gap-2 items-center"><select className="flex-1 p-2 border rounded-lg text-sm bg-white" value={bc.development} onChange={e => updateBackcharge(idx, 'development', e.target.value)}><option value="">Select development</option>{DEVELOPMENTS.map(dev => <option key={dev} value={dev}>{dev}</option>)}</select><input type="number" className="w-20 p-2 border rounded-lg text-center text-sm" placeholder="%" value={bc.percentage} onChange={e => updateBackcharge(idx, 'percentage', e.target.value)} /><button onClick={() => removeBackcharge(idx)} className="text-red-500 p-1">✕</button></div>))}<button onClick={addBackcharge} className="text-blue-600 text-sm font-medium">+ Add Development</button></div>)}
+                  {formData.hasBackcharge && (<div className="space-y-3">{formData.backcharges.map((bc, idx) => (<div key={idx} className="flex gap-2 items-center"><select className="flex-1 p-2 border rounded-lg text-sm bg-white" value={bc.development} onChange={e => updateBackcharge(idx, 'development', e.target.value)}><option value="">Select development</option>{DEVELOPMENTS.map(dev => <option key={dev} value={dev}>{dev}</option>)}</select><input type="number" step="0.1" className="w-20 p-2 border rounded-lg text-center text-sm" placeholder="%" value={bc.percentage} onChange={e => updateBackcharge(idx, 'percentage', e.target.value)} /><span className="text-sm">%</span><button onClick={() => removeBackcharge(idx)} className="text-red-500 p-1">✕</button></div>))}<button onClick={addBackcharge} className="text-blue-600 text-sm font-medium">+ Add Development</button>
+                    <div className={`text-xs font-bold text-center p-2 rounded ${backchargeValid ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
+                        {backchargeValid ? `✅ Total: ${backchargeTotal.toFixed(1)}%` : `⚠️ Total must be 100% (Current: ${backchargeTotal.toFixed(1)}%)`}
+                    </div>
+                  </div>)}
                 </div>
               </div>
             )}
           </div>
-          <div className="p-4 border-t bg-slate-50">{step === 2 && (<div className="flex gap-3">{!editExpense && <button onClick={() => setStep(1)} className="flex-1 py-3 rounded-xl border-2 border-slate-300 font-semibold">← Back</button><button onClick={handleSave} disabled={!canSave} className={`${editExpense ? 'w-full' : 'flex-[2]'} py-3 rounded-xl bg-blue-600 text-white font-semibold disabled:opacity-50`}>{editExpense ? '💾 Save' : 'Save ✓'}</button></div>)}</div>
+          <div className="p-4 border-t bg-slate-50">{step === 2 && (<div className="flex gap-3">{!editExpense && <button onClick={() => setStep(1)} className="flex-1 py-3 rounded-xl border-2 border-slate-300 font-semibold">← Back</button>}<button onClick={handleSave} disabled={!canSave} className={`${editExpense ? 'w-full' : 'flex-[2]'} py-3 rounded-xl bg-blue-600 text-white font-semibold disabled:opacity-50`}>{editExpense ? '💾 Save' : 'Save ✓'}</button></div>)}</div>
         </div>
         {showFullImage && <ImageViewer src={showFullImage} onClose={() => setShowFullImage(null)} />}
       </div>
@@ -1026,6 +1045,7 @@ export default function BerkeleyExpenseSystem() {
   const PreviewClaimModal = () => {
     const userReimburseCurrency = getUserReimburseCurrency(currentUser);
     const groupedExpenses = pendingExpenses.reduce((acc, exp) => { if (!acc[exp.category]) acc[exp.category] = []; acc[exp.category].push(exp); return acc; }, {});
+    const canSubmit = !hasForeignCurrency || (hasForeignCurrency && annotatedStatements.length > 0);
     const getCategoryTotal = (cat) => (groupedExpenses[cat] || []).reduce((sum, e) => sum + parseFloat(e.reimbursementAmount || e.amount || 0), 0);
     const workflow = getApprovalWorkflow(currentUser.id, currentUser.office);
     const [viewImg, setViewImg] = useState(null);
@@ -1034,60 +1054,78 @@ export default function BerkeleyExpenseSystem() {
       <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-50">
         <div className="bg-white rounded-2xl max-w-4xl w-full max-h-[95vh] overflow-hidden shadow-2xl flex flex-col">
           <div className="bg-gradient-to-r from-blue-900 to-indigo-900 text-white p-4 flex justify-between items-center shrink-0"><div><h2 className="text-lg font-bold">📋 Preview</h2><p className="text-blue-200 text-sm">{userReimburseCurrency}</p></div><div className="flex items-center gap-2"><button onClick={handleDownloadPreviewPDF} disabled={downloading} className="bg-green-500 text-white px-4 py-2 rounded-lg font-semibold text-sm">📥 PDF</button><button onClick={() => setShowPreview(false)} className="w-8 h-8 rounded-full bg-white/20">✕</button></div></div>
-          <div className="flex-1 overflow-y-auto p-6 bg-slate-100">
-            <div className="max-w-3xl mx-auto border-2 border-slate-300 rounded-xl p-6 bg-white shadow-lg">
+          <div className="flex-1 overflow-y-auto p-6">
+            <div className="max-w-3xl mx-auto border-2 border-slate-300 rounded-xl p-6">
               <div className="text-center mb-6"><h1 className="text-xl font-bold">Motor & Expense Claim Form</h1><p className="text-sm text-slate-500">{getCompanyName(currentUser.office)}</p></div>
               <div className="grid grid-cols-2 gap-4 mb-6 text-sm"><div><span className="text-slate-500">Name:</span> <strong>{currentUser.name}</strong></div><div><span className="text-slate-500">Currency:</span> <strong className="text-green-700">{userReimburseCurrency}</strong></div></div>
+              {workflow && (<div className="bg-blue-50 border border-blue-200 rounded-xl p-4 mb-6 text-sm"><p className="font-semibold text-blue-800">Approval: {workflow.selfSubmit ? `Direct Save → ${workflow.externalApproval || 'External'}` : workflow.singleLevel ? (workflow.externalApproval ? `${workflow.level1Name} → ${workflow.externalApproval}` : `${workflow.level1Name} (Final)`) : `${workflow.level1Name} → ${workflow.level2Name}`}</p></div>)}
               <table className="w-full text-sm"><tbody>{Object.keys(EXPENSE_CATEGORIES).map(cat => (<tr key={cat} className="border-b"><td className="py-2 font-bold text-blue-700 w-8">{cat}.</td><td className="py-2">{EXPENSE_CATEGORIES[cat].name}</td><td className="py-2 text-right font-medium">{userReimburseCurrency} {getCategoryTotal(cat).toFixed(2)}</td></tr>))}</tbody></table>
               <div className="bg-blue-50 p-4 rounded-xl mt-4 flex justify-between items-center"><span className="font-bold text-lg">Total</span><span className="font-bold text-2xl text-blue-700">{formatCurrency(reimbursementTotal, userReimburseCurrency)}</span></div>
               <h3 className="font-bold mt-6 mb-3">Receipts ({pendingExpenses.length})</h3>
-              <div className="grid grid-cols-3 gap-3">{pendingExpenses.map(exp => (<div key={exp.id} className="border rounded-lg overflow-hidden"><div className="bg-blue-100 p-1 flex justify-between text-xs font-bold text-blue-700"><span>{exp.ref}</span>{exp.isForeignCurrency && <span>💳</span>}</div>{exp.receiptPreview ? (<img src={exp.receiptPreview} alt={exp.ref} className="w-full h-16 object-cover cursor-pointer" onClick={() => setViewImg(exp.receiptPreview)} />) : (<div className="w-full h-16 bg-slate-100 flex items-center justify-center">📄</div>)}<div className="p-1 bg-slate-50 text-xs"><p className="truncate">{exp.merchant}</p><p className="text-green-700 font-bold">{formatCurrency(exp.reimbursementAmount || exp.amount, userReimburseCurrency)}</p></div></div>))}</div>
-              {hasForeignCurrency && (<div className={`mt-4 rounded-xl p-4 border-2 ${annotatedStatements.length > 0 ? 'bg-green-50 border-green-200' : 'bg-red-50 border-red-300'}`}><div className="flex justify-between items-center"><p className={`font-bold ${annotatedStatements.length > 0 ? 'text-green-800' : 'text-red-800'}`}>{annotatedStatements.length > 0 ? `✅ ${annotatedStatements.length} Statements Tagged` : '❌ Statement(s) Required'}</p><button onClick={() => { setShowPreview(false); setShowStatementUpload(true); }} className="bg-amber-500 text-white px-3 py-1.5 rounded-lg font-bold text-xs shadow">📎 {annotatedStatements.length > 0 ? 'Edit/Add Statements' : 'Upload Statements'}</button></div>{annotatedStatements.length > 0 && (<div className="flex gap-2 mt-3 overflow-x-auto">{annotatedStatements.map((img, idx) => (<img key={idx} src={img} className="h-16 rounded border-2 border-green-300 shadow-sm cursor-pointer" onClick={() => setViewImg(img)} />))}</div>)}{untaggedExpenses.length > 0 && (<div className="mt-3 bg-white/60 p-2 rounded-lg"><p className="text-red-600 text-xs font-black">Untagged: {untaggedExpenses.map(e => e.ref).join(', ')}</p></div>)}</div>)}
+              <div className="grid grid-cols-3 gap-3">{pendingExpenses.map(exp => (<div key={exp.id} className="border rounded-lg overflow-hidden"><div className="bg-blue-100 p-1 flex justify-between text-xs"><span className="font-bold text-blue-700">{exp.ref}</span><div className="flex gap-1">{exp.isForeignCurrency && <span>💳</span>}{exp.receiptPreview2 && <span>📑</span>}</div></div>{exp.receiptPreview ? (<img src={exp.receiptPreview} alt={exp.ref} className="w-full h-16 object-cover cursor-pointer" onClick={() => setViewImg(exp.receiptPreview)} />) : (<div className="w-full h-16 bg-slate-100 flex items-center justify-center">📄</div>)}<div className="p-1 bg-slate-50 text-xs"><p className="truncate">{exp.merchant}</p><p className="text-green-700 font-bold">{formatCurrency(exp.reimbursementAmount || exp.amount, userReimburseCurrency)}</p></div></div>))}</div>
+              {hasForeignCurrency && annotatedStatements.length === 0 && (<div className="mt-4 bg-red-50 border-2 border-red-300 rounded-xl p-4"><p className="text-red-800 font-bold">❌ Statement(s) Required</p><button onClick={() => { setShowPreview(false); setShowStatementUpload(true); }} className="mt-2 bg-amber-500 text-white px-4 py-2 rounded-lg font-semibold text-sm">📎 Upload Statements</button></div>)}
+              {annotatedStatements.length > 0 && (<div className="mt-4 bg-green-50 border border-green-200 rounded-xl p-4"><div className="flex justify-between items-start"><p className="text-green-800 font-semibold">✅ {annotatedStatements.length} Statement(s) Annotated</p><button onClick={() => { setShowPreview(false); setShowStatementUpload(true); }} className="text-blue-600 text-sm">✏️ Edit</button></div><div className="flex gap-2 mt-2 overflow-x-auto">{annotatedStatements.map((img, idx) => (<img key={idx} src={img} alt={`Statement ${idx+1}`} className="h-20 rounded cursor-pointer border-2 border-green-300" onClick={() => setViewImg(img)} />))}</div>{untaggedExpenses.length > 0 && (<div className="mt-2 bg-amber-100 border border-amber-300 rounded-lg p-2"><p className="text-amber-800 text-sm">⚠️ Untagged: {untaggedExpenses.map(e => e.ref).join(', ')}</p></div>)}</div>)}
             </div>
           </div>
-          <div className="p-4 border-t bg-slate-50 flex gap-3 shrink-0"><button onClick={() => setShowPreview(false)} className="flex-1 py-3 rounded-xl border-2 font-bold text-slate-500">← Back</button><button onClick={async () => { await handleSubmitClaim(); }} className={`flex-[2] py-3 rounded-xl font-bold shadow-lg transition-all ${(!hasForeignCurrency || untaggedExpenses.length === 0) ? 'bg-green-600 text-white active:scale-95' : 'bg-slate-300 text-slate-500 opacity-50'}`}>{loading ? '⏳ Processing...' : 'Submit Claim ✓'}</button></div>
+          <div className="p-4 border-t bg-slate-50 flex gap-3 shrink-0"><button onClick={() => setShowPreview(false)} className="flex-1 py-3 rounded-xl border-2 font-semibold">← Back</button><button onClick={async () => { await handleSubmitClaim(); setShowPreview(false); }} disabled={!canSubmit || loading} className={`flex-[2] py-3 rounded-xl font-semibold ${canSubmit && !loading ? 'bg-green-600 text-white' : 'bg-slate-300 text-slate-500'}`}>{loading ? '⏳...' : canSubmit ? 'Submit ✓' : '⚠️ Upload Statement'}</button></div>
         </div>
         {viewImg && <ImageViewer src={viewImg} onClose={() => setViewImg(null)} />}
       </div>
     );
   };
 
-  const handleApprove = async (claim) => {
-    setLoading(true);
-    try {
-      const level = claim.approval_level || 1;
-      const workflow = SENIOR_STAFF_ROUTING[claim.user_id];
-      const isSingleLevel = workflow?.singleLevel === true;
-      if (level === 1) {
-        if (isSingleLevel) {
-          const { error } = await supabase.from('claims').update({ status: 'approved', level1_approved_by: currentUser.name, level1_approved_at: new Date().toISOString(), level2_approved_by: workflow?.externalApproval || currentUser.name, level2_approved_at: new Date().toISOString() }).eq('id', claim.id);
-          if (error) throw error;
-        } else {
-          const { error } = await supabase.from('claims').update({ status: 'pending_level2', approval_level: 2, level1_approved_by: currentUser.name, level1_approved_at: new Date().toISOString() }).eq('id', claim.id);
-          if (error) throw error;
-        }
-      } else {
-        const { error } = await supabase.from('claims').update({ status: 'approved', level2_approved_by: currentUser.name, level2_approved_at: new Date().toISOString() }).eq('id', claim.id);
-        if (error) throw error;
-      }
-      await loadClaims(); setSelectedClaim(null); alert('✅ Approved');
-    } catch (err) { alert('❌ Error'); }
-    setLoading(false);
+  const EditClaimModal = ({ claim, onClose }) => {
+    const [editedExpenses, setEditedExpenses] = useState(claim.expenses || []);
+    const [saving, setSaving] = useState(false);
+    const updateExpense = (idx, field, value) => setEditedExpenses(prev => prev.map((e, i) => i === idx ? { ...e, [field]: value } : e));
+    const handleSaveEdits = async () => { 
+      setSaving(true); 
+      await handleSaveAdminEdits(claim, editedExpenses);
+      setSaving(false); 
+      onClose(); 
+    };
+    return (
+      <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50">
+        <div className="bg-white rounded-2xl max-w-4xl w-full max-h-[90vh] overflow-hidden">
+          <div className="bg-purple-600 text-white p-5 flex justify-between"><h2 className="font-bold">✏️ Edit: {claim.user_name}</h2><button onClick={onClose} className="w-8 h-8 rounded-full bg-white/20">✕</button></div>
+          <div className="p-6 overflow-y-auto max-h-[calc(90vh-180px)]">{editedExpenses.map((exp, idx) => (<div key={idx} className={`border-2 rounded-xl p-4 mb-4 ${exp.isPotentialDuplicate ? 'border-red-400 bg-red-50' : ''}`}>
+            <div className="flex items-center gap-2 mb-3 flex-wrap">
+              <span className="bg-blue-100 text-blue-700 font-bold px-3 py-1 rounded-lg">{exp.ref}</span>
+              {exp.isPotentialDuplicate && <span className="bg-red-100 text-red-600 text-xs px-2 py-1 rounded font-semibold">⚠️ Potential Duplicate</span>}
+              {exp.numberOfPax && <span className="bg-purple-100 text-purple-600 text-xs px-2 py-1 rounded">👥 {exp.numberOfPax} pax</span>}
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <input className="p-2 border rounded-lg text-sm" placeholder="Merchant" value={exp.merchant} onChange={e => updateExpense(idx, 'merchant', e.target.value)} />
+              <input type="number" className="p-2 border rounded-lg text-sm" placeholder="Amount" value={exp.reimbursementAmount || exp.amount} onChange={e => updateExpense(idx, 'reimbursementAmount', parseFloat(e.target.value))} />
+              <input className="p-2 border rounded-lg text-sm col-span-2" placeholder="Description" value={exp.description} onChange={e => updateExpense(idx, 'description', e.target.value)} />
+              {exp.attendees && <div className="col-span-2 bg-slate-50 p-2 rounded-lg text-xs text-slate-600">👥 {exp.attendees.replace(/\n/g, ', ')}</div>}
+              <input className="p-2 border-2 border-amber-300 bg-amber-50 rounded-lg text-sm col-span-2" placeholder="Admin Notes (will appear in PDF as 'Notes: ...')" value={exp.adminNotes || ''} onChange={e => updateExpense(idx, 'adminNotes', e.target.value)} />
+            </div>
+          </div>))}</div>
+          <div className="p-4 border-t flex gap-3"><button onClick={onClose} className="flex-1 py-3 rounded-xl border-2 font-semibold">Cancel</button><button onClick={handleSaveEdits} disabled={saving} className="flex-[2] py-3 rounded-xl bg-purple-600 text-white font-semibold disabled:opacity-50">{saving ? '⏳' : '💾 Save Changes'}</button></div>
+        </div>
+      </div>
+    );
   };
-
   const MyExpensesTab = () => {
     const myClaims = claims.filter(c => c.user_id === currentUser.id);
+    const returnedClaims = myClaims.filter(c => c.status === 'changes_requested');
     const userReimburseCurrency = getUserReimburseCurrency(currentUser);
     const groupedExpenses = pendingExpenses.reduce((acc, exp) => { if (!acc[exp.category]) acc[exp.category] = []; acc[exp.category].push(exp); return acc; }, {});
     return (
       <div className="space-y-4">
-        <div className="grid grid-cols-2 gap-4"><div className="bg-white rounded-2xl shadow-lg p-6 text-center"><div className="text-4xl font-bold text-slate-800">{pendingExpenses.length}</div><div className="text-sm text-slate-500">Drafts</div></div><div className="bg-white rounded-2xl shadow-lg p-6 text-center"><div className="text-2xl font-bold text-green-600">{formatCurrency(reimbursementTotal, userReimburseCurrency)}</div><div className="text-sm text-slate-500">Total</div></div></div>
-        <div className="bg-white rounded-2xl shadow-lg p-6 flex gap-3"><button onClick={() => setShowAddExpense(true)} className="flex-1 bg-blue-600 text-white py-3 rounded-xl font-bold shadow-lg shadow-blue-200">📸 Add Receipt</button><button onClick={() => setShowPreview(true)} disabled={pendingExpenses.length === 0} className="flex-1 bg-slate-900 text-white py-3 rounded-xl font-bold disabled:opacity-50">📋 Preview</button></div>
+        {returnedClaims.length > 0 && (<div className="bg-amber-50 border-2 border-amber-400 rounded-xl p-4"><h3 className="font-bold text-amber-800 mb-2">⚠️ Changes Requested</h3>{returnedClaims.map(claim => (<div key={claim.id} className="bg-white rounded-lg p-3 mb-2"><p className="font-semibold">{claim.claim_number}</p><p className="text-sm text-amber-700">"{claim.admin_comment}"</p></div>))}</div>)}
+        <div className="grid grid-cols-2 gap-4"><div className="bg-white rounded-2xl shadow-lg p-6 text-center"><div className="text-4xl font-bold text-slate-800">{pendingExpenses.length}</div><div className="text-sm text-slate-500">Pending</div></div><div className="bg-white rounded-2xl shadow-lg p-6 text-center"><div className="text-2xl font-bold text-green-600">{formatCurrency(reimbursementTotal, userReimburseCurrency)}</div><div className="text-sm text-slate-500">To Reimburse</div></div></div>
+        <div className="bg-white rounded-2xl shadow-lg p-6"><div className="flex flex-wrap gap-3"><button onClick={() => setShowAddExpense(true)} className="bg-blue-600 text-white px-6 py-3 rounded-xl font-semibold shadow-lg">📸 Add Receipt</button>{pendingExpenses.length > 0 && (<button onClick={() => setShowPreview(true)} className="border-2 border-green-500 text-green-600 px-6 py-3 rounded-xl font-semibold">📋 Preview ({pendingExpenses.length})</button>)}<button onClick={handleManualSync} disabled={loading} className="border-2 border-slate-300 text-slate-600 px-4 py-3 rounded-xl font-semibold">{loading ? '⏳' : '🔄'} Sync</button></div></div>
         <div className="bg-white rounded-2xl shadow-lg p-6">
-          <h3 className="font-bold text-slate-800 mb-4 tracking-tighter uppercase text-xs text-slate-400">Current Items</h3>
-          {pendingExpenses.length === 0 ? (<div className="text-center py-10 text-slate-300">No items found</div>) : (
-            <div className="space-y-4">{Object.entries(groupedExpenses).sort().map(([cat, exps]) => (<div key={cat}><p className="text-[10px] font-black text-slate-400 mb-2 uppercase tracking-widest">{EXPENSE_CATEGORIES[cat]?.icon} {cat}. {EXPENSE_CATEGORIES[cat]?.name}</p>{exps.map(exp => (<div key={exp.id} className="flex items-center justify-between p-3 rounded-xl bg-slate-50 border mb-2"><div className="flex-1"><div className="flex items-center gap-2"><span className="bg-blue-100 text-blue-700 text-xs font-bold px-2 py-1 rounded">{exp.ref}</span><span className="font-semibold text-sm truncate max-w-[120px] inline-block">{exp.merchant}</span>{exp.isForeignCurrency && <span className="text-amber-600 text-xs">💳</span>}</div><p className="text-[10px] text-slate-400 font-bold mt-1 uppercase">{exp.description}</p></div><div className="flex items-center gap-2"><span className="font-bold text-green-700 text-sm">{formatCurrency(exp.reimbursementAmount || exp.amount, userReimburseCurrency)}</span><button onClick={() => setEditingExpense(exp)} className="text-blue-500 p-2">✏️</button><button onClick={() => setExpenses(prev => sortAndReassignRefs(prev.filter(e => e.id !== exp.id)))} className="text-red-500 p-2">🗑️</button></div></div>))}</div>))}</div>
+          <h3 className="font-bold text-slate-800 mb-4">📋 Pending</h3>
+          {pendingExpenses.length === 0 ? (<div className="text-center py-12 text-slate-400">📭 No pending</div>) : (
+            <div className="space-y-2">{Object.entries(groupedExpenses).sort().map(([cat, exps]) => (<div key={cat}><p className="text-xs font-semibold text-slate-500 mb-2">{EXPENSE_CATEGORIES[cat]?.icon} {cat}. {EXPENSE_CATEGORIES[cat]?.name}</p>{exps.map(exp => (<div key={exp.id} className="flex items-center justify-between p-3 rounded-xl bg-slate-50 border mb-2"><div className="flex-1"><div className="flex items-center gap-2"><span className="bg-blue-100 text-blue-700 text-xs font-bold px-2 py-1 rounded">{exp.ref}</span><span className="font-semibold text-sm">{exp.merchant}</span>{exp.isForeignCurrency && <span className="text-amber-600 text-xs">💳</span>}{exp.receiptPreview2 && <span className="text-slate-500 text-xs">📑</span>}</div><p className="text-xs text-slate-500 mt-1">{exp.description}</p></div><div className="flex items-center gap-2"><span className="font-bold text-green-700">{formatCurrency(exp.reimbursementAmount || exp.amount, userReimburseCurrency)}</span><button onClick={() => setEditingExpense(exp)} className="text-blue-500 p-2">✏️</button><button onClick={() => setExpenses(prev => sortAndReassignRefs(prev.filter(e => e.id !== exp.id)))} className="text-red-500 p-2">🗑️</button></div></div>))}</div>))}</div>
           )}
+        </div>
+        <div className="bg-white rounded-2xl shadow-lg p-6">
+          <h3 className="font-bold text-slate-800 mb-4">📁 My Claims</h3>
+          {myClaims.filter(c => c.status !== 'changes_requested').length === 0 ? <p className="text-center text-slate-400 py-8">None</p> : (<div className="space-y-2">{myClaims.filter(c => c.status !== 'changes_requested').map(claim => (<div key={claim.id} className="flex items-center justify-between p-4 rounded-xl bg-slate-50 border"><div><span className="font-semibold">{claim.claim_number}</span><span className={`ml-2 text-xs px-2 py-0.5 rounded-full ${claim.status === 'approved' ? 'bg-green-100 text-green-700' : claim.status === 'rejected' ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-700'}`}>{getClaimStatusText(claim)}</span></div><div className="flex items-center gap-3"><span className="font-bold">{formatCurrency(claim.total_amount, claim.currency)}</span><button onClick={() => handleDownloadPDF(claim)} className="bg-green-100 text-green-700 px-3 py-2 rounded-lg text-sm">📥</button></div></div>))}</div>)}
         </div>
       </div>
     );
@@ -1095,48 +1133,115 @@ export default function BerkeleyExpenseSystem() {
 
   const ReviewClaimsTab = () => {
     const reviewableClaims = getReviewableClaims();
+    const claimsForSubmission = getClaimsForSubmission();
+    const getBackchargeReport = () => {
+      if (!backchargeFromDate || !backchargeToDate) return null;
+      const fromDate = new Date(backchargeFromDate);
+      const toDate = new Date(backchargeToDate);
+      toDate.setHours(23, 59, 59, 999);
+      const officeApprovedClaims = claims.filter(c => {
+        if (c.status !== 'approved' && c.status !== 'submitted_to_finance') return false;
+        if (c.office_code !== currentUser.office) return false;
+        const approvedDate = c.level2_approved_at ? new Date(c.level2_approved_at) : null;
+        if (!approvedDate) return false;
+        return approvedDate >= fromDate && approvedDate <= toDate;
+      });
+      const backchargeSummary = {};
+      let grandTotal = 0;
+      officeApprovedClaims.forEach(claim => {
+        const expenses = claim.expenses || [];
+        expenses.forEach(exp => {
+          if (exp.hasBackcharge && exp.backcharges?.length > 0) {
+            const expAmount = parseFloat(exp.reimbursementAmount || exp.amount) || 0;
+            exp.backcharges.forEach(bc => {
+              const dev = bc.development;
+              const pct = parseFloat(bc.percentage) || 0;
+              const amt = (expAmount * pct / 100);
+              if (!backchargeSummary[dev]) { backchargeSummary[dev] = { total: 0, items: [] }; }
+              backchargeSummary[dev].total += amt;
+              backchargeSummary[dev].items.push({ claimNumber: claim.claim_number, claimant: claim.user_name, ref: exp.ref, merchant: exp.merchant, date: exp.date, approvedDate: claim.level2_approved_at, amount: amt, percentage: pct });
+              grandTotal += amt;
+            });
+          }
+        });
+      });
+      return { summary: backchargeSummary, grandTotal, claimCount: officeApprovedClaims.length };
+    };
+    const backchargeData = showBackchargeReport ? getBackchargeReport() : null;
+    const generateBackchargeReportPDF = () => {
+      if (!backchargeData) return;
+      const { summary, grandTotal } = backchargeData;
+      const office = OFFICES.find(o => o.code === currentUser.office);
+      const currency = office?.currency || 'SGD';
+      const printWindow = window.open('', '_blank');
+      const html = `<!DOCTYPE html><html><head><title>Backcharge Report - ${office?.name}</title><style>body{font-family:Arial,sans-serif;font-size:11px;padding:20mm;}h1{text-align:center;color:#9c27b0;margin-bottom:5px;}.subtitle{text-align:center;color:#666;margin-bottom:20px;}table{width:100%;border-collapse:collapse;margin-top:15px;}th,td{border:1px solid #999;padding:6px;text-align:left;}th{background:#e1bee7;font-weight:bold;}.dev-header{background:#9c27b0;color:white;font-weight:bold;}.subtotal{background:#f3e5f5;font-weight:bold;}.grand-total{background:#9c27b0;color:white;font-weight:bold;font-size:12px;}.amount{text-align:right;}@media print{body{padding:10mm;}}</style></head><body><h1>📊 Backcharge Report</h1><div class="subtitle">${office?.name} | ${formatDate(backchargeFromDate)} to ${formatDate(backchargeToDate)}</div><table><thead><tr><th>Development</th><th>Claim #</th><th>Claimant</th><th>Ref</th><th>Merchant</th><th>Date</th><th>%</th><th class="amount">Amount (${currency})</th></tr></thead><tbody>${Object.entries(summary).map(([dev, data]) => `<tr class="dev-header"><td colspan="8">${dev}</td></tr>` + data.items.map(item => `<tr><td></td><td>${item.claimNumber}</td><td>${item.claimant}</td><td>${item.ref}</td><td>${item.merchant}</td><td>${formatShortDate(item.date)}</td><td>${item.percentage}%</td><td class="amount">${item.amount.toFixed(2)}</td></tr>`).join('') + `<tr class="subtotal"><td colspan="7">Subtotal: ${dev}</td><td class="amount">${data.total.toFixed(2)}</td></tr>`).join('')}<tr class="grand-total"><td colspan="7">TOTAL BACKCHARGES</td><td class="amount">${grandTotal.toFixed(2)}</td></tr></tbody></table><script>window.onload=function(){window.print();setTimeout(function(){window.close();},500);};</script></body></html>`;
+      printWindow.document.write(html);
+      printWindow.document.close();
+    };
+    const BACKCHARGE_REPORT_ADMINS = [805, 306, 102, 1002, 505];
+    const canGenerateBackchargeReport = BACKCHARGE_REPORT_ADMINS.includes(currentUser.id);
     return (
       <div className="space-y-4">
-        <h3 className="font-bold mb-4">📊 To Review ({reviewableClaims.length})</h3>
-        {reviewableClaims.length === 0 ? <div className="text-center py-12 text-slate-400">✅ All Clear</div> : (<div className="space-y-2">{reviewableClaims.map(claim => (<div key={claim.id} onClick={() => setSelectedClaim(claim)} className="flex items-center justify-between p-4 rounded-xl bg-white shadow-sm border cursor-pointer hover:border-blue-400 transition-all"><div><span className="font-bold text-slate-800">{claim.user_name}</span><span className={`ml-2 text-[10px] px-2 py-0.5 rounded-full font-black uppercase ${claim.approval_level === 2 ? 'bg-blue-100 text-blue-700' : 'bg-amber-100 text-amber-700'}`}>L{claim.approval_level || 1}</span><p className="text-xs text-slate-400 font-bold uppercase">{claim.office}</p></div><span className="font-black text-blue-600">{formatCurrency(claim.total_amount, claim.currency)}</span></div>))}</div>)}
-        {selectedClaim && (<div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50"><div className="bg-white rounded-2xl max-w-2xl w-full max-h-[90vh] overflow-hidden flex flex-col shadow-2xl"><div className="p-6 border-b flex justify-between bg-slate-50"><div><h2 className="text-xl font-bold">{selectedClaim.user_name}</h2><p className="text-xs font-bold text-slate-400 uppercase tracking-widest">{selectedClaim.claim_number}</p></div><button onClick={() => setSelectedClaim(null)} className="text-2xl text-slate-400">×</button></div><div className="p-6 overflow-y-auto flex-1"><button onClick={() => handleDownloadPDF(selectedClaim)} className="w-full bg-green-600 text-white py-3 rounded-xl font-bold shadow-lg mb-4">📥 Download Form PDF</button><div className="space-y-3">{selectedClaim.expenses?.map((exp, i) => (<div key={i} className="p-3 bg-slate-50 rounded-xl border flex justify-between items-center"><div className="flex-1"><div className="flex items-center gap-2"><span className="bg-blue-100 text-blue-700 text-[10px] px-2 py-0.5 rounded font-black">{exp.ref}</span><span className="font-bold text-sm">{exp.merchant}</span></div><p className="text-xs text-slate-500 mt-1">{exp.description}</p></div><span className="font-black text-blue-600 ml-2">{formatCurrency(exp.reimbursementAmount || exp.amount, selectedClaim.currency)}</span></div>))}</div></div><div className="p-4 border-t bg-slate-100 flex gap-3"><button onClick={() => handleReject(selectedClaim.id)} className="flex-1 py-3 rounded-xl bg-red-500 text-white font-bold shadow">Reject</button><button onClick={() => handleApprove(selectedClaim)} className="flex-[2] bg-blue-600 text-white py-3 rounded-xl font-bold shadow-xl">Approve ✓</button></div></div></div>)}
+        {canGenerateBackchargeReport && (<div className="bg-white rounded-2xl shadow-lg p-6 border-2 border-purple-300"><h3 className="font-bold mb-4 text-purple-700">📊 Backcharge Report Generator</h3><div className="flex flex-wrap gap-3 items-end mb-4"><div><label className="block text-xs text-slate-500 mb-1">From Date</label><input type="date" value={backchargeFromDate} onChange={(e) => setBackchargeFromDate(e.target.value)} className="border-2 rounded-lg px-3 py-2 text-sm" /></div><div><label className="block text-xs text-slate-500 mb-1">To Date</label><input type="date" value={backchargeToDate} onChange={(e) => setBackchargeToDate(e.target.value)} className="border-2 rounded-lg px-3 py-2 text-sm" /></div><button onClick={() => setShowBackchargeReport(true)} disabled={!backchargeFromDate || !backchargeToDate} className="bg-purple-600 text-white px-4 py-2 rounded-lg text-sm font-semibold disabled:opacity-50">Generate Report</button></div>{showBackchargeReport && backchargeData && (<div className="border-2 border-purple-200 rounded-xl p-4 bg-purple-50"><div className="flex justify-between items-center mb-3"><h4 className="font-bold text-purple-800">Report: {formatDate(backchargeFromDate)} - {formatDate(backchargeToDate)}</h4><div className="flex gap-2"><button onClick={generateBackchargeReportPDF} className="bg-green-600 text-white px-3 py-1 rounded text-sm">📥 Download PDF</button><button onClick={() => setShowBackchargeReport(false)} className="text-slate-500 text-sm">✕ Close</button></div></div>{Object.keys(backchargeData.summary).length === 0 ? (<p className="text-center text-slate-500 py-4">No backcharges found in this period.</p>) : (<div className="space-y-3">{Object.entries(backchargeData.summary).map(([dev, data]) => (<div key={dev} className="bg-white rounded-lg p-3 border"><div className="flex justify-between items-center"><span className="font-semibold text-purple-700">{dev}</span><span className="font-bold">{formatCurrency(data.total, OFFICES.find(o => o.code === currentUser.office)?.currency || 'SGD')}</span></div><div className="text-xs text-slate-500 mt-1">{data.items.length} expense(s)</div></div>))}<div className="bg-purple-700 text-white rounded-lg p-3 flex justify-between"><span className="font-bold">TOTAL BACKCHARGES</span><span className="font-bold">{formatCurrency(backchargeData.grandTotal, OFFICES.find(o => o.code === currentUser.office)?.currency || 'SGD')}</span></div></div>)}</div>)}</div>)}
+        {claimsForSubmission.length > 0 && (<div className="bg-white rounded-2xl shadow-lg p-6 border-2 border-green-300"><h3 className="font-bold mb-4 text-green-700">📤 For Submission ({claimsForSubmission.length})</h3><div className="space-y-2">{claimsForSubmission.map(claim => (<div key={claim.id} className="flex items-center justify-between p-4 rounded-xl bg-green-50 border border-green-200"><div className="flex-1"><div className="flex items-center gap-2"><span className="font-semibold">{claim.user_name}</span><span className="bg-green-100 text-green-700 text-xs px-2 py-0.5 rounded-full">Approved</span></div><p className="text-sm text-slate-500">{claim.claim_number} • {claim.office}</p></div><div className="flex items-center gap-2"><span className="font-bold text-green-700">{formatCurrency(claim.total_amount, claim.currency)}</span><button onClick={() => handleDownloadPDF(claim)} className="bg-blue-100 text-blue-700 px-3 py-2 rounded-lg text-sm">📥</button><button onClick={() => handleMarkSubmitted(claim.id)} disabled={loading} className="bg-green-600 text-white px-3 py-2 rounded-lg text-sm font-semibold disabled:opacity-50">✓ Submitted</button></div></div>))}</div></div>)}
+        <div className="bg-white rounded-2xl shadow-lg p-6">
+          <h3 className="font-bold mb-4">📊 To Review ({reviewableClaims.length})</h3>
+          {reviewableClaims.length === 0 ? <div className="text-center py-12 text-slate-400">✅ Nothing to review</div> : (<div className="space-y-2">{reviewableClaims.map(claim => (<div key={claim.id} onClick={() => setSelectedClaim(claim)} className="flex items-center justify-between p-4 rounded-xl bg-slate-50 border cursor-pointer hover:border-blue-300"><div><span className="font-semibold">{claim.user_name}</span><span className={`ml-2 text-xs px-2 py-0.5 rounded-full ${claim.approval_level === 2 ? 'bg-blue-100 text-blue-700' : 'bg-amber-100 text-amber-700'}`}>L{claim.approval_level || 1}</span><p className="text-sm text-slate-500">{claim.office}</p></div><span className="font-bold">{formatCurrency(claim.total_amount, claim.currency)}</span></div>))}</div>)}
+        </div>
+        {selectedClaim && (<div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50" onClick={() => setSelectedClaim(null)}><div className="bg-white rounded-2xl max-w-2xl w-full max-h-[90vh] overflow-auto" onClick={e => e.stopPropagation()}><div className="p-6 border-b flex justify-between"><div><h2 className="text-xl font-bold">{selectedClaim.user_name}</h2><p className="text-sm text-slate-500">{selectedClaim.claim_number} • Level {selectedClaim.approval_level || 1}</p></div><button onClick={() => setSelectedClaim(null)} className="text-2xl text-slate-400">×</button></div><div className="p-6"><button onClick={() => handleDownloadPDF(selectedClaim)} className="w-full bg-green-600 text-white py-3 rounded-xl font-semibold mb-4">📥 Download PDF</button>{selectedClaim.expenses?.map((exp, i) => (<div key={i} className="py-3 border-b"><div className="flex justify-between items-start"><div className="flex-1"><div className="flex items-center gap-2 flex-wrap"><span className="bg-blue-100 text-blue-700 text-xs px-2 py-0.5 rounded font-bold">{exp.ref}</span><span className="font-semibold">{exp.merchant}</span>{exp.isPotentialDuplicate && <span className="bg-red-100 text-red-600 text-xs px-2 py-0.5 rounded">⚠️ Duplicate?</span>}{exp.numberOfPax && <span className="bg-purple-100 text-purple-600 text-xs px-2 py-0.5 rounded">👥 {exp.numberOfPax} pax</span>}</div><p className="text-xs text-slate-500 mt-1">{exp.description}</p>{exp.adminNotes && <p className="text-xs text-amber-600 mt-1 bg-amber-50 px-2 py-1 rounded">📝 Notes: {exp.adminNotes}</p>}</div><span className="font-bold text-green-700 ml-2">{formatCurrency(exp.reimbursementAmount || exp.amount, selectedClaim.currency)}</span></div></div>))}</div><div className="p-4 border-t bg-slate-50 space-y-3"><div className="flex gap-3"><button onClick={() => setEditingClaim(selectedClaim)} className="flex-1 py-3 rounded-xl bg-purple-500 text-white font-semibold">✏️ Edit / Add Notes</button><button onClick={() => setShowRequestChanges(true)} className="flex-1 py-3 rounded-xl bg-amber-500 text-white font-semibold">📝 Return</button></div><div className="flex gap-3"><button onClick={() => handleReject(selectedClaim.id)} disabled={loading} className="flex-1 py-3 rounded-xl bg-red-500 text-white font-semibold disabled:opacity-50">↩️ Reject</button><button onClick={() => handleApprove(selectedClaim)} disabled={loading} className="flex-[2] py-3 rounded-xl bg-green-600 text-white font-semibold disabled:opacity-50">{(() => { const workflow = SENIOR_STAFF_ROUTING[selectedClaim.user_id]; const isSingleLevel = workflow?.singleLevel; const level = selectedClaim.approval_level || 1; if (level === 1 && isSingleLevel) return workflow?.externalApproval ? '✓ Approve (→ Chairman)' : '✓ Final Approve'; if (level === 1) return '✓ Approve → L2'; return '✓ Final Approve'; })()}</button></div></div></div></div>)}
+        {editingClaim && <EditClaimModal claim={editingClaim} onClose={() => setEditingClaim(null)} />}
+        {showRequestChanges && selectedClaim && (<div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50"><div className="bg-white rounded-2xl max-w-md w-full"><div className="bg-amber-500 text-white p-5"><h2 className="font-bold">📝 Request Changes</h2></div><div className="p-6"><textarea className="w-full p-3 border-2 rounded-xl" rows={4} placeholder="What needs fixing?" value={changeRequestComment} onChange={(e) => setChangeRequestComment(e.target.value)} /></div><div className="p-4 border-t flex gap-3"><button onClick={() => setShowRequestChanges(false)} className="flex-1 py-3 rounded-xl border-2 font-semibold">Cancel</button><button onClick={() => handleRequestChanges(selectedClaim.id, changeRequestComment)} disabled={!changeRequestComment.trim()} className="flex-[2] py-3 rounded-xl bg-amber-500 text-white font-semibold disabled:opacity-50">Send 📤</button></div></div></div>)}
       </div>
     );
   };
 
+  const canReview = currentUser.role === 'admin' || currentUser.role === 'manager' || currentUser.role === 'finance' || getReviewableClaims().length > 0 || getClaimsForSubmission().length > 0;
+  
   const handleStatementAnnotationSave = (annotatedImage, annotations) => { 
     const newAnnotated = [...annotatedStatements];
     newAnnotated[currentStatementIndex] = annotatedImage;
     setAnnotatedStatements(newAnnotated);
-    setStatementAnnotations([...statementAnnotations.filter(a => a.pageIndex !== currentStatementIndex), ...annotations.map(a => ({ ...a, pageIndex: currentStatementIndex }))]);
-    setShowStatementAnnotator(false);
-    setShowPreview(true);
+    setStatementAnnotations([...statementAnnotations, ...annotations]);
+    if (currentStatementIndex < statementImages.length - 1) setCurrentStatementIndex(currentStatementIndex + 1);
+    else { setShowStatementAnnotator(false); setShowPreview(true); }
   };
 
   return (
-    <div className="min-h-screen bg-slate-100">
-      <header className="bg-slate-900 text-white px-4 py-3 sticky top-0 z-40 shadow-xl"><div className="max-w-3xl mx-auto flex justify-between items-center"><div><div className="text-xs font-black text-blue-400 uppercase tracking-widest">Berkeley</div><div className="text-sm font-bold truncate max-w-[150px]">{currentUser.name}</div></div><button onClick={() => { localStorage.clear(); window.location.reload(); }} className="bg-white/10 px-3 py-1.5 rounded-lg text-xs font-bold border border-white/10">Logout</button></div></header>
-      <div className="bg-white border-b sticky top-[52px] z-30"><div className="max-w-3xl mx-auto flex"><button onClick={() => setActiveTab('my_expenses')} className={`flex-1 py-3 text-xs font-black uppercase tracking-widest border-b-4 transition-all ${activeTab === 'my_expenses' ? 'border-blue-600 text-blue-600' : 'border-transparent text-slate-400'}`}>My Drafts</button><button onClick={() => setActiveTab('review')} className={`flex-1 py-3 text-xs font-black uppercase tracking-widest border-b-4 transition-all ${activeTab === 'review' ? 'border-blue-600 text-blue-600' : 'border-transparent text-slate-400'}`}>Reviews</button></div></div>
-      <main className="max-w-3xl mx-auto p-4">{activeTab === 'review' ? <ReviewClaimsTab /> : <MyExpensesTab />}</main>
+    <div className="min-h-screen bg-gradient-to-br from-slate-100 to-slate-200">
+      <header className="bg-gradient-to-r from-slate-900 to-slate-800 text-white px-4 py-3 shadow-lg sticky top-0 z-40">
+        <div className="max-w-3xl mx-auto flex items-center justify-between">
+          <div><div className="font-semibold text-sm">Berkeley Expenses</div><div className="text-xs text-slate-400">{userOffice?.name} • {getUserReimburseCurrency(currentUser)}</div></div>
+          <div className="flex items-center gap-3"><div className="text-right hidden sm:block"><div className="text-sm font-medium">{currentUser.name.split(' ').slice(0, 2).join(' ')}</div><div className="text-xs text-slate-400 capitalize">{currentUser.role}</div></div><button onClick={() => { localStorage.removeItem('berkeley_current_user'); setCurrentUser(null); setExpenses([]); setAnnotatedStatements([]); setStatementAnnotations([]); setStatementImages([]); setActiveTab('my_expenses'); }} className="bg-white/10 px-3 py-2 rounded-lg text-xs font-medium">Logout</button></div>
+        </div>
+      </header>
+      {canReview && (<div className="bg-white border-b sticky top-14 z-30"><div className="max-w-3xl mx-auto flex"><button onClick={() => setActiveTab('my_expenses')} className={`flex-1 py-3 text-sm font-semibold border-b-2 ${activeTab === 'my_expenses' ? 'border-blue-600 text-blue-600' : 'border-transparent text-slate-500'}`}>📋 My Expenses</button><button onClick={() => setActiveTab('review')} className={`flex-1 py-3 text-sm font-semibold border-b-2 ${activeTab === 'review' ? 'border-blue-600 text-blue-600' : 'border-transparent text-slate-500'}`}>👀 Review{getReviewableClaims().length > 0 && <span className="ml-2 bg-amber-500 text-white text-xs px-2 py-0.5 rounded-full">{getReviewableClaims().length}</span>}</button></div></div>)}
+      <main className="max-w-3xl mx-auto p-4 pb-20">{canReview && activeTab === 'review' ? <ReviewClaimsTab /> : <MyExpensesTab />}</main>
       {(showAddExpense || editingExpense) && <AddExpenseModal editExpense={editingExpense} existingClaims={claims} expenses={expenses} onClose={() => { setShowAddExpense(false); setEditingExpense(null); }} />}
       {showPreview && <PreviewClaimModal />}
       {showStatementUpload && (
         <StatementUploadModal 
           existingImages={statementImages}
           onClose={() => setShowStatementUpload(false)}
-          onContinue={(imgs) => { setStatementImages(imgs); setAnnotatedStatements(prev => { const arr = [...prev]; while(arr.length < imgs.length) arr.push(null); return arr.slice(0, imgs.length); }); setShowStatementUpload(false); setShowPreview(true); }}
-          onEditExisting={(idx, imgs) => { setStatementImages(imgs); setCurrentStatementIndex(idx); setShowStatementUpload(false); setShowStatementAnnotator(true); }}
+          onContinue={(imgs) => {
+            setStatementImages(imgs);
+            if (imgs.length > 0) {
+              setCurrentStatementIndex(0);
+              setShowStatementUpload(false); 
+              setShowStatementAnnotator(true);
+            }
+          }}
         />
       )}
       {showStatementAnnotator && statementImages[currentStatementIndex] && (
         <StatementAnnotator 
           image={statementImages[currentStatementIndex]} 
           expenses={pendingExpenses} 
-          existingAnnotations={statementAnnotations.filter(a => a.pageIndex === currentStatementIndex)} 
+          existingAnnotations={statementAnnotations} 
           onSave={handleStatementAnnotationSave} 
           onCancel={() => { setShowStatementAnnotator(false); setShowPreview(true); }} 
         />
       )}
+      {viewingImage && <ImageViewer src={viewingImage} onClose={() => setViewingImage(null)} />}
     </div>
   );
 }
