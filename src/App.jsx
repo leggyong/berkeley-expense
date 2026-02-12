@@ -2,10 +2,10 @@
 
 /*
  * BERKELEY INTERNATIONAL EXPENSE MANAGEMENT SYSTEM
- * Version: 4.0 - NO COMPRESSION (Fixes "Nothing Happens" bug)
- * - Removed: Image Compression (It was crashing mobile browsers)
- * - Fixed: Upload now reads file directly (100% reliable)
- * - Fixed: Scrolling works perfectly (Touch logic separated)
+ * Version: 4.1 - STABILITY FIX (Solved Upload Crash)
+ * - Fixed: Moved Upload Modal outside main component to prevent unmounting on focus/sync
+ * - Fixed: Uses lightweight preview (createObjectURL) to prevent memory crashes
+ * - Preserved: All Scroll and Sync fixes
  */
 
 const SUPABASE_URL = 'https://wlhoyjsicvkncfjbexoi.supabase.co';
@@ -420,6 +420,93 @@ const StatementAnnotator = ({ image, expenses, existingAnnotations = [], onSave,
       </div>
     </div>
   );
+};
+
+// ============================================
+// STABLE UPLOAD MODAL (Defined Outside)
+// ============================================
+const StatementUploadModal = ({ existingImages, onClose, onContinue }) => {
+    const [localStatements, setLocalStatements] = useState([...existingImages]);
+    const [isProcessing, setIsProcessing] = useState(false);
+    
+    // Programmatic trigger ref for file input
+    const fileInputRef = useRef(null);
+    const triggerFileSelect = () => { if (fileInputRef.current) fileInputRef.current.click(); };
+
+    const handleFileSelect = (e) => { 
+      const file = e.target.files[0]; 
+      if (!file) return;
+
+      setIsProcessing(true);
+      // LIGHTWEIGHT PREVIEW - Use URL.createObjectURL to avoid memory crash
+      try {
+        const previewUrl = URL.createObjectURL(file);
+        setLocalStatements(prev => [...prev, previewUrl]);
+      } catch (err) {
+        alert("Failed to read file.");
+      }
+      setIsProcessing(false);
+      // Reset input to allow selecting same file again
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    };
+
+    const removeStatement = (idx) => setLocalStatements(prev => prev.filter((_, i) => i !== idx));
+    const handleContinueInternal = () => { onContinue(localStatements); };
+    
+    return (
+      <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50">
+        <div className="bg-white rounded-2xl max-w-lg w-full shadow-2xl max-h-[90vh] overflow-hidden flex flex-col">
+          <div className="bg-amber-500 text-white p-5 shrink-0"><h2 className="text-lg font-bold">💳 Upload Credit Card Statements</h2><p className="text-amber-100 text-sm">You can upload multiple statements</p></div>
+          <div className="p-6 overflow-y-auto flex-1">
+            <div className="grid grid-cols-2 gap-3 mb-4">
+              {localStatements.map((img, idx) => (
+                <div key={idx} className="relative border-2 border-green-400 rounded-lg overflow-hidden">
+                  <img src={img} alt={`Statement ${idx + 1}`} className="w-full h-24 object-cover" />
+                  <button onClick={() => removeStatement(idx)} className="absolute top-1 right-1 bg-red-500 text-white w-6 h-6 rounded-full text-xs">✕</button>
+                  <div className="absolute bottom-0 left-0 right-0 bg-green-600 text-white text-xs text-center py-1">Statement {idx + 1}</div>
+                </div>
+              ))}
+              
+              {/* Simplified Upload Button */}
+              <div 
+                onClick={triggerFileSelect}
+                className="border-2 border-dashed border-slate-300 rounded-lg p-4 text-center cursor-pointer hover:border-amber-400 flex flex-col items-center justify-center min-h-[96px] bg-slate-50"
+              >
+                {isProcessing ? (
+                  <span className="text-sm font-semibold text-amber-600 animate-pulse">Loading...</span>
+                ) : (
+                  <>
+                    <span className="text-3xl">➕</span>
+                    <span className="text-xs text-slate-500 mt-1">Add Statement</span>
+                  </>
+                )}
+              </div>
+              {/* Hidden Input */}
+              <input 
+                type="file" 
+                accept="image/*" 
+                className="hidden" 
+                ref={fileInputRef}
+                onChange={handleFileSelect}
+                disabled={isProcessing} 
+              />
+            </div>
+            {localStatements.length === 0 && (
+              <div className="text-center py-8 text-slate-400">
+                <p>📄 No statements uploaded yet</p>
+                <p className="text-sm">Tap the + box to add one</p>
+              </div>
+            )}
+          </div>
+          <div className="p-4 border-t flex gap-3 shrink-0">
+            <button onClick={onClose} className="flex-1 py-3 rounded-xl border-2 font-semibold">Cancel</button>
+            <button onClick={handleContinueInternal} disabled={localStatements.length === 0 || isProcessing} className="flex-[2] py-3 rounded-xl bg-green-600 text-white font-semibold disabled:opacity-50">
+              {isProcessing ? 'Please wait...' : `Annotate (${localStatements.length}) →`}
+            </button>
+          </div>
+        </div>
+      </div>
+    );
 };
 
 export default function BerkeleyExpenseSystem() {
@@ -876,7 +963,7 @@ export default function BerkeleyExpenseSystem() {
               <div className="flex gap-3 pt-2"><button onClick={() => { setLoginStep('select'); setSelectedEmployee(null); }} className="flex-1 py-3 rounded-xl border-2 border-slate-300 font-semibold text-slate-600">← Back</button><button onClick={handleLogin} className="flex-[2] py-3 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 text-white font-semibold shadow-lg">Login 🔐</button></div>
             </div>
           )}
-          <p className="text-center text-xs text-slate-400 mt-8">v4.0 (No Compression)</p>
+          <p className="text-center text-xs text-slate-400 mt-8">v4.1 (Stable Upload)</p>
         </div>
       </div>
     );
@@ -971,103 +1058,6 @@ export default function BerkeleyExpenseSystem() {
     );
   };
   
-  // ============================================
-  // UPLOAD FIX: REMOVED COMPRESSION ENTIRELY
-  // ============================================
-  const StatementUploadModal = () => {
-    const [localStatements, setLocalStatements] = useState([...statementImages]);
-    const [isProcessing, setIsProcessing] = useState(false);
-    
-    // Programmatic trigger ref for file input
-    const fileInputRef = useRef(null);
-    const triggerFileSelect = () => { if (fileInputRef.current) fileInputRef.current.click(); };
-
-    const handleFileSelect = (e) => { 
-      const file = e.target.files[0]; 
-      if (!file) return;
-
-      setIsProcessing(true);
-      // DIRECT READ - No canvas compression (prevents memory crash)
-      const reader = new FileReader();
-      reader.onload = (event) => {
-        setLocalStatements(prev => [...prev, event.target.result]);
-        setIsProcessing(false);
-      };
-      reader.onerror = () => {
-        alert("Failed to read file.");
-        setIsProcessing(false);
-      };
-      reader.readAsDataURL(file);
-
-      // Reset input
-      if (fileInputRef.current) fileInputRef.current.value = '';
-    };
-
-    const removeStatement = (idx) => setLocalStatements(prev => prev.filter((_, i) => i !== idx));
-    const handleContinue = () => { 
-      setStatementImages(localStatements);
-      if (localStatements.length > 0) {
-        setCurrentStatementIndex(0);
-        setShowStatementUpload(false); 
-        setShowStatementAnnotator(true);
-      }
-    };
-    return (
-      <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50">
-        <div className="bg-white rounded-2xl max-w-lg w-full shadow-2xl max-h-[90vh] overflow-hidden flex flex-col">
-          <div className="bg-amber-500 text-white p-5 shrink-0"><h2 className="text-lg font-bold">💳 Upload Credit Card Statements</h2><p className="text-amber-100 text-sm">You can upload multiple statements</p></div>
-          <div className="p-6 overflow-y-auto flex-1">
-            <div className="grid grid-cols-2 gap-3 mb-4">
-              {localStatements.map((img, idx) => (
-                <div key={idx} className="relative border-2 border-green-400 rounded-lg overflow-hidden">
-                  <img src={img} alt={`Statement ${idx + 1}`} className="w-full h-24 object-cover" />
-                  <button onClick={() => removeStatement(idx)} className="absolute top-1 right-1 bg-red-500 text-white w-6 h-6 rounded-full text-xs">✕</button>
-                  <div className="absolute bottom-0 left-0 right-0 bg-green-600 text-white text-xs text-center py-1">Statement {idx + 1}</div>
-                </div>
-              ))}
-              
-              {/* Simplified Upload Button */}
-              <div 
-                onClick={triggerFileSelect}
-                className="border-2 border-dashed border-slate-300 rounded-lg p-4 text-center cursor-pointer hover:border-amber-400 flex flex-col items-center justify-center min-h-[96px] bg-slate-50"
-              >
-                {isProcessing ? (
-                  <span className="text-sm font-semibold text-amber-600 animate-pulse">Loading...</span>
-                ) : (
-                  <>
-                    <span className="text-3xl">➕</span>
-                    <span className="text-xs text-slate-500 mt-1">Add Statement</span>
-                  </>
-                )}
-              </div>
-              {/* Hidden Input */}
-              <input 
-                type="file" 
-                accept="image/*" 
-                className="hidden" 
-                ref={fileInputRef}
-                onChange={handleFileSelect}
-                disabled={isProcessing} 
-              />
-            </div>
-            {localStatements.length === 0 && (
-              <div className="text-center py-8 text-slate-400">
-                <p>📄 No statements uploaded yet</p>
-                <p className="text-sm">Tap the + box to add one</p>
-              </div>
-            )}
-          </div>
-          <div className="p-4 border-t flex gap-3 shrink-0">
-            <button onClick={() => setShowStatementUpload(false)} className="flex-1 py-3 rounded-xl border-2 font-semibold">Cancel</button>
-            <button onClick={handleContinue} disabled={localStatements.length === 0 || isProcessing} className="flex-[2] py-3 rounded-xl bg-green-600 text-white font-semibold disabled:opacity-50">
-              {isProcessing ? 'Please wait...' : `Annotate (${localStatements.length}) →`}
-            </button>
-          </div>
-        </div>
-      </div>
-    );
-  };
-
   const PreviewClaimModal = () => {
     const userReimburseCurrency = getUserReimburseCurrency(currentUser);
     const groupedExpenses = pendingExpenses.reduce((acc, exp) => { if (!acc[exp.category]) acc[exp.category] = []; acc[exp.category].push(exp); return acc; }, {});
@@ -1244,7 +1234,23 @@ export default function BerkeleyExpenseSystem() {
       <main className="max-w-3xl mx-auto p-4 pb-20">{canReview && activeTab === 'review' ? <ReviewClaimsTab /> : <MyExpensesTab />}</main>
       {(showAddExpense || editingExpense) && <AddExpenseModal editExpense={editingExpense} onClose={() => { setShowAddExpense(false); setEditingExpense(null); }} />}
       {showPreview && <PreviewClaimModal />}
-      {showStatementUpload && <StatementUploadModal />}
+      
+      {/* FIXED: Statement Upload Modal is now defined outside and passed handlers */}
+      {showStatementUpload && (
+        <StatementUploadModal 
+          existingImages={statementImages}
+          onClose={() => setShowStatementUpload(false)}
+          onContinue={(imgs) => {
+            setStatementImages(imgs);
+            if (imgs.length > 0) {
+              setCurrentStatementIndex(0);
+              setShowStatementUpload(false); 
+              setShowStatementAnnotator(true);
+            }
+          }}
+        />
+      )}
+
       {showStatementAnnotator && statementImages[currentStatementIndex] && (
         <StatementAnnotator 
           image={statementImages[currentStatementIndex]} 
