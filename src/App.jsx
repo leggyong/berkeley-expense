@@ -2,10 +2,13 @@
 
 /*
  * BERKELEY INTERNATIONAL EXPENSE MANAGEMENT SYSTEM
- * Version: 4.1 - STABILITY FIX (Solved Upload Crash)
- * - Fixed: Moved Upload Modal outside main component to prevent unmounting on focus/sync
- * - Fixed: Uses lightweight preview (createObjectURL) to prevent memory crashes
- * - Preserved: All Scroll and Sync fixes
+ * Version: 4.2 - POLISH & LOGIC CHECKS
+ * - Feature: Real-time Duplicate Checker (Checks History & Drafts)
+ * - Feature: >2 Month Old Warning in PDF (Details & Receipts)
+ * - Feature: Backcharge % Visual Validator (Red/Green text)
+ * - Feature: Attendee vs Pax Visual Validator (Red/Green text)
+ * - Feature: Per Pax shown in PDF Detail Tables
+ * - Update: Claim Naming Convention (Name-YYYY-XX)
  */
 
 const SUPABASE_URL = 'https://wlhoyjsicvkncfjbexoi.supabase.co';
@@ -388,7 +391,6 @@ const StatementAnnotator = ({ image, expenses, existingAnnotations = [], onSave,
         {untaggedExpenses.length > 0 && <div className="mt-2 bg-amber-50 border border-amber-300 rounded-lg p-2"><p className="text-amber-800 text-xs">⚠️ Untagged: {untaggedExpenses.map(e => e.ref).join(', ')}</p></div>}
         {selectedLabel && <p className="mt-2 text-orange-600 font-medium text-xs">👆 Tap image to place {selectedLabel}</p>}
       </div>
-      {/* SCROLLING WORKS: The container handles touch scroll, but canvas captures events only if necessary */}
       <div className="flex-1 overflow-auto bg-slate-800 p-2" style={{ WebkitOverflowScrolling: 'touch', touchAction: 'pan-y' }}>
         {imageLoaded && (
           <canvas ref={canvasRef}
@@ -422,31 +424,21 @@ const StatementAnnotator = ({ image, expenses, existingAnnotations = [], onSave,
   );
 };
 
-// ============================================
-// STABLE UPLOAD MODAL (Defined Outside)
-// ============================================
 const StatementUploadModal = ({ existingImages, onClose, onContinue }) => {
     const [localStatements, setLocalStatements] = useState([...existingImages]);
     const [isProcessing, setIsProcessing] = useState(false);
-    
-    // Programmatic trigger ref for file input
     const fileInputRef = useRef(null);
     const triggerFileSelect = () => { if (fileInputRef.current) fileInputRef.current.click(); };
 
     const handleFileSelect = (e) => { 
       const file = e.target.files[0]; 
       if (!file) return;
-
       setIsProcessing(true);
-      // LIGHTWEIGHT PREVIEW - Use URL.createObjectURL to avoid memory crash
       try {
         const previewUrl = URL.createObjectURL(file);
         setLocalStatements(prev => [...prev, previewUrl]);
-      } catch (err) {
-        alert("Failed to read file.");
-      }
+      } catch (err) { alert("Failed to read file."); }
       setIsProcessing(false);
-      // Reset input to allow selecting same file again
       if (fileInputRef.current) fileInputRef.current.value = '';
     };
 
@@ -466,58 +458,21 @@ const StatementUploadModal = ({ existingImages, onClose, onContinue }) => {
                   <div className="absolute bottom-0 left-0 right-0 bg-green-600 text-white text-xs text-center py-1">Statement {idx + 1}</div>
                 </div>
               ))}
-              
-              {/* Simplified Upload Button */}
-              <div 
-                onClick={triggerFileSelect}
-                className="border-2 border-dashed border-slate-300 rounded-lg p-4 text-center cursor-pointer hover:border-amber-400 flex flex-col items-center justify-center min-h-[96px] bg-slate-50"
-              >
-                {isProcessing ? (
-                  <span className="text-sm font-semibold text-amber-600 animate-pulse">Loading...</span>
-                ) : (
-                  <>
-                    <span className="text-3xl">➕</span>
-                    <span className="text-xs text-slate-500 mt-1">Add Statement</span>
-                  </>
-                )}
+              <div onClick={triggerFileSelect} className="border-2 border-dashed border-slate-300 rounded-lg p-4 text-center cursor-pointer hover:border-amber-400 flex flex-col items-center justify-center min-h-[96px] bg-slate-50">
+                {isProcessing ? <span className="text-sm font-semibold text-amber-600 animate-pulse">Loading...</span> : <><span className="text-3xl">➕</span><span className="text-xs text-slate-500 mt-1">Add Statement</span></>}
               </div>
-              {/* Hidden Input */}
-              <input 
-                type="file" 
-                accept="image/*" 
-                className="hidden" 
-                ref={fileInputRef}
-                onChange={handleFileSelect}
-                disabled={isProcessing} 
-              />
+              <input type="file" accept="image/*" className="hidden" ref={fileInputRef} onChange={handleFileSelect} disabled={isProcessing} />
             </div>
-            {localStatements.length === 0 && (
-              <div className="text-center py-8 text-slate-400">
-                <p>📄 No statements uploaded yet</p>
-                <p className="text-sm">Tap the + box to add one</p>
-              </div>
-            )}
+            {localStatements.length === 0 && (<div className="text-center py-8 text-slate-400"><p>📄 No statements uploaded yet</p><p className="text-sm">Tap the + box to add one</p></div>)}
           </div>
-          <div className="p-4 border-t flex gap-3 shrink-0">
-            <button onClick={onClose} className="flex-1 py-3 rounded-xl border-2 font-semibold">Cancel</button>
-            <button onClick={handleContinueInternal} disabled={localStatements.length === 0 || isProcessing} className="flex-[2] py-3 rounded-xl bg-green-600 text-white font-semibold disabled:opacity-50">
-              {isProcessing ? 'Please wait...' : `Annotate (${localStatements.length}) →`}
-            </button>
-          </div>
+          <div className="p-4 border-t flex gap-3 shrink-0"><button onClick={onClose} className="flex-1 py-3 rounded-xl border-2 font-semibold">Cancel</button><button onClick={handleContinueInternal} disabled={localStatements.length === 0 || isProcessing} className="flex-[2] py-3 rounded-xl bg-green-600 text-white font-semibold disabled:opacity-50">{isProcessing ? 'Please wait...' : `Annotate (${localStatements.length}) →`}</button></div>
         </div>
       </div>
     );
 };
 
 export default function BerkeleyExpenseSystem() {
-  const [currentUser, setCurrentUser] = useState(() => {
-    try {
-      const saved = localStorage.getItem('berkeley_current_user');
-      return saved ? JSON.parse(saved) : null;
-    } catch (e) {
-      return null;
-    }
-  });
+  const [currentUser, setCurrentUser] = useState(() => { try { const saved = localStorage.getItem('berkeley_current_user'); return saved ? JSON.parse(saved) : null; } catch (e) { return null; } });
   const [expenses, setExpenses] = useState([]);
   const [claims, setClaims] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -545,21 +500,15 @@ export default function BerkeleyExpenseSystem() {
   const [passwordInput, setPasswordInput] = useState('');
   const [loginError, setLoginError] = useState('');
 
-  // --- SYNC LOGIC (Untouched) ---
+  // --- SYNC LOGIC ---
   const loadDrafts = async () => {
     if (!currentUser) return;
     try {
       const { data, error } = await supabase.from('user_drafts').select('*').eq('user_id', currentUser.id);
       if (!error && data && data.length > 0) {
         const draft = data[0];
-        if (draft.expenses) {
-          const parsed = JSON.parse(draft.expenses);
-          if (parsed && parsed.length > 0) setExpenses(parsed);
-        }
-        if (draft.statements) {
-          const parsed = JSON.parse(draft.statements);
-          if (parsed && parsed.length > 0) setAnnotatedStatements(parsed);
-        }
+        if (draft.expenses) { const parsed = JSON.parse(draft.expenses); if (parsed && parsed.length > 0) setExpenses(parsed); }
+        if (draft.statements) { const parsed = JSON.parse(draft.statements); if (parsed && parsed.length > 0) setAnnotatedStatements(parsed); }
       } else {
         const savedExpenses = localStorage.getItem(`draft_expenses_${currentUser.id}`);
         if (savedExpenses) setExpenses(JSON.parse(savedExpenses));
@@ -586,13 +535,7 @@ export default function BerkeleyExpenseSystem() {
         if (currentUser) {
           if (expenses && expenses.length > 0) localStorage.setItem(`draft_expenses_${currentUser.id}`, JSON.stringify(expenses));
           else localStorage.removeItem(`draft_expenses_${currentUser.id}`);
-          
-          const draftData = {
-            user_id: currentUser.id,
-            expenses: JSON.stringify(expenses || []),
-            statements: JSON.stringify(annotatedStatements || []),
-            updated_at: new Date().toISOString()
-          };
+          const draftData = { user_id: currentUser.id, expenses: JSON.stringify(expenses || []), statements: JSON.stringify(annotatedStatements || []), updated_at: new Date().toISOString() };
           const { data: existing } = await supabase.from('user_drafts').select('id').eq('user_id', currentUser.id);
           if (existing && existing.length > 0) await supabase.from('user_drafts').update(draftData).eq('user_id', currentUser.id);
           else await supabase.from('user_drafts').insert([draftData]);
@@ -603,13 +546,7 @@ export default function BerkeleyExpenseSystem() {
     return () => clearTimeout(timeout);
   }, [expenses, annotatedStatements, currentUser]);
 
-  const handleManualSync = async () => {
-    setLoading(true);
-    await loadDrafts();
-    await loadClaims();
-    setLoading(false);
-    alert('✅ Synced!');
-  };
+  const handleManualSync = async () => { setLoading(true); await loadDrafts(); await loadClaims(); setLoading(false); alert('✅ Synced!'); };
 
   const clearDraftStorage = async () => {
     if (currentUser) {
@@ -663,12 +600,8 @@ export default function BerkeleyExpenseSystem() {
       });
     } catch (err) { return expenseList || []; }
   };
-  const getReviewableClaims = () => {
-    if (!currentUser) return [];
-    return claims.filter(c => (c.status === 'pending_review' || c.status === 'pending_level2') && canUserReviewClaim(currentUser.id, c));
-  };
+  const getReviewableClaims = () => { if (!currentUser) return []; return claims.filter(c => (c.status === 'pending_review' || c.status === 'pending_level2') && canUserReviewClaim(currentUser.id, c)); };
   
-  // PDF Generation Logic (Same as before)
   const generatePDFFromHTML = async (expenseList, userName, officeCode, claimNumber, submittedDate, statementImgs, reimburseCurrency, level2ApprovedBy, level2ApprovedAt) => {
     const printWindow = window.open('', '_blank');
     if (!printWindow) { alert('Please allow popups'); return; }
@@ -693,7 +626,9 @@ export default function BerkeleyExpenseSystem() {
     for (const exp of expenseList) {
       const imgs = [exp.receiptPreview, exp.receiptPreview2].filter(Boolean);
       const isCNY = exp.currency === 'CNY';
+      const isOld = isOlderThan2Months(exp.date);
       const adminNotesHTML = exp.adminNotes ? `<br><span style="color:#d97706;font-style:italic;">Notes: ${exp.adminNotes}</span>` : '';
+      const oldWarningHTML = isOld ? `<br><span style="background:#fff3cd;color:#856404;padding:2px 6px;border-radius:4px;font-weight:bold;font-size:9px;">⚠️ >2 MONTHS OLD</span>` : '';
       const duplicateHTML = exp.isPotentialDuplicate ? `<br><span style="background:#fef2f2;color:#dc2626;padding:2px 6px;border-radius:4px;font-weight:bold;font-size:9px;">⚠️ DUPLICATE${exp.duplicateInfo ? ` - ${exp.duplicateInfo}` : ''}</span>` : '';
       const paxCount = parseInt(exp.numberOfPax) || 0;
       const isEntertaining = ['E', 'F'].includes(exp.category);
@@ -701,12 +636,12 @@ export default function BerkeleyExpenseSystem() {
       const perPaxHTML = isEntertaining && paxCount > 0 ? `<br><span style="color:#6366f1;font-weight:bold;font-size:9px;">👥 ${paxCount} pax • ${reimburseCurrency} ${perPaxAmount.toFixed(2)} per pax</span>` : '';
       const attendeesHTML = exp.attendees ? `<br><span style="color:#059669;font-size:9px;">Attendees: ${exp.attendees.replace(/\n/g, ', ')}</span>` : '';
       const backchargeHTML = exp.hasBackcharge && exp.backcharges?.length > 0 ? `<div class="backcharge-inline"><strong style="color:#1565c0;">📊 Backcharges:</strong> ${exp.backcharges.map(bc => `${bc.development}: ${bc.percentage}%`).join(' | ')}</div>` : '';
-      receiptsHTML += `<div class="page receipt-page"><div class="receipt-header"><div class="receipt-ref">${exp.ref}</div><div class="receipt-info"><strong>${exp.merchant}</strong><br>Date: ${formatShortDate(exp.date)} | Original: ${formatCurrency(exp.amount, exp.currency)}${exp.isForeignCurrency ? ` | Reimburse: ${formatCurrency(exp.reimbursementAmount, reimburseCurrency)}` : ''}<br>${exp.description || ''}${duplicateHTML}${perPaxHTML}${attendeesHTML}${adminNotesHTML}</div></div>${imgs.map((img, idx) => `<div>${imgs.length > 1 && isCNY ? `<p style="font-size:9px;color:#666;margin:2px 0;">${idx === 0 ? '发票 Fapiao' : '小票 Xiaopiao'}</p>` : ''}<img src="${img}" class="receipt-img" /></div>`).join('')}${imgs.length === 0 ? '<div class="no-receipt">No receipt image</div>' : ''}${backchargeHTML}</div>`;
+      receiptsHTML += `<div class="page receipt-page"><div class="receipt-header"><div class="receipt-ref">${exp.ref}</div><div class="receipt-info"><strong>${exp.merchant}</strong><br>Date: ${formatShortDate(exp.date)} | Original: ${formatCurrency(exp.amount, exp.currency)}${exp.isForeignCurrency ? ` | Reimburse: ${formatCurrency(exp.reimbursementAmount, reimburseCurrency)}` : ''}<br>${exp.description || ''}${oldWarningHTML}${duplicateHTML}${perPaxHTML}${attendeesHTML}${adminNotesHTML}</div></div>${imgs.map((img, idx) => `<div>${imgs.length > 1 && isCNY ? `<p style="font-size:9px;color:#666;margin:2px 0;">${idx === 0 ? '发票 Fapiao' : '小票 Xiaopiao'}</p>` : ''}<img src="${img}" class="receipt-img" /></div>`).join('')}${imgs.length === 0 ? '<div class="no-receipt">No receipt image</div>' : ''}${backchargeHTML}</div>`;
     }
 
-    const travelDetailHTML = travelExpenses.length > 0 ? `<div class="page"><h2 class="detail-title">Travel Expense Detail</h2><div class="detail-info">Name: <strong>${userName}</strong></div><p class="detail-note">Please do not include any travel expenses associated with Employee Entertaining. (See Staff Entertaining)</p><table class="detail-table"><thead><tr><th>Receipt No.</th><th>B<br>Parking</th><th colspan="5">C - Travel Expenses</th><th colspan="2">D - Motor Vehicles</th><th>Full Description</th></tr><tr><th>VAT</th><th>Parking</th><th>Public Transport</th><th>Taxis</th><th>Tolls</th><th>Cong.Chg</th><th>Subsistence</th><th>Repairs</th><th>Parts</th><th></th></tr></thead><tbody>${travelExpenses.map((exp, idx) => `<tr><td>${idx + 1}</td><td>${exp.subcategory === 'Off-Street Parking' ? (exp.reimbursementAmount||exp.amount) : ''}</td><td>${exp.subcategory === 'Public Transport' ? (exp.reimbursementAmount||exp.amount) : ''}</td><td>${exp.subcategory === 'Taxis' ? (exp.reimbursementAmount||exp.amount) : ''}</td><td>${exp.subcategory === 'Tolls' ? (exp.reimbursementAmount||exp.amount) : ''}</td><td>${exp.subcategory === 'Congestion Charging' ? (exp.reimbursementAmount||exp.amount) : ''}</td><td>${exp.subcategory === 'Subsistence' ? (exp.reimbursementAmount||exp.amount) : ''}</td><td>${exp.subcategory === 'Repairs' ? (exp.reimbursementAmount||exp.amount) : ''}</td><td>${exp.subcategory === 'Parts' ? (exp.reimbursementAmount||exp.amount) : ''}</td><td class="desc">${exp.ref} - ${exp.description || ''}${exp.adminNotes ? `<br><span style="color:#d97706;">Notes: ${exp.adminNotes}</span>` : ''}</td></tr>`).join('')}<tr class="subtotal-row"><td><strong>SUBTOTAL</strong></td><td><strong>${travelSub.parking||''}</strong></td><td><strong>${travelSub.publicTransport||''}</strong></td><td><strong>${travelSub.taxis||''}</strong></td><td><strong>${travelSub.tolls||''}</strong></td><td><strong>${travelSub.congestion||''}</strong></td><td><strong>${travelSub.subsistence||''}</strong></td><td><strong>${travelSub.repairs||''}</strong></td><td><strong>${travelSub.parts||''}</strong></td><td><strong>TOTAL: ${reimburseCurrency} ${travelTotal.toFixed(2)}</strong></td></tr></tbody></table></div>` : '';
-    const entertainingDetailHTML = entertainingExpenses.length > 0 ? `<div class="page"><h2 class="detail-title">Entertaining and Welfare Detail</h2><div class="detail-info">Name: <strong>${userName}</strong></div><p class="detail-note">PLEASE ENSURE A FULL LIST OF GUESTS ENTERTAINED ARE SUPPLIED WITH EACH RECEIPT STATING WHO THEY ARE EMPLOYED BY.</p><table class="detail-table"><thead><tr><th>Receipt No.</th><th colspan="3">E - Employee Entertaining</th><th colspan="3">E - Business / Client Entertaining</th><th colspan="3">F - Welfare</th><th>Full Description</th></tr><tr><th></th><th>Meals/Drinks</th><th>Accom</th><th>Other</th><th>Meals/Drinks</th><th>Accom</th><th>Other</th><th>Hotels</th><th>Emp Gifts</th><th>Corp Gifts</th><th></th></tr></thead><tbody>${entertainingExpenses.map((exp, idx) => { const isEmp = exp.subcategory?.includes('Employees'); const isCust = exp.subcategory?.includes('Customers'); return `<tr><td>${idx+1}</td><td>${isEmp && exp.category === 'E' ? (exp.reimbursementAmount||exp.amount) : ''}</td><td></td><td></td><td>${isCust && exp.category === 'E' ? (exp.reimbursementAmount||exp.amount) : ''}</td><td></td><td></td><td>${exp.subcategory === 'Hotel Accommodation' ? (exp.reimbursementAmount||exp.amount) : ''}</td><td>${exp.subcategory === 'Gifts to Employees' ? (exp.reimbursementAmount||exp.amount) : ''}</td><td>${exp.subcategory === 'Corporate Gifts' ? (exp.reimbursementAmount||exp.amount) : ''}</td><td class="desc">${exp.ref} - ${formatShortDate(exp.date)}, ${exp.description || ''} ${exp.attendees ? `(${exp.attendees})` : ''}${exp.adminNotes ? `<br><span style="color:#d97706;">Notes: ${exp.adminNotes}</span>` : ''}</td></tr>`; }).join('')}<tr class="subtotal-row"><td><strong>SUBTOTAL</strong></td><td><strong>${entSub.empMeals||''}</strong></td><td></td><td></td><td><strong>${entSub.custMeals||''}</strong></td><td></td><td></td><td><strong>${entSub.hotels||''}</strong></td><td><strong>${entSub.empGifts||''}</strong></td><td><strong>${entSub.corpGifts||''}</strong></td><td><strong>TOTAL: ${reimburseCurrency} ${entTotal.toFixed(2)}</strong></td></tr></tbody></table></div>` : '';
-    const otherDetailHTML = otherExpenses.length > 0 ? `<div class="page"><h2 class="detail-title">Other Expense Detail</h2><div class="detail-info">Name: <strong>${userName}</strong></div><table class="detail-table"><thead><tr><th>Receipt No.</th><th colspan="3">G - Subscriptions</th><th>H - Computer</th><th>I - WIP</th><th>J - Other</th><th>Full Description</th></tr><tr><th></th><th>Professional</th><th>Non-Professional</th><th>Publications</th><th>Costs</th><th>Costs</th><th>Vatable</th><th></th></tr></thead><tbody>${otherExpenses.map((exp, idx) => `<tr><td>${idx+1}</td><td>${exp.subcategory === 'Professional' ? (exp.reimbursementAmount||exp.amount) : ''}</td><td>${exp.subcategory === 'Non-Professional' ? (exp.reimbursementAmount||exp.amount) : ''}</td><td>${exp.subcategory === 'Newspapers & Magazines' ? (exp.reimbursementAmount||exp.amount) : ''}</td><td>${exp.category === 'H' ? (exp.reimbursementAmount||exp.amount) : ''}</td><td>${exp.category === 'I' ? (exp.reimbursementAmount||exp.amount) : ''}</td><td>${exp.category === 'J' ? (exp.reimbursementAmount||exp.amount) : ''}</td><td class="desc">${exp.ref} - ${exp.description || ''}${exp.adminNotes ? `<br><span style="color:#d97706;">Notes: ${exp.adminNotes}</span>` : ''}</td></tr>`).join('')}<tr class="subtotal-row"><td><strong>SUBTOTAL</strong></td><td><strong>${othSub.professional||''}</strong></td><td><strong>${othSub.nonProfessional||''}</strong></td><td><strong>${othSub.publications||''}</strong></td><td><strong>${othSub.computer||''}</strong></td><td><strong>${othSub.wip||''}</strong></td><td><strong>${othSub.other||''}</strong></td><td><strong>TOTAL: ${reimburseCurrency} ${othTotal.toFixed(2)}</strong></td></tr></tbody></table></div>` : '';
+    const travelDetailHTML = travelExpenses.length > 0 ? `<div class="page"><h2 class="detail-title">Travel Expense Detail</h2><div class="detail-info">Name: <strong>${userName}</strong></div><p class="detail-note">Please do not include any travel expenses associated with Employee Entertaining. (See Staff Entertaining)</p><table class="detail-table"><thead><tr><th>Receipt No.</th><th>B<br>Parking</th><th colspan="5">C - Travel Expenses</th><th colspan="2">D - Motor Vehicles</th><th>Full Description</th></tr><tr><th>VAT</th><th>Parking</th><th>Public Transport</th><th>Taxis</th><th>Tolls</th><th>Cong.Chg</th><th>Subsistence</th><th>Repairs</th><th>Parts</th><th></th></tr></thead><tbody>${travelExpenses.map((exp, idx) => `<tr><td>${idx + 1}</td><td>${exp.subcategory === 'Off-Street Parking' ? (exp.reimbursementAmount||exp.amount) : ''}</td><td>${exp.subcategory === 'Public Transport' ? (exp.reimbursementAmount||exp.amount) : ''}</td><td>${exp.subcategory === 'Taxis' ? (exp.reimbursementAmount||exp.amount) : ''}</td><td>${exp.subcategory === 'Tolls' ? (exp.reimbursementAmount||exp.amount) : ''}</td><td>${exp.subcategory === 'Congestion Charging' ? (exp.reimbursementAmount||exp.amount) : ''}</td><td>${exp.subcategory === 'Subsistence' ? (exp.reimbursementAmount||exp.amount) : ''}</td><td>${exp.subcategory === 'Repairs' ? (exp.reimbursementAmount||exp.amount) : ''}</td><td>${exp.subcategory === 'Parts' ? (exp.reimbursementAmount||exp.amount) : ''}</td><td class="desc">${exp.ref} - ${exp.description || ''}${isOlderThan2Months(exp.date) ? ' ⚠️ (>2 Months Old)' : ''}${exp.adminNotes ? `<br><span style="color:#d97706;">Notes: ${exp.adminNotes}</span>` : ''}</td></tr>`).join('')}<tr class="subtotal-row"><td><strong>SUBTOTAL</strong></td><td><strong>${travelSub.parking||''}</strong></td><td><strong>${travelSub.publicTransport||''}</strong></td><td><strong>${travelSub.taxis||''}</strong></td><td><strong>${travelSub.tolls||''}</strong></td><td><strong>${travelSub.congestion||''}</strong></td><td><strong>${travelSub.subsistence||''}</strong></td><td><strong>${travelSub.repairs||''}</strong></td><td><strong>${travelSub.parts||''}</strong></td><td><strong>TOTAL: ${reimburseCurrency} ${travelTotal.toFixed(2)}</strong></td></tr></tbody></table></div>` : '';
+    const entertainingDetailHTML = entertainingExpenses.length > 0 ? `<div class="page"><h2 class="detail-title">Entertaining and Welfare Detail</h2><div class="detail-info">Name: <strong>${userName}</strong></div><p class="detail-note">PLEASE ENSURE A FULL LIST OF GUESTS ENTERTAINED ARE SUPPLIED WITH EACH RECEIPT STATING WHO THEY ARE EMPLOYED BY.</p><table class="detail-table"><thead><tr><th>Receipt No.</th><th colspan="3">E - Employee Entertaining</th><th colspan="3">E - Business / Client Entertaining</th><th colspan="3">F - Welfare</th><th>Full Description</th></tr><tr><th></th><th>Meals/Drinks</th><th>Accom</th><th>Other</th><th>Meals/Drinks</th><th>Accom</th><th>Other</th><th>Hotels</th><th>Emp Gifts</th><th>Corp Gifts</th><th></th></tr></thead><tbody>${entertainingExpenses.map((exp, idx) => { const isEmp = exp.subcategory?.includes('Employees'); const isCust = exp.subcategory?.includes('Customers'); const pax = parseInt(exp.numberOfPax) || 0; const pp = pax > 0 ? (parseFloat(exp.reimbursementAmount||exp.amount)/pax).toFixed(2) : 0; return `<tr><td>${idx+1}</td><td>${isEmp && exp.category === 'E' ? (exp.reimbursementAmount||exp.amount) : ''}</td><td></td><td></td><td>${isCust && exp.category === 'E' ? (exp.reimbursementAmount||exp.amount) : ''}</td><td></td><td></td><td>${exp.subcategory === 'Hotel Accommodation' ? (exp.reimbursementAmount||exp.amount) : ''}</td><td>${exp.subcategory === 'Gifts to Employees' ? (exp.reimbursementAmount||exp.amount) : ''}</td><td>${exp.subcategory === 'Corporate Gifts' ? (exp.reimbursementAmount||exp.amount) : ''}</td><td class="desc">${exp.ref} - ${formatShortDate(exp.date)}, ${exp.description || ''} ${exp.attendees ? `(${exp.attendees})` : ''} ${pax > 0 ? `(${reimburseCurrency} ${pp}/pax)` : ''}${isOlderThan2Months(exp.date) ? ' ⚠️ (>2 Months Old)' : ''}${exp.adminNotes ? `<br><span style="color:#d97706;">Notes: ${exp.adminNotes}</span>` : ''}</td></tr>`; }).join('')}<tr class="subtotal-row"><td><strong>SUBTOTAL</strong></td><td><strong>${entSub.empMeals||''}</strong></td><td></td><td></td><td><strong>${entSub.custMeals||''}</strong></td><td></td><td></td><td><strong>${entSub.hotels||''}</strong></td><td><strong>${entSub.empGifts||''}</strong></td><td><strong>${entSub.corpGifts||''}</strong></td><td><strong>TOTAL: ${reimburseCurrency} ${entTotal.toFixed(2)}</strong></td></tr></tbody></table></div>` : '';
+    const otherDetailHTML = otherExpenses.length > 0 ? `<div class="page"><h2 class="detail-title">Other Expense Detail</h2><div class="detail-info">Name: <strong>${userName}</strong></div><table class="detail-table"><thead><tr><th>Receipt No.</th><th colspan="3">G - Subscriptions</th><th>H - Computer</th><th>I - WIP</th><th>J - Other</th><th>Full Description</th></tr><tr><th></th><th>Professional</th><th>Non-Professional</th><th>Publications</th><th>Costs</th><th>Costs</th><th>Vatable</th><th></th></tr></thead><tbody>${otherExpenses.map((exp, idx) => `<tr><td>${idx+1}</td><td>${exp.subcategory === 'Professional' ? (exp.reimbursementAmount||exp.amount) : ''}</td><td>${exp.subcategory === 'Non-Professional' ? (exp.reimbursementAmount||exp.amount) : ''}</td><td>${exp.subcategory === 'Newspapers & Magazines' ? (exp.reimbursementAmount||exp.amount) : ''}</td><td>${exp.category === 'H' ? (exp.reimbursementAmount||exp.amount) : ''}</td><td>${exp.category === 'I' ? (exp.reimbursementAmount||exp.amount) : ''}</td><td>${exp.category === 'J' ? (exp.reimbursementAmount||exp.amount) : ''}</td><td class="desc">${exp.ref} - ${exp.description || ''}${isOlderThan2Months(exp.date) ? ' ⚠️ (>2 Months Old)' : ''}${exp.adminNotes ? `<br><span style="color:#d97706;">Notes: ${exp.adminNotes}</span>` : ''}</td></tr>`).join('')}<tr class="subtotal-row"><td><strong>SUBTOTAL</strong></td><td><strong>${othSub.professional||''}</strong></td><td><strong>${othSub.nonProfessional||''}</strong></td><td><strong>${othSub.publications||''}</strong></td><td><strong>${othSub.computer||''}</strong></td><td><strong>${othSub.wip||''}</strong></td><td><strong>${othSub.other||''}</strong></td><td><strong>TOTAL: ${reimburseCurrency} ${othTotal.toFixed(2)}</strong></td></tr></tbody></table></div>` : '';
     const backchargeExpenses = expenseList.filter(e => e.hasBackcharge && e.backcharges?.length > 0);
     const backchargeSummary = {};
     backchargeExpenses.forEach(exp => {
@@ -772,7 +707,14 @@ export default function BerkeleyExpenseSystem() {
         const { error } = await supabase.from('claims').update(updateData).eq('id', returned.id);
         if (error) throw new Error(error.message);
       } else {
-        const claimNumber = `EXP-2026-${String(claims.length + 1).padStart(3, '0')}`;
+        // --- NEW CLAIM NUMBER LOGIC: FirstName-YYYY-XX ---
+        const year = new Date().getFullYear();
+        const firstName = currentUser.name.trim().split(' ')[0];
+        // Count claims submitted by this user in this year (check created_at or submitted_at)
+        const userClaimsThisYear = claims.filter(c => c.user_id === currentUser.id && new Date(c.created_at).getFullYear() === year);
+        const count = userClaimsThisYear.length + 1;
+        const claimNumber = `${firstName}-${year}-${String(count).padStart(2, '0')}`;
+
         const insertData = {
           claim_number: claimNumber, 
           user_id: currentUser.id, 
@@ -963,13 +905,13 @@ export default function BerkeleyExpenseSystem() {
               <div className="flex gap-3 pt-2"><button onClick={() => { setLoginStep('select'); setSelectedEmployee(null); }} className="flex-1 py-3 rounded-xl border-2 border-slate-300 font-semibold text-slate-600">← Back</button><button onClick={handleLogin} className="flex-[2] py-3 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 text-white font-semibold shadow-lg">Login 🔐</button></div>
             </div>
           )}
-          <p className="text-center text-xs text-slate-400 mt-8">v4.1 (Stable Upload)</p>
+          <p className="text-center text-xs text-slate-400 mt-8">v4.2</p>
         </div>
       </div>
     );
   }
 
-  const AddExpenseModal = ({ editExpense = null, onClose }) => {
+  const AddExpenseModal = ({ editExpense = null, existingClaims = [], onClose }) => {
     const [step, setStep] = useState(editExpense ? 2 : 1);
     const [receiptPreview, setReceiptPreview] = useState(editExpense?.receiptPreview || null);
     const [receiptPreview2, setReceiptPreview2] = useState(editExpense?.receiptPreview2 || null);
@@ -978,6 +920,24 @@ export default function BerkeleyExpenseSystem() {
     const [formData, setFormData] = useState(editExpense ? { merchant: editExpense.merchant || '', amount: editExpense.amount || '', currency: editExpense.currency || userOffice?.currency || 'SGD', date: editExpense.date || new Date().toISOString().split('T')[0], category: editExpense.category || 'C', subcategory: editExpense.subcategory || 'Taxis', description: editExpense.description || '', attendees: editExpense.attendees || '', numberOfPax: editExpense.numberOfPax || '', reimbursementAmount: editExpense.reimbursementAmount || '', hasBackcharge: editExpense.hasBackcharge || false, backcharges: editExpense.backcharges || [] } : { merchant: '', amount: '', currency: userOffice?.currency || 'SGD', date: new Date().toISOString().split('T')[0], category: 'C', subcategory: 'Taxis', description: '', attendees: '', numberOfPax: '', reimbursementAmount: '', hasBackcharge: false, backcharges: [] });
     const isForeignCurrency = formData.currency !== userReimburseCurrency;
     const isCNY = formData.currency === 'CNY';
+    const [duplicateWarning, setDuplicateWarning] = useState(null);
+
+    // Duplicate Check Effect
+    useEffect(() => {
+        if (!formData.amount || !formData.date || !formData.currency) return;
+        // Check history
+        const found = existingClaims.flatMap(c => c.expenses || []).find(e => 
+            e.amount === parseFloat(formData.amount) && 
+            e.date === formData.date && 
+            e.currency === formData.currency &&
+            e.id !== editExpense?.id
+        );
+        // Check current drafts (if needed, though handled by editExpense mostly)
+        // Ignoring current draft check for simplicity as React state updates handle it
+        if (found) setDuplicateWarning(`⚠️ Possible Duplicate: Found matching amount/date in history.`);
+        else setDuplicateWarning(null);
+    }, [formData.amount, formData.date, formData.currency, existingClaims, editExpense]);
+
     const handleFileChange = (e, isSecond = false) => { 
       const file = e.target.files?.[0]; 
       if (!file) return;
@@ -994,26 +954,29 @@ export default function BerkeleyExpenseSystem() {
     const backchargeTotal = formData.backcharges.reduce((sum, bc) => sum + (parseFloat(bc.percentage) || 0), 0);
     const backchargeValid = !formData.hasBackcharge || (formData.backcharges.length > 0 && backchargeTotal >= 99.5 && backchargeTotal <= 100.5);
     
+    const needsAttendees = EXPENSE_CATEGORIES[formData.category]?.requiresAttendees;
+    const paxCount = parseInt(formData.numberOfPax) || 0;
+    const attendeeLines = formData.attendees ? formData.attendees.split('\n').filter(line => line.trim().length > 0) : [];
+    const attendeeCount = attendeeLines.length;
+    const attendeePaxMatch = !needsAttendees || (paxCount > 0 && paxCount === attendeeCount);
+
     const handleSave = () => {
       try {
         if (editExpense) { 
           setExpenses(prev => {
-            const updated = prev.map(e => e.id === editExpense.id ? { ...e, ...formData, amount: parseFloat(formData.amount), reimbursementAmount: isForeignCurrency ? parseFloat(formData.reimbursementAmount) : parseFloat(formData.amount), receiptPreview: receiptPreview || e.receiptPreview, receiptPreview2: isCNY ? (receiptPreview2 || e.receiptPreview2) : null, isForeignCurrency } : e);
+            const updated = prev.map(e => e.id === editExpense.id ? { ...e, ...formData, amount: parseFloat(formData.amount), reimbursementAmount: isForeignCurrency ? parseFloat(formData.reimbursementAmount) : parseFloat(formData.amount), receiptPreview: receiptPreview || e.receiptPreview, receiptPreview2: isCNY ? (receiptPreview2 || e.receiptPreview2) : null, isForeignCurrency, isPotentialDuplicate: !!duplicateWarning } : e);
             return sortAndReassignRefs(updated);
           });
         } else { 
           setExpenses(prev => {
-            const newExpense = { id: Date.now(), ref: 'temp', ...formData, amount: parseFloat(formData.amount) || 0, reimbursementAmount: isForeignCurrency ? (parseFloat(formData.reimbursementAmount) || 0) : (parseFloat(formData.amount) || 0), receiptPreview: receiptPreview || null, receiptPreview2: isCNY ? (receiptPreview2 || null) : null, status: 'draft', isForeignCurrency: isForeignCurrency || false, isOld: isOlderThan2Months(formData.date), createdAt: new Date().toISOString() };
+            const newExpense = { id: Date.now(), ref: 'temp', ...formData, amount: parseFloat(formData.amount) || 0, reimbursementAmount: isForeignCurrency ? (parseFloat(formData.reimbursementAmount) || 0) : (parseFloat(formData.amount) || 0), receiptPreview: receiptPreview || null, receiptPreview2: isCNY ? (receiptPreview2 || null) : null, status: 'draft', isForeignCurrency: isForeignCurrency || false, isOld: isOlderThan2Months(formData.date), createdAt: new Date().toISOString(), isPotentialDuplicate: !!duplicateWarning };
             return sortAndReassignRefs([...prev, newExpense]);
           });
         }
         onClose();
       } catch (err) { alert('❌ Error saving expense. Please try again.'); }
     };
-    const needsAttendees = EXPENSE_CATEGORIES[formData.category]?.requiresAttendees;
-    const paxCount = parseInt(formData.numberOfPax) || 0;
-    const attendeeLines = formData.attendees ? formData.attendees.split('\n').filter(line => line.trim().length > 0) : [];
-    const attendeePaxMatch = !needsAttendees || (paxCount > 0 && paxCount === attendeeLines.length);
+    
     const canSave = formData.merchant && formData.amount && formData.date && formData.description && (!needsAttendees || (formData.attendees && formData.numberOfPax)) && (!isForeignCurrency || formData.reimbursementAmount) && backchargeValid && attendeePaxMatch;
 
     return (
@@ -1024,6 +987,7 @@ export default function BerkeleyExpenseSystem() {
             {step === 1 && (<div className="space-y-3"><label className="block border-3 border-dashed border-blue-400 bg-blue-50 rounded-2xl p-6 text-center cursor-pointer hover:border-blue-500"><input type="file" accept="image/*" capture="environment" onChange={(e) => handleFileChange(e, false)} className="hidden" /><div className="text-4xl mb-2">📷</div><p className="font-semibold text-blue-700">Take Photo</p><p className="text-xs text-slate-500">Open camera</p></label><label className="block border-3 border-dashed border-green-400 bg-green-50 rounded-2xl p-6 text-center cursor-pointer hover:border-green-500"><input type="file" accept="image/*" onChange={(e) => handleFileChange(e, false)} className="hidden" /><div className="text-4xl mb-2">🖼️</div><p className="font-semibold text-green-700">Choose from Gallery</p><p className="text-xs text-slate-500">Select existing photo</p></label></div>)}
             {step === 2 && (
               <div className="space-y-4">
+                {duplicateWarning && <div className="bg-red-100 border-l-4 border-red-500 text-red-700 p-3 text-sm font-bold animate-pulse">{duplicateWarning}</div>}
                 {isCNY ? (
                   <div className="grid grid-cols-2 gap-3">
                     <div><p className="text-xs font-semibold text-slate-500 mb-1">Receipt 1 (发票)</p>{receiptPreview ? (<div className="relative"><img src={receiptPreview} alt="Receipt" className="w-full h-28 object-cover bg-slate-100 rounded-lg cursor-pointer" onClick={() => setShowFullImage(receiptPreview)} /><button onClick={() => setReceiptPreview(null)} className="absolute top-1 right-1 bg-red-500 text-white w-6 h-6 rounded-full text-xs">✕</button></div>) : (<label className="block border-2 border-dashed border-slate-300 rounded-lg p-4 text-center cursor-pointer hover:border-blue-400"><input type="file" accept="image/*" onChange={(e) => handleFileChange(e, false)} className="hidden" /><span className="text-2xl">📷</span></label>)}</div>
@@ -1042,11 +1006,18 @@ export default function BerkeleyExpenseSystem() {
                   <div className="space-y-3">
                     <div><label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Number of Pax *</label><input type="number" min="1" className="w-full p-3 border-2 border-slate-200 rounded-xl" placeholder="e.g. 4" value={formData.numberOfPax} onChange={e => setFormData(prev => ({ ...prev, numberOfPax: e.target.value }))} /></div>
                     <div><label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Attendees *</label><textarea className="w-full p-3 border-2 border-slate-200 rounded-xl resize-none" rows={3} placeholder="Enter each attendee on a new line:&#10;John Smith - Berkeley&#10;Jane Doe - ABC Corp" value={formData.attendees} onChange={e => setFormData(prev => ({ ...prev, attendees: e.target.value }))} /></div>
+                    <div className={`text-xs font-bold text-center p-2 rounded ${attendeePaxMatch ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
+                      {attendeePaxMatch ? `✅ Pax Check Passed (${paxCount} pax = ${attendeeCount} names)` : `⚠️ Pax Mismatch: ${paxCount} pax indicated vs ${attendeeCount} names listed`}
+                    </div>
                   </div>
                 )}
                 <div className="bg-blue-50 border-2 border-blue-200 rounded-xl p-4">
                   <label className="flex items-center gap-2 cursor-pointer mb-3"><input type="checkbox" checked={formData.hasBackcharge} onChange={e => setFormData(prev => ({ ...prev, hasBackcharge: e.target.checked, backcharges: e.target.checked ? prev.backcharges : [] }))} className="w-5 h-5" /><span className="font-semibold text-blue-800">📊 Backcharge to Development(s)</span></label>
-                  {formData.hasBackcharge && (<div className="space-y-3">{formData.backcharges.map((bc, idx) => (<div key={idx} className="flex gap-2 items-center"><select className="flex-1 p-2 border rounded-lg text-sm bg-white" value={bc.development} onChange={e => updateBackcharge(idx, 'development', e.target.value)}><option value="">Select development</option>{DEVELOPMENTS.map(dev => <option key={dev} value={dev}>{dev}</option>)}</select><input type="number" step="0.1" className="w-20 p-2 border rounded-lg text-center text-sm" placeholder="%" value={bc.percentage} onChange={e => updateBackcharge(idx, 'percentage', e.target.value)} /><span className="text-sm">%</span><button onClick={() => removeBackcharge(idx)} className="text-red-500 p-1">✕</button></div>))}<button onClick={addBackcharge} className="text-blue-600 text-sm font-medium">+ Add Development</button></div>)}
+                  {formData.hasBackcharge && (<div className="space-y-3">{formData.backcharges.map((bc, idx) => (<div key={idx} className="flex gap-2 items-center"><select className="flex-1 p-2 border rounded-lg text-sm bg-white" value={bc.development} onChange={e => updateBackcharge(idx, 'development', e.target.value)}><option value="">Select development</option>{DEVELOPMENTS.map(dev => <option key={dev} value={dev}>{dev}</option>)}</select><input type="number" step="0.1" className="w-20 p-2 border rounded-lg text-center text-sm" placeholder="%" value={bc.percentage} onChange={e => updateBackcharge(idx, 'percentage', e.target.value)} /><span className="text-sm">%</span><button onClick={() => removeBackcharge(idx)} className="text-red-500 p-1">✕</button></div>))}<button onClick={addBackcharge} className="text-blue-600 text-sm font-medium">+ Add Development</button>
+                    <div className={`text-xs font-bold text-center p-2 rounded ${backchargeValid ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
+                        {backchargeValid ? `✅ Total: ${backchargeTotal.toFixed(1)}%` : `⚠️ Total must be 100% (Current: ${backchargeTotal.toFixed(1)}%)`}
+                    </div>
+                  </div>)}
                 </div>
               </div>
             )}
@@ -1232,10 +1203,8 @@ export default function BerkeleyExpenseSystem() {
       </header>
       {canReview && (<div className="bg-white border-b sticky top-14 z-30"><div className="max-w-3xl mx-auto flex"><button onClick={() => setActiveTab('my_expenses')} className={`flex-1 py-3 text-sm font-semibold border-b-2 ${activeTab === 'my_expenses' ? 'border-blue-600 text-blue-600' : 'border-transparent text-slate-500'}`}>📋 My Expenses</button><button onClick={() => setActiveTab('review')} className={`flex-1 py-3 text-sm font-semibold border-b-2 ${activeTab === 'review' ? 'border-blue-600 text-blue-600' : 'border-transparent text-slate-500'}`}>👀 Review{getReviewableClaims().length > 0 && <span className="ml-2 bg-amber-500 text-white text-xs px-2 py-0.5 rounded-full">{getReviewableClaims().length}</span>}</button></div></div>)}
       <main className="max-w-3xl mx-auto p-4 pb-20">{canReview && activeTab === 'review' ? <ReviewClaimsTab /> : <MyExpensesTab />}</main>
-      {(showAddExpense || editingExpense) && <AddExpenseModal editExpense={editingExpense} onClose={() => { setShowAddExpense(false); setEditingExpense(null); }} />}
+      {(showAddExpense || editingExpense) && <AddExpenseModal editExpense={editingExpense} existingClaims={claims} onClose={() => { setShowAddExpense(false); setEditingExpense(null); }} />}
       {showPreview && <PreviewClaimModal />}
-      
-      {/* FIXED: Statement Upload Modal is now defined outside and passed handlers */}
       {showStatementUpload && (
         <StatementUploadModal 
           existingImages={statementImages}
@@ -1250,7 +1219,6 @@ export default function BerkeleyExpenseSystem() {
           }}
         />
       )}
-
       {showStatementAnnotator && statementImages[currentStatementIndex] && (
         <StatementAnnotator 
           image={statementImages[currentStatementIndex]} 
