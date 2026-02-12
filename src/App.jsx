@@ -2,10 +2,10 @@
 
 /*
  * BERKELEY INTERNATIONAL EXPENSE MANAGEMENT SYSTEM
- * Version: 3.7 - FIXED UPLOAD & SCROLLING
- * - Sync & Persistence: UNTOUCHED (Working)
- * - Fix 1: Robust Statement Upload (Added processing state & safer file reading)
- * - Fix 2: Mobile Scrolling (Canvas now allows scrolling when not dragging tags)
+ * Version: 3.9 - UPLOAD FAIL-SAFE FIX
+ * - Fixed: "Nothing happens after selecting file" bug
+ * - Logic: If image compression fails, it forces the original image to upload immediately
+ * - Scroll: Smart scrolling in annotator preserved
  */
 
 const SUPABASE_URL = 'https://wlhoyjsicvkncfjbexoi.supabase.co';
@@ -173,32 +173,47 @@ const CURRENCIES = ['SGD', 'HKD', 'CNY', 'THB', 'AED', 'GBP', 'USD', 'EUR', 'MYR
 
 const compressImage = (file, maxWidth = 1200, quality = 0.7) => {
   return new Promise((resolve) => {
+    // 1. First, simply read the file to base64
     const reader = new FileReader();
     reader.onload = (e) => {
+      const originalBase64 = e.target.result;
+
+      // 2. Try to compress
       const img = new Image();
       img.onload = () => {
         try {
           const canvas = document.createElement('canvas');
           let width = img.width;
           let height = img.height;
+          
           if (width > maxWidth) {
             height = (height * maxWidth) / width;
             width = maxWidth;
           }
+          
           canvas.width = width;
           canvas.height = height;
           const ctx = canvas.getContext('2d');
           ctx.drawImage(img, 0, 0, width, height);
+          
+          // Successful compression
           resolve(canvas.toDataURL('image/jpeg', quality));
         } catch (err) {
-          console.error('Compression failed', err);
-          resolve(e.target.result); // Fallback to original if compression fails
+          console.warn('Compression failed, using original', err);
+          resolve(originalBase64); // Fallback to original
         }
       };
-      img.onerror = () => resolve(e.target.result); 
-      img.src = e.target.result;
+      
+      img.onerror = () => {
+        console.warn('Image load failed, using original file data');
+        resolve(originalBase64); // Fallback to original
+      };
+
+      // Set src to trigger onload
+      img.src = originalBase64;
     };
-    reader.onerror = () => resolve(null);
+    
+    reader.onerror = () => resolve(null); // Read failure
     reader.readAsDataURL(file);
   });
 };
@@ -429,7 +444,6 @@ const StatementAnnotator = ({ image, expenses, existingAnnotations = [], onSave,
             onMouseUp={handleEnd}
             onMouseLeave={handleEnd}
             onTouchStart={(e) => {
-              // Only prevent scrolling if user is interacting with an element
               if (selectedLabel) { e.preventDefault(); handleStart(e); return; }
               const pos = getPos(e);
               const found = findAnnotationAt(pos);
@@ -908,7 +922,7 @@ export default function BerkeleyExpenseSystem() {
               <div className="flex gap-3 pt-2"><button onClick={() => { setLoginStep('select'); setSelectedEmployee(null); }} className="flex-1 py-3 rounded-xl border-2 border-slate-300 font-semibold text-slate-600">← Back</button><button onClick={handleLogin} className="flex-[2] py-3 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 text-white font-semibold shadow-lg">Login 🔐</button></div>
             </div>
           )}
-          <p className="text-center text-xs text-slate-400 mt-8">v3.7</p>
+          <p className="text-center text-xs text-slate-400 mt-8">v3.9</p>
         </div>
       </div>
     );
@@ -1003,32 +1017,41 @@ export default function BerkeleyExpenseSystem() {
     );
   };
   
-  // UPLOAD FIX: Added processing state & safer file reading
+  // ROBUST UPLOAD FIX
   const StatementUploadModal = () => {
     const [localStatements, setLocalStatements] = useState([...statementImages]);
     const [isProcessing, setIsProcessing] = useState(false);
+    // Programmatic trigger ref
+    const fileInputRef = useRef(null);
     
-    const handleAddStatement = async (e) => { 
-      const file = e.target.files[0]; 
-      if (file && file.type.startsWith('image/')) { 
-        setIsProcessing(true);
-        try {
-          const compressed = await compressImage(file, 1400, 0.8);
-          if (compressed) {
-            setLocalStatements(prev => [...prev, compressed]);
-          }
-        } catch (err) {
-          console.error('Statement image error:', err);
-          // Fallback to basic file reader if compression fails
-          const reader = new FileReader(); 
-          reader.onloadend = () => setLocalStatements(prev => [...prev, reader.result]); 
-          reader.readAsDataURL(file);
-        }
-        setIsProcessing(false);
-        // Reset input to allow selecting same file again
-        e.target.value = '';
-      } 
+    // Function to trigger file dialog safely
+    const triggerFileSelect = () => {
+      if (fileInputRef.current) {
+        fileInputRef.current.click();
+      }
     };
+
+    const handleFileSelect = async (e) => { 
+      const file = e.target.files[0]; 
+      if (!file) return;
+
+      setIsProcessing(true);
+      try {
+        // Try to compress, but safely fallback if it fails
+        const result = await compressImage(file, 1400, 0.8);
+        if (result) {
+          setLocalStatements(prev => [...prev, result]);
+        } else {
+          alert("Could not process this image. Please try a different file.");
+        }
+      } catch (err) {
+        console.error('Processing error:', err);
+      }
+      setIsProcessing(false);
+      // Reset input to allow selecting same file again
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    };
+
     const removeStatement = (idx) => setLocalStatements(prev => prev.filter((_, i) => i !== idx));
     const handleContinue = () => { 
       setStatementImages(localStatements);
@@ -1051,8 +1074,12 @@ export default function BerkeleyExpenseSystem() {
                   <div className="absolute bottom-0 left-0 right-0 bg-green-600 text-white text-xs text-center py-1">Statement {idx + 1}</div>
                 </div>
               ))}
-              <label className="border-2 border-dashed border-slate-300 rounded-lg p-4 text-center cursor-pointer hover:border-amber-400 flex flex-col items-center justify-center min-h-[96px]">
-                <input type="file" accept="image/*" className="hidden" onChange={handleAddStatement} disabled={isProcessing} />
+              
+              {/* Programmatic Click Area */}
+              <div 
+                onClick={triggerFileSelect}
+                className="border-2 border-dashed border-slate-300 rounded-lg p-4 text-center cursor-pointer hover:border-amber-400 flex flex-col items-center justify-center min-h-[96px] bg-slate-50"
+              >
                 {isProcessing ? (
                   <span className="text-sm font-semibold text-amber-600 animate-pulse">Processing...</span>
                 ) : (
@@ -1061,12 +1088,21 @@ export default function BerkeleyExpenseSystem() {
                     <span className="text-xs text-slate-500 mt-1">Add Statement</span>
                   </>
                 )}
-              </label>
+              </div>
+              {/* Hidden Input */}
+              <input 
+                type="file" 
+                accept="image/*" 
+                className="hidden" 
+                ref={fileInputRef}
+                onChange={handleFileSelect}
+                disabled={isProcessing} 
+              />
             </div>
             {localStatements.length === 0 && (
               <div className="text-center py-8 text-slate-400">
                 <p>📄 No statements uploaded yet</p>
-                <p className="text-sm">Click + to add your credit card statement(s)</p>
+                <p className="text-sm">Tap the + box to add one</p>
               </div>
             )}
           </div>
