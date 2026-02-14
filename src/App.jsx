@@ -2,10 +2,11 @@
 
 /*
  * BERKELEY INTERNATIONAL EXPENSE MANAGEMENT SYSTEM
- * Version: 4.3 - AGGRESSIVE DUPLICATE CHECKER
- * - Feature: "Popup Blocker" on Save if duplicate detected
- * - Fix: Duplicate check now scans current Drafts AND History (fixes missing red box)
- * - Retained: All previous fixes (Upload, PDF, etc.)
+ * Version: 4.4 - Entertainment Subcategories + No Pax for Gifts + Prevent Untagged Submit + Statement Edit Fix
+ * - Entertaining (E) now has subcategories: Meals/Drinks, Accommodation, Others
+ * - Gifts no longer require pax/attendees
+ * - Cannot submit if there are untagged foreign currency expenses
+ * - Fixed statement annotation editing (Re-annotate vs Add New)
  */
 
 const SUPABASE_URL = 'https://wlhoyjsicvkncfjbexoi.supabase.co';
@@ -161,15 +162,15 @@ const EXPENSE_CATEGORIES = {
   B: { name: 'Parking', subcategories: ['Off-Street Parking'], icon: '🅿️', requiresAttendees: false },
   C: { name: 'Travel Expenses', subcategories: ['Public Transport', 'Taxis', 'Tolls', 'Congestion Charging', 'Subsistence'], icon: '🚕', requiresAttendees: false },
   D: { name: 'Vehicle Repairs', subcategories: ['Repairs', 'Parts'], icon: '🔧', requiresAttendees: false },
-  E: { name: 'Entertaining', subcategories: ['Customers (Staff & Customers)', 'Employees (Staff only)'], icon: '🍽️', requiresAttendees: true },
-  F: { name: 'Welfare', subcategories: ['Hotel Accommodation', 'Gifts to Employees', 'Corporate Gifts'], icon: '🏨', requiresAttendees: true },
+  E: { name: 'Entertaining', subcategories: ['Customers - Meals/Drinks', 'Customers - Accommodation', 'Customers - Others', 'Employees - Meals/Drinks', 'Employees - Accommodation', 'Employees - Others'], icon: '🍽️', requiresAttendees: true },
+  F: { name: 'Welfare', subcategories: ['Hotel Accommodation', 'Gifts to Employees', 'Corporate Gifts'], icon: '🏨', requiresAttendees: false, giftSubcategories: ['Gifts to Employees', 'Corporate Gifts'] },
   G: { name: 'Subscriptions', subcategories: ['Professional', 'Non-Professional', 'Newspapers & Magazines'], icon: '📰', requiresAttendees: false },
   H: { name: 'Computer Costs', subcategories: ['All Items'], icon: '💻', requiresAttendees: false },
   I: { name: 'WIP', subcategories: ['All Items'], icon: '📦', requiresAttendees: false },
   J: { name: 'Other', subcategories: ['Miscellaneous Vatable Items'], icon: '📋', requiresAttendees: false }
 };
 
-const CURRENCIES = ['SGD', 'HKD', 'CNY', 'THB', 'AED', 'GBP', 'USD', 'EUR', 'MYR', 'JPY', 'SAR'];
+const CURRENCIES = ['AED', 'CNY', 'EUR', 'GBP', 'HKD', 'MYR', 'SGD', 'THB', 'TWD', 'USD'];
 
 const formatCurrency = (amount, currency) => `${currency} ${parseFloat(amount || 0).toFixed(2)}`;
 const formatDate = (dateStr) => { if (!dateStr) return ''; const d = new Date(dateStr); return d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }); };
@@ -196,11 +197,11 @@ const SPECIAL_REVIEWERS = {
   813: { finalReviewer: 808, finalReviewerName: 'Ong Yongle' },
   504: { finalReviewer: 808, finalReviewerName: 'Ong Yongle' },
   806: { finalReviewer: 801, finalReviewerName: 'John Yan Chung Keung' },
-  818: { finalReviewer: 801, finalReviewerName: 'John Yan Chung Keung' },
-  810: { finalReviewer: 801, finalReviewerName: 'John Yan Chung Keung' },
-  503: { finalReviewer: 801, finalReviewerName: 'John Yan Chung Keung' },
-  1004: { finalReviewer: 801, finalReviewerName: 'John Yan Chung Keung' },
-  1007: { finalReviewer: 801, finalReviewerName: 'John Yan Chung Keung' },
+  818: { finalReviewer: 801, finalReviewerName: 'Prabakaran Rajinderan' },
+  810: { finalReviewer: 801, finalReviewerName: 'Prabakaran Rajinderan' },
+  503: { finalReviewer: 801, finalReviewerName: 'Prabakaran Rajinderan' },
+  1004: { finalReviewer: 801, finalReviewerName: 'Christopher James Mclean Frame' },
+  1007: { finalReviewer: 801, finalReviewerName: 'Christopher James Mclean Frame' },
 };
 
 const SENIOR_STAFF_ROUTING = {
@@ -431,11 +432,18 @@ const StatementUploadModal = ({ existingImages, onClose, onContinue }) => {
       const file = e.target.files[0]; 
       if (!file) return;
       setIsProcessing(true);
-      try {
-        const previewUrl = URL.createObjectURL(file);
-        setLocalStatements(prev => [...prev, previewUrl]);
-      } catch (err) { alert("Failed to read file."); }
-      setIsProcessing(false);
+      // Convert to base64 for persistence across devices
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        const base64 = event.target.result;
+        setLocalStatements(prev => [...prev, base64]);
+        setIsProcessing(false);
+      };
+      reader.onerror = () => {
+        alert("Failed to read file.");
+        setIsProcessing(false);
+      };
+      reader.readAsDataURL(file);
       if (fileInputRef.current) fileInputRef.current.value = '';
     };
 
@@ -450,7 +458,8 @@ const StatementUploadModal = ({ existingImages, onClose, onContinue }) => {
             <div className="grid grid-cols-2 gap-3 mb-4">
               {localStatements.map((img, idx) => (
                 <div key={idx} className="relative border-2 border-green-400 rounded-lg overflow-hidden">
-                  <img src={img} alt={`Statement ${idx + 1}`} className="w-full h-24 object-cover" />
+                  <img src={img} alt={`Statement ${idx + 1}`} className="w-full h-24 object-cover" onError={(e) => { e.target.style.display = 'none'; e.target.nextSibling.style.display = 'flex'; }} />
+                  <div className="w-full h-24 bg-slate-200 items-center justify-center text-slate-500 text-xs" style={{display: 'none'}}>Image unavailable</div>
                   <button onClick={() => removeStatement(idx)} className="absolute top-1 right-1 bg-red-500 text-white w-6 h-6 rounded-full text-xs">✕</button>
                   <div className="absolute bottom-0 left-0 right-0 bg-green-600 text-white text-xs text-center py-1">Statement {idx + 1}</div>
                 </div>
@@ -506,6 +515,7 @@ export default function BerkeleyExpenseSystem() {
         const draft = data[0];
         if (draft.expenses) { const parsed = JSON.parse(draft.expenses); if (parsed && parsed.length > 0) setExpenses(parsed); }
         if (draft.statements) { const parsed = JSON.parse(draft.statements); if (parsed && parsed.length > 0) setAnnotatedStatements(parsed); }
+        if (draft.annotations) { const parsed = JSON.parse(draft.annotations); if (parsed && parsed.length > 0) setStatementAnnotations(parsed); }
       } else {
         const savedExpenses = localStorage.getItem(`draft_expenses_${currentUser.id}`);
         if (savedExpenses) setExpenses(JSON.parse(savedExpenses));
@@ -532,7 +542,13 @@ export default function BerkeleyExpenseSystem() {
         if (currentUser) {
           if (expenses && expenses.length > 0) localStorage.setItem(`draft_expenses_${currentUser.id}`, JSON.stringify(expenses));
           else localStorage.removeItem(`draft_expenses_${currentUser.id}`);
-          const draftData = { user_id: currentUser.id, expenses: JSON.stringify(expenses || []), statements: JSON.stringify(annotatedStatements || []), updated_at: new Date().toISOString() };
+          const draftData = { 
+            user_id: currentUser.id, 
+            expenses: JSON.stringify(expenses || []), 
+            statements: JSON.stringify(annotatedStatements || []), 
+            annotations: JSON.stringify(statementAnnotations || []),
+            updated_at: new Date().toISOString() 
+          };
           const { data: existing } = await supabase.from('user_drafts').select('id').eq('user_id', currentUser.id);
           if (existing && existing.length > 0) await supabase.from('user_drafts').update(draftData).eq('user_id', currentUser.id);
           else await supabase.from('user_drafts').insert([draftData]);
@@ -541,7 +557,7 @@ export default function BerkeleyExpenseSystem() {
     };
     const timeout = setTimeout(saveDrafts, 1000);
     return () => clearTimeout(timeout);
-  }, [expenses, annotatedStatements, currentUser]);
+  }, [expenses, annotatedStatements, statementAnnotations, currentUser]);
 
   const handleManualSync = async () => { setLoading(true); await loadDrafts(); await loadClaims(); setLoading(false); alert('✅ Synced!'); };
 
@@ -614,7 +630,17 @@ export default function BerkeleyExpenseSystem() {
 
     const travelSub = { parking: travelExpenses.filter(e => e.subcategory === 'Off-Street Parking').reduce((s,e) => s + parseFloat(e.reimbursementAmount||e.amount||0), 0), publicTransport: travelExpenses.filter(e => e.subcategory === 'Public Transport').reduce((s,e) => s + parseFloat(e.reimbursementAmount||e.amount||0), 0), taxis: travelExpenses.filter(e => e.subcategory === 'Taxis').reduce((s,e) => s + parseFloat(e.reimbursementAmount||e.amount||0), 0), tolls: travelExpenses.filter(e => e.subcategory === 'Tolls').reduce((s,e) => s + parseFloat(e.reimbursementAmount||e.amount||0), 0), congestion: travelExpenses.filter(e => e.subcategory === 'Congestion Charging').reduce((s,e) => s + parseFloat(e.reimbursementAmount||e.amount||0), 0), subsistence: travelExpenses.filter(e => e.subcategory === 'Subsistence').reduce((s,e) => s + parseFloat(e.reimbursementAmount||e.amount||0), 0), repairs: travelExpenses.filter(e => e.subcategory === 'Repairs').reduce((s,e) => s + parseFloat(e.reimbursementAmount||e.amount||0), 0), parts: travelExpenses.filter(e => e.subcategory === 'Parts').reduce((s,e) => s + parseFloat(e.reimbursementAmount||e.amount||0), 0) };
     const travelTotal = Object.values(travelSub).reduce((s,v) => s + v, 0);
-    const entSub = { empMeals: entertainingExpenses.filter(e => e.category === 'E' && e.subcategory?.includes('Employees')).reduce((s,e) => s + parseFloat(e.reimbursementAmount||e.amount||0), 0), custMeals: entertainingExpenses.filter(e => e.category === 'E' && e.subcategory?.includes('Customers')).reduce((s,e) => s + parseFloat(e.reimbursementAmount||e.amount||0), 0), hotels: entertainingExpenses.filter(e => e.subcategory === 'Hotel Accommodation').reduce((s,e) => s + parseFloat(e.reimbursementAmount||e.amount||0), 0), empGifts: entertainingExpenses.filter(e => e.subcategory === 'Gifts to Employees').reduce((s,e) => s + parseFloat(e.reimbursementAmount||e.amount||0), 0), corpGifts: entertainingExpenses.filter(e => e.subcategory === 'Corporate Gifts').reduce((s,e) => s + parseFloat(e.reimbursementAmount||e.amount||0), 0) };
+    const entSub = { 
+      empMeals: entertainingExpenses.filter(e => e.category === 'E' && (e.subcategory === 'Employees - Meals/Drinks' || e.subcategory?.includes('Employees (Staff only)'))).reduce((s,e) => s + parseFloat(e.reimbursementAmount||e.amount||0), 0), 
+      empAccom: entertainingExpenses.filter(e => e.category === 'E' && e.subcategory === 'Employees - Accommodation').reduce((s,e) => s + parseFloat(e.reimbursementAmount||e.amount||0), 0),
+      empOther: entertainingExpenses.filter(e => e.category === 'E' && e.subcategory === 'Employees - Others').reduce((s,e) => s + parseFloat(e.reimbursementAmount||e.amount||0), 0),
+      custMeals: entertainingExpenses.filter(e => e.category === 'E' && (e.subcategory === 'Customers - Meals/Drinks' || e.subcategory?.includes('Customers'))).reduce((s,e) => s + parseFloat(e.reimbursementAmount||e.amount||0), 0), 
+      custAccom: entertainingExpenses.filter(e => e.category === 'E' && e.subcategory === 'Customers - Accommodation').reduce((s,e) => s + parseFloat(e.reimbursementAmount||e.amount||0), 0),
+      custOther: entertainingExpenses.filter(e => e.category === 'E' && e.subcategory === 'Customers - Others').reduce((s,e) => s + parseFloat(e.reimbursementAmount||e.amount||0), 0),
+      hotels: entertainingExpenses.filter(e => e.subcategory === 'Hotel Accommodation').reduce((s,e) => s + parseFloat(e.reimbursementAmount||e.amount||0), 0), 
+      empGifts: entertainingExpenses.filter(e => e.subcategory === 'Gifts to Employees').reduce((s,e) => s + parseFloat(e.reimbursementAmount||e.amount||0), 0), 
+      corpGifts: entertainingExpenses.filter(e => e.subcategory === 'Corporate Gifts').reduce((s,e) => s + parseFloat(e.reimbursementAmount||e.amount||0), 0) 
+    };
     const entTotal = Object.values(entSub).reduce((s,v) => s + v, 0);
     const othSub = { professional: otherExpenses.filter(e => e.subcategory === 'Professional').reduce((s,e) => s + parseFloat(e.reimbursementAmount||e.amount||0), 0), nonProfessional: otherExpenses.filter(e => e.subcategory === 'Non-Professional').reduce((s,e) => s + parseFloat(e.reimbursementAmount||e.amount||0), 0), publications: otherExpenses.filter(e => e.subcategory === 'Newspapers & Magazines').reduce((s,e) => s + parseFloat(e.reimbursementAmount||e.amount||0), 0), computer: otherExpenses.filter(e => e.category === 'H').reduce((s,e) => s + parseFloat(e.reimbursementAmount||e.amount||0), 0), wip: otherExpenses.filter(e => e.category === 'I').reduce((s,e) => s + parseFloat(e.reimbursementAmount||e.amount||0), 0), other: otherExpenses.filter(e => e.category === 'J').reduce((s,e) => s + parseFloat(e.reimbursementAmount||e.amount||0), 0) };
     const othTotal = Object.values(othSub).reduce((s,v) => s + v, 0);
@@ -637,7 +663,7 @@ export default function BerkeleyExpenseSystem() {
     }
 
     const travelDetailHTML = travelExpenses.length > 0 ? `<div class="page"><h2 class="detail-title">Travel Expense Detail</h2><div class="detail-info">Name: <strong>${userName}</strong></div><p class="detail-note">Please do not include any travel expenses associated with Employee Entertaining. (See Staff Entertaining)</p><table class="detail-table"><thead><tr><th>Receipt No.</th><th>B<br>Parking</th><th colspan="5">C - Travel Expenses</th><th colspan="2">D - Motor Vehicles</th><th>Full Description</th></tr><tr><th>VAT</th><th>Parking</th><th>Public Transport</th><th>Taxis</th><th>Tolls</th><th>Cong.Chg</th><th>Subsistence</th><th>Repairs</th><th>Parts</th><th></th></tr></thead><tbody>${travelExpenses.map((exp, idx) => `<tr><td>${idx + 1}</td><td>${exp.subcategory === 'Off-Street Parking' ? (exp.reimbursementAmount||exp.amount) : ''}</td><td>${exp.subcategory === 'Public Transport' ? (exp.reimbursementAmount||exp.amount) : ''}</td><td>${exp.subcategory === 'Taxis' ? (exp.reimbursementAmount||exp.amount) : ''}</td><td>${exp.subcategory === 'Tolls' ? (exp.reimbursementAmount||exp.amount) : ''}</td><td>${exp.subcategory === 'Congestion Charging' ? (exp.reimbursementAmount||exp.amount) : ''}</td><td>${exp.subcategory === 'Subsistence' ? (exp.reimbursementAmount||exp.amount) : ''}</td><td>${exp.subcategory === 'Repairs' ? (exp.reimbursementAmount||exp.amount) : ''}</td><td>${exp.subcategory === 'Parts' ? (exp.reimbursementAmount||exp.amount) : ''}</td><td class="desc">${exp.ref} - ${exp.description || ''}${isOlderThan2Months(exp.date) ? ' ⚠️ (>2 Months Old)' : ''}${exp.adminNotes ? `<br><span style="color:#d97706;">Notes: ${exp.adminNotes}</span>` : ''}</td></tr>`).join('')}<tr class="subtotal-row"><td><strong>SUBTOTAL</strong></td><td><strong>${travelSub.parking||''}</strong></td><td><strong>${travelSub.publicTransport||''}</strong></td><td><strong>${travelSub.taxis||''}</strong></td><td><strong>${travelSub.tolls||''}</strong></td><td><strong>${travelSub.congestion||''}</strong></td><td><strong>${travelSub.subsistence||''}</strong></td><td><strong>${travelSub.repairs||''}</strong></td><td><strong>${travelSub.parts||''}</strong></td><td><strong>TOTAL: ${reimburseCurrency} ${travelTotal.toFixed(2)}</strong></td></tr></tbody></table></div>` : '';
-    const entertainingDetailHTML = entertainingExpenses.length > 0 ? `<div class="page"><h2 class="detail-title">Entertaining and Welfare Detail</h2><div class="detail-info">Name: <strong>${userName}</strong></div><p class="detail-note">PLEASE ENSURE A FULL LIST OF GUESTS ENTERTAINED ARE SUPPLIED WITH EACH RECEIPT STATING WHO THEY ARE EMPLOYED BY.</p><table class="detail-table"><thead><tr><th>Receipt No.</th><th colspan="3">E - Employee Entertaining</th><th colspan="3">E - Business / Client Entertaining</th><th colspan="3">F - Welfare</th><th>Full Description</th></tr><tr><th></th><th>Meals/Drinks</th><th>Accom</th><th>Other</th><th>Meals/Drinks</th><th>Accom</th><th>Other</th><th>Hotels</th><th>Emp Gifts</th><th>Corp Gifts</th><th></th></tr></thead><tbody>${entertainingExpenses.map((exp, idx) => { const isEmp = exp.subcategory?.includes('Employees'); const isCust = exp.subcategory?.includes('Customers'); const pax = parseInt(exp.numberOfPax) || 0; const pp = pax > 0 ? (parseFloat(exp.reimbursementAmount||exp.amount)/pax).toFixed(2) : 0; return `<tr><td>${idx+1}</td><td>${isEmp && exp.category === 'E' ? (exp.reimbursementAmount||exp.amount) : ''}</td><td></td><td></td><td>${isCust && exp.category === 'E' ? (exp.reimbursementAmount||exp.amount) : ''}</td><td></td><td></td><td>${exp.subcategory === 'Hotel Accommodation' ? (exp.reimbursementAmount||exp.amount) : ''}</td><td>${exp.subcategory === 'Gifts to Employees' ? (exp.reimbursementAmount||exp.amount) : ''}</td><td>${exp.subcategory === 'Corporate Gifts' ? (exp.reimbursementAmount||exp.amount) : ''}</td><td class="desc">${exp.ref} - ${formatShortDate(exp.date)}, ${exp.description || ''} ${exp.attendees ? `(${exp.attendees})` : ''} ${pax > 0 ? `(${reimburseCurrency} ${pp}/pax)` : ''}${isOlderThan2Months(exp.date) ? ' ⚠️ (>2 Months Old)' : ''}${exp.adminNotes ? `<br><span style="color:#d97706;">Notes: ${exp.adminNotes}</span>` : ''}</td></tr>`; }).join('')}<tr class="subtotal-row"><td><strong>SUBTOTAL</strong></td><td><strong>${entSub.empMeals||''}</strong></td><td></td><td></td><td><strong>${entSub.custMeals||''}</strong></td><td></td><td></td><td><strong>${entSub.hotels||''}</strong></td><td><strong>${entSub.empGifts||''}</strong></td><td><strong>${entSub.corpGifts||''}</strong></td><td><strong>TOTAL: ${reimburseCurrency} ${entTotal.toFixed(2)}</strong></td></tr></tbody></table></div>` : '';
+    const entertainingDetailHTML = entertainingExpenses.length > 0 ? `<div class="page"><h2 class="detail-title">Entertaining and Welfare Detail</h2><div class="detail-info">Name: <strong>${userName}</strong></div><p class="detail-note">PLEASE ENSURE A FULL LIST OF GUESTS ENTERTAINED ARE SUPPLIED WITH EACH RECEIPT STATING WHO THEY ARE EMPLOYED BY.</p><table class="detail-table"><thead><tr><th>Receipt No.</th><th colspan="3">E - Employee Entertaining</th><th colspan="3">E - Business / Client Entertaining</th><th colspan="3">F - Welfare</th><th>Full Description</th></tr><tr><th></th><th>Meals/Drinks</th><th>Accom</th><th>Other</th><th>Meals/Drinks</th><th>Accom</th><th>Other</th><th>Hotels</th><th>Emp Gifts</th><th>Corp Gifts</th><th></th></tr></thead><tbody>${entertainingExpenses.map((exp, idx) => { const isEmpMeals = exp.subcategory === 'Employees - Meals/Drinks' || exp.subcategory?.includes('Employees (Staff only)'); const isEmpAccom = exp.subcategory === 'Employees - Accommodation'; const isEmpOther = exp.subcategory === 'Employees - Others'; const isCustMeals = exp.subcategory === 'Customers - Meals/Drinks' || exp.subcategory?.includes('Customers'); const isCustAccom = exp.subcategory === 'Customers - Accommodation'; const isCustOther = exp.subcategory === 'Customers - Others'; const pax = parseInt(exp.numberOfPax) || 0; const pp = pax > 0 ? (parseFloat(exp.reimbursementAmount||exp.amount)/pax).toFixed(2) : 0; return `<tr><td>${idx+1}</td><td>${isEmpMeals && exp.category === 'E' ? (exp.reimbursementAmount||exp.amount) : ''}</td><td>${isEmpAccom && exp.category === 'E' ? (exp.reimbursementAmount||exp.amount) : ''}</td><td>${isEmpOther && exp.category === 'E' ? (exp.reimbursementAmount||exp.amount) : ''}</td><td>${isCustMeals && exp.category === 'E' ? (exp.reimbursementAmount||exp.amount) : ''}</td><td>${isCustAccom && exp.category === 'E' ? (exp.reimbursementAmount||exp.amount) : ''}</td><td>${isCustOther && exp.category === 'E' ? (exp.reimbursementAmount||exp.amount) : ''}</td><td>${exp.subcategory === 'Hotel Accommodation' ? (exp.reimbursementAmount||exp.amount) : ''}</td><td>${exp.subcategory === 'Gifts to Employees' ? (exp.reimbursementAmount||exp.amount) : ''}</td><td>${exp.subcategory === 'Corporate Gifts' ? (exp.reimbursementAmount||exp.amount) : ''}</td><td class="desc">${exp.ref} - ${formatShortDate(exp.date)}, ${exp.description || ''} ${exp.attendees ? `(${exp.attendees})` : ''} ${pax > 0 ? `(${reimburseCurrency} ${pp}/pax)` : ''}${isOlderThan2Months(exp.date) ? ' ⚠️ (>2 Months Old)' : ''}${exp.adminNotes ? `<br><span style="color:#d97706;">Notes: ${exp.adminNotes}</span>` : ''}</td></tr>`; }).join('')}<tr class="subtotal-row"><td><strong>SUBTOTAL</strong></td><td><strong>${entSub.empMeals||''}</strong></td><td><strong>${entSub.empAccom||''}</strong></td><td><strong>${entSub.empOther||''}</strong></td><td><strong>${entSub.custMeals||''}</strong></td><td><strong>${entSub.custAccom||''}</strong></td><td><strong>${entSub.custOther||''}</strong></td><td><strong>${entSub.hotels||''}</strong></td><td><strong>${entSub.empGifts||''}</strong></td><td><strong>${entSub.corpGifts||''}</strong></td><td><strong>TOTAL: ${reimburseCurrency} ${entTotal.toFixed(2)}</strong></td></tr></tbody></table></div>` : '';
     const otherDetailHTML = otherExpenses.length > 0 ? `<div class="page"><h2 class="detail-title">Other Expense Detail</h2><div class="detail-info">Name: <strong>${userName}</strong></div><table class="detail-table"><thead><tr><th>Receipt No.</th><th colspan="3">G - Subscriptions</th><th>H - Computer</th><th>I - WIP</th><th>J - Other</th><th>Full Description</th></tr><tr><th></th><th>Professional</th><th>Non-Professional</th><th>Publications</th><th>Costs</th><th>Costs</th><th>Vatable</th><th></th></tr></thead><tbody>${otherExpenses.map((exp, idx) => `<tr><td>${idx+1}</td><td>${exp.subcategory === 'Professional' ? (exp.reimbursementAmount||exp.amount) : ''}</td><td>${exp.subcategory === 'Non-Professional' ? (exp.reimbursementAmount||exp.amount) : ''}</td><td>${exp.subcategory === 'Newspapers & Magazines' ? (exp.reimbursementAmount||exp.amount) : ''}</td><td>${exp.category === 'H' ? (exp.reimbursementAmount||exp.amount) : ''}</td><td>${exp.category === 'I' ? (exp.reimbursementAmount||exp.amount) : ''}</td><td>${exp.category === 'J' ? (exp.reimbursementAmount||exp.amount) : ''}</td><td class="desc">${exp.ref} - ${exp.description || ''}${isOlderThan2Months(exp.date) ? ' ⚠️ (>2 Months Old)' : ''}${exp.adminNotes ? `<br><span style="color:#d97706;">Notes: ${exp.adminNotes}</span>` : ''}</td></tr>`).join('')}<tr class="subtotal-row"><td><strong>SUBTOTAL</strong></td><td><strong>${othSub.professional||''}</strong></td><td><strong>${othSub.nonProfessional||''}</strong></td><td><strong>${othSub.publications||''}</strong></td><td><strong>${othSub.computer||''}</strong></td><td><strong>${othSub.wip||''}</strong></td><td><strong>${othSub.other||''}</strong></td><td><strong>TOTAL: ${reimburseCurrency} ${othTotal.toFixed(2)}</strong></td></tr></tbody></table></div>` : '';
     const backchargeExpenses = expenseList.filter(e => e.hasBackcharge && e.backcharges?.length > 0);
     const backchargeSummary = {};
@@ -961,7 +987,9 @@ export default function BerkeleyExpenseSystem() {
     const backchargeTotal = formData.backcharges.reduce((sum, bc) => sum + (parseFloat(bc.percentage) || 0), 0);
     const backchargeValid = !formData.hasBackcharge || (formData.backcharges.length > 0 && backchargeTotal >= 99.5 && backchargeTotal <= 100.5);
     
-    const needsAttendees = EXPENSE_CATEGORIES[formData.category]?.requiresAttendees;
+    // Check if this expense type needs attendees - exclude gifts
+    const isGift = EXPENSE_CATEGORIES[formData.category]?.giftSubcategories?.includes(formData.subcategory);
+    const needsAttendees = EXPENSE_CATEGORIES[formData.category]?.requiresAttendees && !isGift;
     const paxCount = parseInt(formData.numberOfPax) || 0;
     const attendeeLines = formData.attendees ? formData.attendees.split('\n').filter(line => line.trim().length > 0) : [];
     const attendeeCount = attendeeLines.length;
@@ -1045,11 +1073,13 @@ export default function BerkeleyExpenseSystem() {
   const PreviewClaimModal = () => {
     const userReimburseCurrency = getUserReimburseCurrency(currentUser);
     const groupedExpenses = pendingExpenses.reduce((acc, exp) => { if (!acc[exp.category]) acc[exp.category] = []; acc[exp.category].push(exp); return acc; }, {});
-    const canSubmit = !hasForeignCurrency || (hasForeignCurrency && annotatedStatements.length > 0);
     const getCategoryTotal = (cat) => (groupedExpenses[cat] || []).reduce((sum, e) => sum + parseFloat(e.reimbursementAmount || e.amount || 0), 0);
     const workflow = getApprovalWorkflow(currentUser.id, currentUser.office);
     const [viewImg, setViewImg] = useState(null);
     const untaggedExpenses = foreignCurrencyExpenses.filter(e => !statementAnnotations.some(a => a.ref === e.ref));
+    // Can submit only if: no foreign currency OR (has statement AND no untagged expenses)
+    const canSubmit = !hasForeignCurrency || (hasForeignCurrency && annotatedStatements.length > 0 && untaggedExpenses.length === 0);
+    const submitButtonText = loading ? '⏳...' : !hasForeignCurrency ? 'Submit ✓' : annotatedStatements.length === 0 ? '⚠️ Upload Statement' : untaggedExpenses.length > 0 ? `⚠️ ${untaggedExpenses.length} Untagged` : 'Submit ✓';
     return (
       <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-50">
         <div className="bg-white rounded-2xl max-w-4xl w-full max-h-[95vh] overflow-hidden shadow-2xl flex flex-col">
@@ -1064,10 +1094,10 @@ export default function BerkeleyExpenseSystem() {
               <h3 className="font-bold mt-6 mb-3">Receipts ({pendingExpenses.length})</h3>
               <div className="grid grid-cols-3 gap-3">{pendingExpenses.map(exp => (<div key={exp.id} className="border rounded-lg overflow-hidden"><div className="bg-blue-100 p-1 flex justify-between text-xs"><span className="font-bold text-blue-700">{exp.ref}</span><div className="flex gap-1">{exp.isForeignCurrency && <span>💳</span>}{exp.receiptPreview2 && <span>📑</span>}</div></div>{exp.receiptPreview ? (<img src={exp.receiptPreview} alt={exp.ref} className="w-full h-16 object-cover cursor-pointer" onClick={() => setViewImg(exp.receiptPreview)} />) : (<div className="w-full h-16 bg-slate-100 flex items-center justify-center">📄</div>)}<div className="p-1 bg-slate-50 text-xs"><p className="truncate">{exp.merchant}</p><p className="text-green-700 font-bold">{formatCurrency(exp.reimbursementAmount || exp.amount, userReimburseCurrency)}</p></div></div>))}</div>
               {hasForeignCurrency && annotatedStatements.length === 0 && (<div className="mt-4 bg-red-50 border-2 border-red-300 rounded-xl p-4"><p className="text-red-800 font-bold">❌ Statement(s) Required</p><button onClick={() => { setShowPreview(false); setShowStatementUpload(true); }} className="mt-2 bg-amber-500 text-white px-4 py-2 rounded-lg font-semibold text-sm">📎 Upload Statements</button></div>)}
-              {annotatedStatements.length > 0 && (<div className="mt-4 bg-green-50 border border-green-200 rounded-xl p-4"><div className="flex justify-between items-start"><p className="text-green-800 font-semibold">✅ {annotatedStatements.length} Statement(s) Annotated</p><button onClick={() => { setShowPreview(false); setShowStatementUpload(true); }} className="text-blue-600 text-sm">✏️ Edit</button></div><div className="flex gap-2 mt-2 overflow-x-auto">{annotatedStatements.map((img, idx) => (<img key={idx} src={img} alt={`Statement ${idx+1}`} className="h-20 rounded cursor-pointer border-2 border-green-300" onClick={() => setViewImg(img)} />))}</div>{untaggedExpenses.length > 0 && (<div className="mt-2 bg-amber-100 border border-amber-300 rounded-lg p-2"><p className="text-amber-800 text-sm">⚠️ Untagged: {untaggedExpenses.map(e => e.ref).join(', ')}</p></div>)}</div>)}
+              {annotatedStatements.length > 0 && (<div className="mt-4 bg-green-50 border border-green-200 rounded-xl p-4"><div className="flex justify-between items-start"><p className="text-green-800 font-semibold">✅ {annotatedStatements.length} Statement(s) Annotated</p><div className="flex gap-2"><button onClick={() => { setStatementImages([...annotatedStatements]); setCurrentStatementIndex(0); setShowPreview(false); setShowStatementAnnotator(true); }} className="text-purple-600 text-sm font-semibold">🔄 Re-annotate</button><button onClick={() => { setShowPreview(false); setShowStatementUpload(true); }} className="text-blue-600 text-sm">➕ Add New</button></div></div><div className="flex gap-2 mt-2 overflow-x-auto">{annotatedStatements.map((img, idx) => (<img key={idx} src={img} alt={`Statement ${idx+1}`} className="h-20 rounded cursor-pointer border-2 border-green-300" onClick={() => setViewImg(img)} />))}</div>{untaggedExpenses.length > 0 && (<div className="mt-2 bg-amber-100 border border-amber-300 rounded-lg p-2"><p className="text-amber-800 text-sm">⚠️ Untagged: {untaggedExpenses.map(e => e.ref).join(', ')}</p></div>)}</div>)}
             </div>
           </div>
-          <div className="p-4 border-t bg-slate-50 flex gap-3 shrink-0"><button onClick={() => setShowPreview(false)} className="flex-1 py-3 rounded-xl border-2 font-semibold">← Back</button><button onClick={async () => { await handleSubmitClaim(); setShowPreview(false); }} disabled={!canSubmit || loading} className={`flex-[2] py-3 rounded-xl font-semibold ${canSubmit && !loading ? 'bg-green-600 text-white' : 'bg-slate-300 text-slate-500'}`}>{loading ? '⏳...' : canSubmit ? 'Submit ✓' : '⚠️ Upload Statement'}</button></div>
+          <div className="p-4 border-t bg-slate-50 flex gap-3 shrink-0"><button onClick={() => setShowPreview(false)} className="flex-1 py-3 rounded-xl border-2 font-semibold">← Back</button><button onClick={async () => { await handleSubmitClaim(); setShowPreview(false); }} disabled={!canSubmit || loading} className={`flex-[2] py-3 rounded-xl font-semibold ${canSubmit && !loading ? 'bg-green-600 text-white' : 'bg-slate-300 text-slate-500'}`}>{submitButtonText}</button></div>
         </div>
         {viewImg && <ImageViewer src={viewImg} onClose={() => setViewImg(null)} />}
       </div>
