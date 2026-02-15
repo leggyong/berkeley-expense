@@ -2,11 +2,10 @@
 
 /*
  * BERKELEY INTERNATIONAL EXPENSE MANAGEMENT SYSTEM
- * Version: 4.8 - Forex rate display and spot rate checking
- * - Calculate and display forex rate (foreign → reimbursement currency)
- * - Check against spot rate for the transaction date
- * - Flag unreasonable rates (>5% variance from spot)
- * - Show forex info in expense list, receipt PDF, and reviewer view
+ * Version: 4.9 - Fixed save/load race condition + saving indicator
+ * - Prevent auto-reload while save is in progress
+ * - Visual indicator: ● pending, 💾 saving, ✓ saved
+ * - Forex rate checking with 3% tolerance
  */
 
 const SUPABASE_URL = 'https://wlhoyjsicvkncfjbexoi.supabase.co';
@@ -668,6 +667,7 @@ export default function BerkeleyExpenseSystem() {
   const [expenses, setExpenses] = useState([]);
   const [claims, setClaims] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [savingStatus, setSavingStatus] = useState(null); // 'saving', 'saved', null
   const [downloading, setDownloading] = useState(false);
   const [showAddExpense, setShowAddExpense] = useState(false);
   const [showPreview, setShowPreview] = useState(false);
@@ -716,16 +716,37 @@ export default function BerkeleyExpenseSystem() {
   useEffect(() => { loadDrafts(); }, [currentUser]);
 
   const modalOpenRef = useRef(false);
+  const isSavingRef = useRef(false); // Prevent loads while saving
+  const pendingSaveRef = useRef(null); // Track pending save timeout
+  
   useEffect(() => { modalOpenRef.current = showAddExpense || editingExpense || showPreview; }, [showAddExpense, editingExpense, showPreview]);
 
   useEffect(() => {
-    const handleFocus = () => { if (currentUser && !modalOpenRef.current) { loadDrafts(); loadClaims(); } };
+    const handleFocus = () => { 
+      // Don't reload if a modal is open or if we're in the middle of saving
+      if (currentUser && !modalOpenRef.current && !isSavingRef.current && !pendingSaveRef.current) { 
+        loadDrafts(); 
+        loadClaims(); 
+      } 
+    };
     window.addEventListener('focus', handleFocus);
     return () => window.removeEventListener('focus', handleFocus);
   }, [currentUser]);
 
   useEffect(() => {
+    // Clear any existing timeout
+    if (pendingSaveRef.current) {
+      clearTimeout(pendingSaveRef.current);
+    }
+    
+    // Show "pending" indicator when there are unsaved changes
+    if (expenses.length > 0 || annotatedStatements.length > 0) {
+      setSavingStatus('pending');
+    }
+    
     const saveDrafts = async () => {
+      isSavingRef.current = true;
+      setSavingStatus('saving');
       try {
         if (currentUser) {
           if (expenses && expenses.length > 0) localStorage.setItem(`draft_expenses_${currentUser.id}`, JSON.stringify(expenses));
@@ -741,11 +762,28 @@ export default function BerkeleyExpenseSystem() {
           const { data: existing } = await supabase.from('user_drafts').select('id').eq('user_id', currentUser.id);
           if (existing && existing.length > 0) await supabase.from('user_drafts').update(draftData).eq('user_id', currentUser.id);
           else await supabase.from('user_drafts').insert([draftData]);
+          setSavingStatus('saved');
+          // Clear "saved" indicator after 2 seconds
+          setTimeout(() => setSavingStatus(null), 2000);
         }
-      } catch (err) { console.error('Failed to save drafts:', err); }
+      } catch (err) { 
+        console.error('Failed to save drafts:', err);
+        setSavingStatus('error');
+        setTimeout(() => setSavingStatus(null), 3000);
+      }
+      finally {
+        isSavingRef.current = false;
+        pendingSaveRef.current = null;
+      }
     };
-    const timeout = setTimeout(saveDrafts, 1000);
-    return () => clearTimeout(timeout);
+    
+    pendingSaveRef.current = setTimeout(saveDrafts, 1000);
+    return () => {
+      if (pendingSaveRef.current) {
+        clearTimeout(pendingSaveRef.current);
+        pendingSaveRef.current = null;
+      }
+    };
   }, [expenses, annotatedStatements, statementAnnotations, originalStatementImages, currentUser]);
 
   const handleManualSync = async () => { setLoading(true); await loadDrafts(); await loadClaims(); setLoading(false); alert('✅ Synced!'); };
@@ -1505,7 +1543,16 @@ export default function BerkeleyExpenseSystem() {
     <div className="min-h-screen bg-gradient-to-br from-slate-100 to-slate-200">
       <header className="bg-gradient-to-r from-slate-900 to-slate-800 text-white px-4 py-3 shadow-lg sticky top-0 z-40">
         <div className="max-w-3xl mx-auto flex items-center justify-between">
-          <div><div className="font-semibold text-sm">Berkeley Expenses</div><div className="text-xs text-slate-400">{userOffice?.name} • {getUserReimburseCurrency(currentUser)}</div></div>
+          <div>
+            <div className="font-semibold text-sm flex items-center gap-2">
+              Berkeley Expenses
+              {savingStatus === 'pending' && <span className="text-yellow-400 text-xs animate-pulse">●</span>}
+              {savingStatus === 'saving' && <span className="text-yellow-400 text-xs animate-pulse">💾</span>}
+              {savingStatus === 'saved' && <span className="text-green-400 text-xs">✓</span>}
+              {savingStatus === 'error' && <span className="text-red-400 text-xs">⚠️</span>}
+            </div>
+            <div className="text-xs text-slate-400">{userOffice?.name} • {getUserReimburseCurrency(currentUser)}</div>
+          </div>
           <div className="flex items-center gap-3"><div className="text-right hidden sm:block"><div className="text-sm font-medium">{currentUser.name.split(' ').slice(0, 2).join(' ')}</div><div className="text-xs text-slate-400 capitalize">{currentUser.role}</div></div><button onClick={() => { localStorage.removeItem('berkeley_current_user'); setCurrentUser(null); setExpenses([]); setAnnotatedStatements([]); setStatementAnnotations([]); setStatementImages([]); setOriginalStatementImages([]); setActiveTab('my_expenses'); }} className="bg-white/10 px-3 py-2 rounded-lg text-xs font-medium">Logout</button></div>
         </div>
       </header>
