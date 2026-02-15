@@ -2,11 +2,10 @@
 
 /*
  * BERKELEY INTERNATIONAL EXPENSE MANAGEMENT SYSTEM
- * Version: 4.4 - Entertainment Subcategories + No Pax for Gifts + Prevent Untagged Submit + Statement Edit Fix
- * - Entertaining (E) now has subcategories: Meals/Drinks, Accommodation, Others
- * - Gifts no longer require pax/attendees
- * - Cannot submit if there are untagged foreign currency expenses
- * - Fixed statement annotation editing (Re-annotate vs Add New)
+ * Version: 4.5 - Cross-device annotation sync with percentage positioning
+ * - Annotations stored as % of image (works on any screen size)
+ * - Edit Tags: add new tags without losing existing ones
+ * - Annotations sync between laptop and phone
  */
 
 const SUPABASE_URL = 'https://wlhoyjsicvkncfjbexoi.supabase.co';
@@ -261,7 +260,7 @@ const ImageViewer = ({ src, onClose }) => (
 
 const StatementAnnotator = ({ image, expenses, existingAnnotations = [], onSave, onCancel }) => {
   const canvasRef = useRef(null);
-  const [annotations, setAnnotations] = useState(existingAnnotations);
+  const [annotations, setAnnotations] = useState([]);
   const [selectedLabel, setSelectedLabel] = useState(null);
   const [dragging, setDragging] = useState(null);
   const [resizing, setResizing] = useState(null);
@@ -280,6 +279,27 @@ const StatementAnnotator = ({ image, expenses, existingAnnotations = [], onSave,
     };
     img.src = image;
   }, [image]);
+
+  // Convert existing annotations from percentages to pixels when image loads
+  useEffect(() => {
+    if (imageLoaded && imgDimensions.width > 0 && existingAnnotations.length > 0) {
+      const pixelAnnotations = existingAnnotations.map(a => {
+        // If stored as percentages, convert to pixels
+        if (a.xPct !== undefined) {
+          return {
+            ref: a.ref,
+            x: a.xPct * imgDimensions.width,
+            y: a.yPct * imgDimensions.height,
+            width: a.widthPct * imgDimensions.width,
+            height: a.heightPct * imgDimensions.height
+          };
+        }
+        // Legacy format (absolute pixels) - keep as is but may be wrong on different screen
+        return a;
+      });
+      setAnnotations(pixelAnnotations);
+    }
+  }, [existingAnnotations, imageLoaded, imgDimensions]);
 
   useEffect(() => {
     if (!imageLoaded || !baseImage) return;
@@ -357,7 +377,18 @@ const StatementAnnotator = ({ image, expenses, existingAnnotations = [], onSave,
 
   const handleEnd = () => { setDragging(null); setResizing(null); };
   const removeAnnotation = (ref) => setAnnotations(prev => prev.filter(a => a.ref !== ref));
-  const handleSave = () => onSave(canvasRef.current.toDataURL('image/png'), annotations);
+  
+  // Save annotations as percentages for cross-device compatibility
+  const handleSave = () => {
+    const annotationsAsPercent = annotations.map(a => ({
+      ref: a.ref,
+      xPct: a.x / imgDimensions.width,
+      yPct: a.y / imgDimensions.height,
+      widthPct: a.width / imgDimensions.width,
+      heightPct: a.height / imgDimensions.height
+    }));
+    onSave(canvasRef.current.toDataURL('image/png'), annotationsAsPercent);
+  };
 
   const foreignExpenses = expenses.filter(e => e.isForeignCurrency);
   const untaggedExpenses = foreignExpenses.filter(e => !annotations.some(a => a.ref === e.ref));
@@ -488,6 +519,7 @@ export default function BerkeleyExpenseSystem() {
   const [showStatementUpload, setShowStatementUpload] = useState(false);
   const [showStatementAnnotator, setShowStatementAnnotator] = useState(false);
   const [statementImages, setStatementImages] = useState([]); 
+  const [originalStatementImages, setOriginalStatementImages] = useState([]); // Store original images for re-annotation 
   const [currentStatementIndex, setCurrentStatementIndex] = useState(0);
   const [annotatedStatements, setAnnotatedStatements] = useState([]);
   const [statementAnnotations, setStatementAnnotations] = useState([]);
@@ -516,6 +548,7 @@ export default function BerkeleyExpenseSystem() {
         if (draft.expenses) { const parsed = JSON.parse(draft.expenses); if (parsed && parsed.length > 0) setExpenses(parsed); }
         if (draft.statements) { const parsed = JSON.parse(draft.statements); if (parsed && parsed.length > 0) setAnnotatedStatements(parsed); }
         if (draft.annotations) { const parsed = JSON.parse(draft.annotations); if (parsed && parsed.length > 0) setStatementAnnotations(parsed); }
+        if (draft.originals) { const parsed = JSON.parse(draft.originals); if (parsed && parsed.length > 0) setOriginalStatementImages(parsed); }
       } else {
         const savedExpenses = localStorage.getItem(`draft_expenses_${currentUser.id}`);
         if (savedExpenses) setExpenses(JSON.parse(savedExpenses));
@@ -547,6 +580,7 @@ export default function BerkeleyExpenseSystem() {
             expenses: JSON.stringify(expenses || []), 
             statements: JSON.stringify(annotatedStatements || []), 
             annotations: JSON.stringify(statementAnnotations || []),
+            originals: JSON.stringify(originalStatementImages || []),
             updated_at: new Date().toISOString() 
           };
           const { data: existing } = await supabase.from('user_drafts').select('id').eq('user_id', currentUser.id);
@@ -557,7 +591,7 @@ export default function BerkeleyExpenseSystem() {
     };
     const timeout = setTimeout(saveDrafts, 1000);
     return () => clearTimeout(timeout);
-  }, [expenses, annotatedStatements, statementAnnotations, currentUser]);
+  }, [expenses, annotatedStatements, statementAnnotations, originalStatementImages, currentUser]);
 
   const handleManualSync = async () => { setLoading(true); await loadDrafts(); await loadClaims(); setLoading(false); alert('✅ Synced!'); };
 
@@ -1094,7 +1128,13 @@ export default function BerkeleyExpenseSystem() {
               <h3 className="font-bold mt-6 mb-3">Receipts ({pendingExpenses.length})</h3>
               <div className="grid grid-cols-3 gap-3">{pendingExpenses.map(exp => (<div key={exp.id} className="border rounded-lg overflow-hidden"><div className="bg-blue-100 p-1 flex justify-between text-xs"><span className="font-bold text-blue-700">{exp.ref}</span><div className="flex gap-1">{exp.isForeignCurrency && <span>💳</span>}{exp.receiptPreview2 && <span>📑</span>}</div></div>{exp.receiptPreview ? (<img src={exp.receiptPreview} alt={exp.ref} className="w-full h-16 object-cover cursor-pointer" onClick={() => setViewImg(exp.receiptPreview)} />) : (<div className="w-full h-16 bg-slate-100 flex items-center justify-center">📄</div>)}<div className="p-1 bg-slate-50 text-xs"><p className="truncate">{exp.merchant}</p><p className="text-green-700 font-bold">{formatCurrency(exp.reimbursementAmount || exp.amount, userReimburseCurrency)}</p></div></div>))}</div>
               {hasForeignCurrency && annotatedStatements.length === 0 && (<div className="mt-4 bg-red-50 border-2 border-red-300 rounded-xl p-4"><p className="text-red-800 font-bold">❌ Statement(s) Required</p><button onClick={() => { setShowPreview(false); setShowStatementUpload(true); }} className="mt-2 bg-amber-500 text-white px-4 py-2 rounded-lg font-semibold text-sm">📎 Upload Statements</button></div>)}
-              {annotatedStatements.length > 0 && (<div className="mt-4 bg-green-50 border border-green-200 rounded-xl p-4"><div className="flex justify-between items-start"><p className="text-green-800 font-semibold">✅ {annotatedStatements.length} Statement(s) Annotated</p><div className="flex gap-2"><button onClick={() => { setStatementImages([...annotatedStatements]); setCurrentStatementIndex(0); setShowPreview(false); setShowStatementAnnotator(true); }} className="text-purple-600 text-sm font-semibold">🔄 Re-annotate</button><button onClick={() => { setShowPreview(false); setShowStatementUpload(true); }} className="text-blue-600 text-sm">➕ Add New</button></div></div><div className="flex gap-2 mt-2 overflow-x-auto">{annotatedStatements.map((img, idx) => (<img key={idx} src={img} alt={`Statement ${idx+1}`} className="h-20 rounded cursor-pointer border-2 border-green-300" onClick={() => setViewImg(img)} />))}</div>{untaggedExpenses.length > 0 && (<div className="mt-2 bg-amber-100 border border-amber-300 rounded-lg p-2"><p className="text-amber-800 text-sm">⚠️ Untagged: {untaggedExpenses.map(e => e.ref).join(', ')}</p></div>)}</div>)}
+              {annotatedStatements.length > 0 && (<div className="mt-4 bg-green-50 border border-green-200 rounded-xl p-4"><div className="flex justify-between items-start"><p className="text-green-800 font-semibold">✅ {annotatedStatements.length} Statement(s) Annotated</p><div className="flex gap-2"><button onClick={() => { 
+                // Use original images but keep existing annotations (positions now stored as %)
+                setStatementImages([...originalStatementImages]); 
+                setCurrentStatementIndex(0); 
+                setShowPreview(false); 
+                setShowStatementAnnotator(true); 
+              }} className="text-purple-600 text-sm font-semibold" disabled={originalStatementImages.length === 0}>✏️ Edit Tags</button><button onClick={() => { setShowPreview(false); setShowStatementUpload(true); }} className="text-blue-600 text-sm">➕ Add Statement</button></div></div><div className="flex gap-2 mt-2 overflow-x-auto">{annotatedStatements.map((img, idx) => (<img key={idx} src={img} alt={`Statement ${idx+1}`} className="h-20 rounded cursor-pointer border-2 border-green-300" onClick={() => setViewImg(img)} />))}</div>{untaggedExpenses.length > 0 && (<div className="mt-2 bg-amber-100 border border-amber-300 rounded-lg p-2"><p className="text-amber-800 text-sm">⚠️ Untagged: {untaggedExpenses.map(e => e.ref).join(', ')}</p></div>)}</div>)}
             </div>
           </div>
           <div className="p-4 border-t bg-slate-50 flex gap-3 shrink-0"><button onClick={() => setShowPreview(false)} className="flex-1 py-3 rounded-xl border-2 font-semibold">← Back</button><button onClick={async () => { await handleSubmitClaim(); setShowPreview(false); }} disabled={!canSubmit || loading} className={`flex-[2] py-3 rounded-xl font-semibold ${canSubmit && !loading ? 'bg-green-600 text-white' : 'bg-slate-300 text-slate-500'}`}>{submitButtonText}</button></div>
@@ -1227,11 +1267,15 @@ export default function BerkeleyExpenseSystem() {
 
   const canReview = currentUser.role === 'admin' || currentUser.role === 'manager' || currentUser.role === 'finance' || getReviewableClaims().length > 0 || getClaimsForSubmission().length > 0;
   
-  const handleStatementAnnotationSave = (annotatedImage, annotations) => { 
+  const handleStatementAnnotationSave = (annotatedImage, newAnnotations) => { 
     const newAnnotated = [...annotatedStatements];
     newAnnotated[currentStatementIndex] = annotatedImage;
     setAnnotatedStatements(newAnnotated);
-    setStatementAnnotations([...statementAnnotations, ...annotations]);
+    // Replace annotations - newAnnotations contains all current annotations for this statement
+    // Remove old annotations for this statement's refs and add new ones
+    const newRefs = newAnnotations.map(a => a.ref);
+    const otherAnnotations = statementAnnotations.filter(a => !newRefs.includes(a.ref));
+    setStatementAnnotations([...otherAnnotations, ...newAnnotations]);
     if (currentStatementIndex < statementImages.length - 1) setCurrentStatementIndex(currentStatementIndex + 1);
     else { setShowStatementAnnotator(false); setShowPreview(true); }
   };
@@ -1241,7 +1285,7 @@ export default function BerkeleyExpenseSystem() {
       <header className="bg-gradient-to-r from-slate-900 to-slate-800 text-white px-4 py-3 shadow-lg sticky top-0 z-40">
         <div className="max-w-3xl mx-auto flex items-center justify-between">
           <div><div className="font-semibold text-sm">Berkeley Expenses</div><div className="text-xs text-slate-400">{userOffice?.name} • {getUserReimburseCurrency(currentUser)}</div></div>
-          <div className="flex items-center gap-3"><div className="text-right hidden sm:block"><div className="text-sm font-medium">{currentUser.name.split(' ').slice(0, 2).join(' ')}</div><div className="text-xs text-slate-400 capitalize">{currentUser.role}</div></div><button onClick={() => { localStorage.removeItem('berkeley_current_user'); setCurrentUser(null); setExpenses([]); setAnnotatedStatements([]); setStatementAnnotations([]); setStatementImages([]); setActiveTab('my_expenses'); }} className="bg-white/10 px-3 py-2 rounded-lg text-xs font-medium">Logout</button></div>
+          <div className="flex items-center gap-3"><div className="text-right hidden sm:block"><div className="text-sm font-medium">{currentUser.name.split(' ').slice(0, 2).join(' ')}</div><div className="text-xs text-slate-400 capitalize">{currentUser.role}</div></div><button onClick={() => { localStorage.removeItem('berkeley_current_user'); setCurrentUser(null); setExpenses([]); setAnnotatedStatements([]); setStatementAnnotations([]); setStatementImages([]); setOriginalStatementImages([]); setActiveTab('my_expenses'); }} className="bg-white/10 px-3 py-2 rounded-lg text-xs font-medium">Logout</button></div>
         </div>
       </header>
       {canReview && (<div className="bg-white border-b sticky top-14 z-30"><div className="max-w-3xl mx-auto flex"><button onClick={() => setActiveTab('my_expenses')} className={`flex-1 py-3 text-sm font-semibold border-b-2 ${activeTab === 'my_expenses' ? 'border-blue-600 text-blue-600' : 'border-transparent text-slate-500'}`}>📋 My Expenses</button><button onClick={() => setActiveTab('review')} className={`flex-1 py-3 text-sm font-semibold border-b-2 ${activeTab === 'review' ? 'border-blue-600 text-blue-600' : 'border-transparent text-slate-500'}`}>👀 Review{getReviewableClaims().length > 0 && <span className="ml-2 bg-amber-500 text-white text-xs px-2 py-0.5 rounded-full">{getReviewableClaims().length}</span>}</button></div></div>)}
@@ -1254,6 +1298,8 @@ export default function BerkeleyExpenseSystem() {
           onClose={() => setShowStatementUpload(false)}
           onContinue={(imgs) => {
             setStatementImages(imgs);
+            // Save originals for re-annotation later
+            setOriginalStatementImages(imgs);
             if (imgs.length > 0) {
               setCurrentStatementIndex(0);
               setShowStatementUpload(false); 
