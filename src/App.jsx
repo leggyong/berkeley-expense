@@ -2,10 +2,10 @@
 
 /*
  * BERKELEY INTERNATIONAL EXPENSE MANAGEMENT SYSTEM
- * Version: 4.5 - Cross-device annotation sync with percentage positioning
+ * Version: 4.6 - Multi-statement annotator with tabs
+ * - Can toggle between multiple statements within annotator
  * - Annotations stored as % of image (works on any screen size)
  * - Edit Tags: add new tags without losing existing ones
- * - Annotations sync between laptop and phone
  */
 
 const SUPABASE_URL = 'https://wlhoyjsicvkncfjbexoi.supabase.co';
@@ -258,8 +258,9 @@ const ImageViewer = ({ src, onClose }) => (
   </div>
 );
 
-const StatementAnnotator = ({ image, expenses, existingAnnotations = [], onSave, onCancel }) => {
+const StatementAnnotator = ({ images, initialIndex = 0, expenses, existingAnnotations = [], onSave, onCancel }) => {
   const canvasRef = useRef(null);
+  const [currentIndex, setCurrentIndex] = useState(initialIndex);
   const [annotations, setAnnotations] = useState([]);
   const [selectedLabel, setSelectedLabel] = useState(null);
   const [dragging, setDragging] = useState(null);
@@ -267,8 +268,12 @@ const StatementAnnotator = ({ image, expenses, existingAnnotations = [], onSave,
   const [imageLoaded, setImageLoaded] = useState(false);
   const [imgDimensions, setImgDimensions] = useState({ width: 0, height: 0 });
   const [baseImage, setBaseImage] = useState(null);
+  const [annotatedImages, setAnnotatedImages] = useState({}); // Store annotated versions per index
+
+  const image = images[currentIndex];
 
   useEffect(() => {
+    setImageLoaded(false);
     const img = new Image();
     img.onload = () => {
       const maxW = Math.min(800, window.innerWidth - 40);
@@ -282,7 +287,7 @@ const StatementAnnotator = ({ image, expenses, existingAnnotations = [], onSave,
 
   // Convert existing annotations from percentages to pixels when image loads
   useEffect(() => {
-    if (imageLoaded && imgDimensions.width > 0 && existingAnnotations.length > 0) {
+    if (imageLoaded && imgDimensions.width > 0) {
       const pixelAnnotations = existingAnnotations.map(a => {
         // If stored as percentages, convert to pixels
         if (a.xPct !== undefined) {
@@ -378,6 +383,22 @@ const StatementAnnotator = ({ image, expenses, existingAnnotations = [], onSave,
   const handleEnd = () => { setDragging(null); setResizing(null); };
   const removeAnnotation = (ref) => setAnnotations(prev => prev.filter(a => a.ref !== ref));
   
+  // Save current statement's annotated image before switching
+  const saveCurrentAnnotatedImage = () => {
+    if (canvasRef.current) {
+      const newAnnotated = { ...annotatedImages };
+      newAnnotated[currentIndex] = canvasRef.current.toDataURL('image/png');
+      setAnnotatedImages(newAnnotated);
+    }
+  };
+
+  // Switch to different statement
+  const switchStatement = (newIndex) => {
+    if (newIndex === currentIndex) return;
+    saveCurrentAnnotatedImage();
+    setCurrentIndex(newIndex);
+  };
+  
   // Save annotations as percentages for cross-device compatibility
   const handleSave = () => {
     const annotationsAsPercent = annotations.map(a => ({
@@ -387,7 +408,10 @@ const StatementAnnotator = ({ image, expenses, existingAnnotations = [], onSave,
       widthPct: a.width / imgDimensions.width,
       heightPct: a.height / imgDimensions.height
     }));
-    onSave(canvasRef.current.toDataURL('image/png'), annotationsAsPercent);
+    // Get final annotated image for current statement
+    const finalAnnotated = { ...annotatedImages };
+    finalAnnotated[currentIndex] = canvasRef.current.toDataURL('image/png');
+    onSave(finalAnnotated, annotationsAsPercent);
   };
 
   const foreignExpenses = expenses.filter(e => e.isForeignCurrency);
@@ -399,6 +423,27 @@ const StatementAnnotator = ({ image, expenses, existingAnnotations = [], onSave,
         <div><h2 className="text-base font-bold">📝 Annotate Statement</h2><p className="text-amber-100 text-xs">Select label → tap on statement</p></div>
         <button onClick={onCancel} className="w-8 h-8 rounded-full bg-white/20">✕</button>
       </div>
+      {/* Statement selector tabs */}
+      {images.length > 1 && (
+        <div className="bg-slate-700 p-2 flex gap-2 overflow-x-auto shrink-0">
+          {images.map((img, idx) => (
+            <button 
+              key={idx} 
+              onClick={() => switchStatement(idx)}
+              className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium whitespace-nowrap ${
+                currentIndex === idx 
+                  ? 'bg-amber-500 text-white' 
+                  : annotatedImages[idx] 
+                    ? 'bg-green-600 text-white' 
+                    : 'bg-slate-600 text-slate-200'
+              }`}
+            >
+              <span>📄 Statement {idx + 1}</span>
+              {annotatedImages[idx] && <span>✓</span>}
+            </button>
+          ))}
+        </div>
+      )}
       <div className="bg-white p-3 shrink-0 max-h-[35vh] overflow-auto">
         <p className="font-semibold mb-2 text-sm">Select expense to place:</p>
         <div className="flex flex-wrap gap-2">
@@ -1267,17 +1312,17 @@ export default function BerkeleyExpenseSystem() {
 
   const canReview = currentUser.role === 'admin' || currentUser.role === 'manager' || currentUser.role === 'finance' || getReviewableClaims().length > 0 || getClaimsForSubmission().length > 0;
   
-  const handleStatementAnnotationSave = (annotatedImage, newAnnotations) => { 
-    const newAnnotated = [...annotatedStatements];
-    newAnnotated[currentStatementIndex] = annotatedImage;
+  const handleStatementAnnotationSave = (annotatedImagesObj, newAnnotations) => { 
+    // annotatedImagesObj is an object with keys being statement indices
+    // Convert to array, filling in original images for any not annotated
+    const newAnnotated = statementImages.map((origImg, idx) => 
+      annotatedImagesObj[idx] || annotatedStatements[idx] || origImg
+    );
     setAnnotatedStatements(newAnnotated);
-    // Replace annotations - newAnnotations contains all current annotations for this statement
-    // Remove old annotations for this statement's refs and add new ones
-    const newRefs = newAnnotations.map(a => a.ref);
-    const otherAnnotations = statementAnnotations.filter(a => !newRefs.includes(a.ref));
-    setStatementAnnotations([...otherAnnotations, ...newAnnotations]);
-    if (currentStatementIndex < statementImages.length - 1) setCurrentStatementIndex(currentStatementIndex + 1);
-    else { setShowStatementAnnotator(false); setShowPreview(true); }
+    // Replace all annotations with the new ones
+    setStatementAnnotations(newAnnotations);
+    setShowStatementAnnotator(false); 
+    setShowPreview(true);
   };
 
   return (
@@ -1294,7 +1339,7 @@ export default function BerkeleyExpenseSystem() {
       {showPreview && <PreviewClaimModal />}
       {showStatementUpload && (
         <StatementUploadModal 
-          existingImages={statementImages}
+          existingImages={originalStatementImages}
           onClose={() => setShowStatementUpload(false)}
           onContinue={(imgs) => {
             setStatementImages(imgs);
@@ -1308,9 +1353,10 @@ export default function BerkeleyExpenseSystem() {
           }}
         />
       )}
-      {showStatementAnnotator && statementImages[currentStatementIndex] && (
+      {showStatementAnnotator && statementImages.length > 0 && (
         <StatementAnnotator 
-          image={statementImages[currentStatementIndex]} 
+          images={statementImages} 
+          initialIndex={currentStatementIndex}
           expenses={pendingExpenses} 
           existingAnnotations={statementAnnotations} 
           onSave={handleStatementAnnotationSave} 
