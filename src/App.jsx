@@ -2,10 +2,11 @@
 
 /*
  * BERKELEY INTERNATIONAL EXPENSE MANAGEMENT SYSTEM
- * Version: 4.9 - Fixed save/load race condition + saving indicator
- * - Prevent auto-reload while save is in progress
- * - Visual indicator: ● pending, 💾 saving, ✓ saved
- * - Forex rate checking with 3% tolerance
+ * Version: 5.0 - Multi-device sync with merge strategy
+ * - Merges expenses from multiple devices instead of overwriting
+ * - Tracks deleted expenses to prevent "resurrection"
+ * - Timestamps for conflict resolution (newer wins)
+ * - Visual save indicator: ● pending, 💾 saving, ✓ saved
  */
 
 const SUPABASE_URL = 'https://wlhoyjsicvkncfjbexoi.supabase.co';
@@ -678,6 +679,7 @@ export default function BerkeleyExpenseSystem() {
   const [currentStatementIndex, setCurrentStatementIndex] = useState(0);
   const [annotatedStatements, setAnnotatedStatements] = useState([]);
   const [statementAnnotations, setStatementAnnotations] = useState([]);
+  const [deletedExpenseIds, setDeletedExpenseIds] = useState([]); // Track deleted expenses to prevent resurrection
   const [selectedClaim, setSelectedClaim] = useState(null);
   const [activeTab, setActiveTab] = useState('my_expenses');
   const [editingExpense, setEditingExpense] = useState(null);
@@ -700,7 +702,19 @@ export default function BerkeleyExpenseSystem() {
       const { data, error } = await supabase.from('user_drafts').select('*').eq('user_id', currentUser.id);
       if (!error && data && data.length > 0) {
         const draft = data[0];
-        if (draft.expenses) { const parsed = JSON.parse(draft.expenses); if (parsed && parsed.length > 0) setExpenses(parsed); }
+        const serverDeletedIds = draft.deleted_ids ? JSON.parse(draft.deleted_ids) : [];
+        
+        // Load deleted IDs first
+        if (serverDeletedIds.length > 0) {
+          setDeletedExpenseIds(prev => [...new Set([...prev, ...serverDeletedIds])]);
+        }
+        
+        if (draft.expenses) { 
+          const parsed = JSON.parse(draft.expenses);
+          // Filter out any expenses that were deleted
+          const filtered = parsed.filter(e => !serverDeletedIds.includes(e.id));
+          if (filtered && filtered.length > 0) setExpenses(filtered); 
+        }
         if (draft.statements) { const parsed = JSON.parse(draft.statements); if (parsed && parsed.length > 0) setAnnotatedStatements(parsed); }
         if (draft.annotations) { const parsed = JSON.parse(draft.annotations); if (parsed && parsed.length > 0) setStatementAnnotations(parsed); }
         if (draft.originals) { const parsed = JSON.parse(draft.originals); if (parsed && parsed.length > 0) setOriginalStatementImages(parsed); }
@@ -749,19 +763,72 @@ export default function BerkeleyExpenseSystem() {
       setSavingStatus('saving');
       try {
         if (currentUser) {
-          if (expenses && expenses.length > 0) localStorage.setItem(`draft_expenses_${currentUser.id}`, JSON.stringify(expenses));
+          // MERGE STRATEGY: Fetch server state first, then merge with local
+          const { data: serverData } = await supabase.from('user_drafts').select('*').eq('user_id', currentUser.id);
+          
+          let mergedExpenses = [...expenses];
+          let mergedDeletedIds = [...deletedExpenseIds];
+          
+          if (serverData && serverData.length > 0) {
+            const serverExpenses = serverData[0].expenses ? JSON.parse(serverData[0].expenses) : [];
+            const serverDeletedIds = serverData[0].deleted_ids ? JSON.parse(serverData[0].deleted_ids) : [];
+            
+            // Combine deleted IDs from both sources
+            mergedDeletedIds = [...new Set([...deletedExpenseIds, ...serverDeletedIds])];
+            
+            // Create a map of local expenses by ID
+            const localById = new Map(expenses.map(e => [e.id, e]));
+            
+            // Merge: Add server expenses that don't exist locally AND weren't deleted
+            serverExpenses.forEach(serverExp => {
+              // Skip if this expense was deleted locally or on server
+              if (mergedDeletedIds.includes(serverExp.id)) return;
+              
+              if (!localById.has(serverExp.id)) {
+                // This expense exists on server but not locally - it was added on another device
+                mergedExpenses.push(serverExp);
+              } else {
+                // Expense exists both places - keep the one with newer updatedAt
+                const localExp = localById.get(serverExp.id);
+                const serverTime = new Date(serverExp.updatedAt || serverExp.createdAt || 0).getTime();
+                const localTime = new Date(localExp.updatedAt || localExp.createdAt || 0).getTime();
+                
+                if (serverTime > localTime) {
+                  // Server version is newer - replace local with server
+                  mergedExpenses = mergedExpenses.map(e => e.id === serverExp.id ? serverExp : e);
+                }
+              }
+            });
+            
+            // Remove any expenses that were deleted on server
+            mergedExpenses = mergedExpenses.filter(e => !mergedDeletedIds.includes(e.id));
+          }
+          
+          // Update local state if merge changed expenses
+          if (JSON.stringify(mergedExpenses.map(e => e.id).sort()) !== JSON.stringify(expenses.map(e => e.id).sort())) {
+            setExpenses(sortAndReassignRefs(mergedExpenses));
+          }
+          if (mergedDeletedIds.length !== deletedExpenseIds.length) {
+            setDeletedExpenseIds(mergedDeletedIds);
+          }
+          
+          // Save merged data
+          if (mergedExpenses && mergedExpenses.length > 0) localStorage.setItem(`draft_expenses_${currentUser.id}`, JSON.stringify(mergedExpenses));
           else localStorage.removeItem(`draft_expenses_${currentUser.id}`);
+          
           const draftData = { 
             user_id: currentUser.id, 
-            expenses: JSON.stringify(expenses || []), 
+            expenses: JSON.stringify(mergedExpenses || []), 
             statements: JSON.stringify(annotatedStatements || []), 
             annotations: JSON.stringify(statementAnnotations || []),
             originals: JSON.stringify(originalStatementImages || []),
+            deleted_ids: JSON.stringify(mergedDeletedIds || []),
             updated_at: new Date().toISOString() 
           };
-          const { data: existing } = await supabase.from('user_drafts').select('id').eq('user_id', currentUser.id);
-          if (existing && existing.length > 0) await supabase.from('user_drafts').update(draftData).eq('user_id', currentUser.id);
+          
+          if (serverData && serverData.length > 0) await supabase.from('user_drafts').update(draftData).eq('user_id', currentUser.id);
           else await supabase.from('user_drafts').insert([draftData]);
+          
           setSavingStatus('saved');
           // Clear "saved" indicator after 2 seconds
           setTimeout(() => setSavingStatus(null), 2000);
@@ -777,14 +844,14 @@ export default function BerkeleyExpenseSystem() {
       }
     };
     
-    pendingSaveRef.current = setTimeout(saveDrafts, 1000);
+    pendingSaveRef.current = setTimeout(saveDrafts, 1500); // Increased to 1.5s for merge safety
     return () => {
       if (pendingSaveRef.current) {
         clearTimeout(pendingSaveRef.current);
         pendingSaveRef.current = null;
       }
     };
-  }, [expenses, annotatedStatements, statementAnnotations, originalStatementImages, currentUser]);
+  }, [expenses, annotatedStatements, statementAnnotations, originalStatementImages, deletedExpenseIds, currentUser]);
 
   const handleManualSync = async () => { setLoading(true); await loadDrafts(); await loadClaims(); setLoading(false); alert('✅ Synced!'); };
 
@@ -792,6 +859,7 @@ export default function BerkeleyExpenseSystem() {
     if (currentUser) {
       localStorage.removeItem(`draft_expenses_${currentUser.id}`);
       localStorage.removeItem(`draft_statements_${currentUser.id}`);
+      setDeletedExpenseIds([]); // Reset deleted tracking
       try { await supabase.from('user_drafts').delete().eq('user_id', currentUser.id); } catch (err) {}
     }
   };
@@ -1269,7 +1337,7 @@ export default function BerkeleyExpenseSystem() {
         
         if (editExpense) { 
           setExpenses(prev => {
-            const updated = prev.map(e => e.id === editExpense.id ? { ...e, ...formData, amount: parseFloat(formData.amount), reimbursementAmount: isForeignCurrency ? parseFloat(formData.reimbursementAmount) : parseFloat(formData.amount), receiptPreview: receiptPreview || e.receiptPreview, receiptPreview2: isCNY ? (receiptPreview2 || e.receiptPreview2) : null, isForeignCurrency, isPotentialDuplicate: !!duplicateWarning, forexRate, forexSpotRate, forexVariance } : e);
+            const updated = prev.map(e => e.id === editExpense.id ? { ...e, ...formData, amount: parseFloat(formData.amount), reimbursementAmount: isForeignCurrency ? parseFloat(formData.reimbursementAmount) : parseFloat(formData.amount), receiptPreview: receiptPreview || e.receiptPreview, receiptPreview2: isCNY ? (receiptPreview2 || e.receiptPreview2) : null, isForeignCurrency, isPotentialDuplicate: !!duplicateWarning, forexRate, forexSpotRate, forexVariance, updatedAt: new Date().toISOString() } : e);
             return sortAndReassignRefs(updated);
           });
         } else { 
@@ -1449,7 +1517,7 @@ export default function BerkeleyExpenseSystem() {
         <div className="bg-white rounded-2xl shadow-lg p-6">
           <h3 className="font-bold text-slate-800 mb-4">📋 Pending</h3>
           {pendingExpenses.length === 0 ? (<div className="text-center py-12 text-slate-400">📭 No pending</div>) : (
-            <div className="space-y-2">{Object.entries(groupedExpenses).sort().map(([cat, exps]) => (<div key={cat}><p className="text-xs font-semibold text-slate-500 mb-2">{EXPENSE_CATEGORIES[cat]?.icon} {cat}. {EXPENSE_CATEGORIES[cat]?.name}</p>{exps.map(exp => (<div key={exp.id} className="flex items-center justify-between p-3 rounded-xl bg-slate-50 border mb-2"><div className="flex-1"><div className="flex items-center gap-2 flex-wrap"><span className="bg-blue-100 text-blue-700 text-xs font-bold px-2 py-1 rounded">{exp.ref}</span><span className="font-semibold text-sm">{exp.merchant}</span>{exp.isForeignCurrency && <span className="text-amber-600 text-xs">💳</span>}{exp.receiptPreview2 && <span className="text-slate-500 text-xs">📑</span>}{exp.forexVariance !== null && exp.forexVariance !== undefined && Math.abs(exp.forexVariance) > 3 && <span className="bg-red-100 text-red-600 text-xs px-1 rounded">⚠️ FX</span>}</div><p className="text-xs text-slate-500 mt-1">{exp.description}</p>{exp.isForeignCurrency && exp.forexRate && <p className="text-xs text-amber-600 mt-0.5">💱 {exp.currency} → {userReimburseCurrency} @ {exp.forexRate.toFixed(4)}{exp.forexVariance !== null && ` (${exp.forexVariance > 0 ? '+' : ''}${exp.forexVariance}%)`}</p>}</div><div className="flex items-center gap-2"><span className="font-bold text-green-700">{formatCurrency(exp.reimbursementAmount || exp.amount, userReimburseCurrency)}</span><button onClick={() => setEditingExpense(exp)} className="text-blue-500 p-2">✏️</button><button onClick={() => setExpenses(prev => sortAndReassignRefs(prev.filter(e => e.id !== exp.id)))} className="text-red-500 p-2">🗑️</button></div></div>))}</div>))}</div>
+            <div className="space-y-2">{Object.entries(groupedExpenses).sort().map(([cat, exps]) => (<div key={cat}><p className="text-xs font-semibold text-slate-500 mb-2">{EXPENSE_CATEGORIES[cat]?.icon} {cat}. {EXPENSE_CATEGORIES[cat]?.name}</p>{exps.map(exp => (<div key={exp.id} className="flex items-center justify-between p-3 rounded-xl bg-slate-50 border mb-2"><div className="flex-1"><div className="flex items-center gap-2 flex-wrap"><span className="bg-blue-100 text-blue-700 text-xs font-bold px-2 py-1 rounded">{exp.ref}</span><span className="font-semibold text-sm">{exp.merchant}</span>{exp.isForeignCurrency && <span className="text-amber-600 text-xs">💳</span>}{exp.receiptPreview2 && <span className="text-slate-500 text-xs">📑</span>}{exp.forexVariance !== null && exp.forexVariance !== undefined && Math.abs(exp.forexVariance) > 3 && <span className="bg-red-100 text-red-600 text-xs px-1 rounded">⚠️ FX</span>}</div><p className="text-xs text-slate-500 mt-1">{exp.description}</p>{exp.isForeignCurrency && exp.forexRate && <p className="text-xs text-amber-600 mt-0.5">💱 {exp.currency} → {userReimburseCurrency} @ {exp.forexRate.toFixed(4)}{exp.forexVariance !== null && ` (${exp.forexVariance > 0 ? '+' : ''}${exp.forexVariance}%)`}</p>}</div><div className="flex items-center gap-2"><span className="font-bold text-green-700">{formatCurrency(exp.reimbursementAmount || exp.amount, userReimburseCurrency)}</span><button onClick={() => setEditingExpense(exp)} className="text-blue-500 p-2">✏️</button><button onClick={() => { setDeletedExpenseIds(prev => [...prev, exp.id]); setExpenses(prev => sortAndReassignRefs(prev.filter(e => e.id !== exp.id))); }} className="text-red-500 p-2">🗑️</button></div></div>))}</div>))}</div>
           )}
         </div>
         <div className="bg-white rounded-2xl shadow-lg p-6">
