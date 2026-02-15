@@ -2,10 +2,10 @@
 
 /*
  * BERKELEY INTERNATIONAL EXPENSE MANAGEMENT SYSTEM
- * Version: 4.6 - Multi-statement annotator with tabs
- * - Can toggle between multiple statements within annotator
- * - Annotations stored as % of image (works on any screen size)
- * - Edit Tags: add new tags without losing existing ones
+ * Version: 4.7 - Per-statement annotations
+ * - Each statement has its own separate annotations
+ * - Tab shows which statements have annotations
+ * - Expense list shows if tagged on current vs other statement
  */
 
 const SUPABASE_URL = 'https://wlhoyjsicvkncfjbexoi.supabase.co';
@@ -261,7 +261,6 @@ const ImageViewer = ({ src, onClose }) => (
 const StatementAnnotator = ({ images, initialIndex = 0, expenses, existingAnnotations = [], onSave, onCancel }) => {
   const canvasRef = useRef(null);
   const [currentIndex, setCurrentIndex] = useState(initialIndex);
-  const [annotations, setAnnotations] = useState([]);
   const [selectedLabel, setSelectedLabel] = useState(null);
   const [dragging, setDragging] = useState(null);
   const [resizing, setResizing] = useState(null);
@@ -269,8 +268,23 @@ const StatementAnnotator = ({ images, initialIndex = 0, expenses, existingAnnota
   const [imgDimensions, setImgDimensions] = useState({ width: 0, height: 0 });
   const [baseImage, setBaseImage] = useState(null);
   const [annotatedImages, setAnnotatedImages] = useState({}); // Store annotated versions per index
+  
+  // Store annotations PER statement index
+  const [annotationsByStatement, setAnnotationsByStatement] = useState(() => {
+    // Initialize from existingAnnotations, grouping by statementIndex
+    const grouped = {};
+    existingAnnotations.forEach(a => {
+      const idx = a.statementIndex || 0;
+      if (!grouped[idx]) grouped[idx] = [];
+      grouped[idx].push(a);
+    });
+    return grouped;
+  });
 
   const image = images[currentIndex];
+  
+  // Get current statement's annotations (in pixels for display)
+  const [currentAnnotations, setCurrentAnnotations] = useState([]);
 
   useEffect(() => {
     setImageLoaded(false);
@@ -285,11 +299,11 @@ const StatementAnnotator = ({ images, initialIndex = 0, expenses, existingAnnota
     img.src = image;
   }, [image]);
 
-  // Convert existing annotations from percentages to pixels when image loads
+  // Convert annotations for current statement from percentages to pixels when image loads or statement changes
   useEffect(() => {
     if (imageLoaded && imgDimensions.width > 0) {
-      const pixelAnnotations = existingAnnotations.map(a => {
-        // If stored as percentages, convert to pixels
+      const statementAnns = annotationsByStatement[currentIndex] || [];
+      const pixelAnnotations = statementAnns.map(a => {
         if (a.xPct !== undefined) {
           return {
             ref: a.ref,
@@ -299,12 +313,11 @@ const StatementAnnotator = ({ images, initialIndex = 0, expenses, existingAnnota
             height: a.heightPct * imgDimensions.height
           };
         }
-        // Legacy format (absolute pixels) - keep as is but may be wrong on different screen
         return a;
       });
-      setAnnotations(pixelAnnotations);
+      setCurrentAnnotations(pixelAnnotations);
     }
-  }, [existingAnnotations, imageLoaded, imgDimensions]);
+  }, [currentIndex, annotationsByStatement, imageLoaded, imgDimensions]);
 
   useEffect(() => {
     if (!imageLoaded || !baseImage) return;
@@ -313,7 +326,7 @@ const StatementAnnotator = ({ images, initialIndex = 0, expenses, existingAnnota
     canvas.width = imgDimensions.width;
     canvas.height = imgDimensions.height;
     ctx.drawImage(baseImage, 0, 0, imgDimensions.width, imgDimensions.height);
-    annotations.forEach(ann => {
+    currentAnnotations.forEach(ann => {
       ctx.strokeStyle = '#ff6600'; ctx.lineWidth = 3;
       ctx.strokeRect(ann.x, ann.y, ann.width, ann.height);
       ctx.fillStyle = '#ff6600';
@@ -327,7 +340,7 @@ const StatementAnnotator = ({ images, initialIndex = 0, expenses, existingAnnota
       ctx.fillRect(ann.x - hs/2, ann.y + ann.height - hs/2, hs, hs);
       ctx.fillRect(ann.x + ann.width - hs/2, ann.y + ann.height - hs/2, hs, hs);
     });
-  }, [annotations, imageLoaded, baseImage, imgDimensions]);
+  }, [currentAnnotations, imageLoaded, baseImage, imgDimensions]);
 
   const getPos = (e) => {
     const rect = canvasRef.current.getBoundingClientRect();
@@ -338,8 +351,8 @@ const StatementAnnotator = ({ images, initialIndex = 0, expenses, existingAnnota
 
   const findAnnotationAt = (pos) => {
     const hs = 15;
-    for (let i = annotations.length - 1; i >= 0; i--) {
-      const a = annotations[i];
+    for (let i = currentAnnotations.length - 1; i >= 0; i--) {
+      const a = currentAnnotations[i];
       if (Math.abs(pos.x - a.x) < hs && Math.abs(pos.y - a.y) < hs) return { ann: a, index: i, corner: 'tl' };
       if (Math.abs(pos.x - (a.x + a.width)) < hs && Math.abs(pos.y - a.y) < hs) return { ann: a, index: i, corner: 'tr' };
       if (Math.abs(pos.x - a.x) < hs && Math.abs(pos.y - (a.y + a.height)) < hs) return { ann: a, index: i, corner: 'bl' };
@@ -356,7 +369,7 @@ const StatementAnnotator = ({ images, initialIndex = 0, expenses, existingAnnota
       if (found.corner) setResizing({ index: found.index, corner: found.corner, startX: pos.x, startY: pos.y, origAnn: { ...found.ann } });
       else setDragging({ index: found.index, offsetX: pos.x - found.ann.x, offsetY: pos.y - found.ann.y });
     } else if (selectedLabel) {
-      setAnnotations(prev => [...prev.filter(a => a.ref !== selectedLabel), { ref: selectedLabel, x: pos.x - 50, y: pos.y - 15, width: 100, height: 30 }]);
+      setCurrentAnnotations(prev => [...prev.filter(a => a.ref !== selectedLabel), { ref: selectedLabel, x: pos.x - 50, y: pos.y - 15, width: 100, height: 30 }]);
       setSelectedLabel(null);
     }
   };
@@ -364,11 +377,11 @@ const StatementAnnotator = ({ images, initialIndex = 0, expenses, existingAnnota
   const handleMove = (e) => {
     const pos = getPos(e);
     if (dragging !== null) {
-      setAnnotations(prev => prev.map((a, i) => i === dragging.index ? { ...a, x: pos.x - dragging.offsetX, y: pos.y - dragging.offsetY } : a));
+      setCurrentAnnotations(prev => prev.map((a, i) => i === dragging.index ? { ...a, x: pos.x - dragging.offsetX, y: pos.y - dragging.offsetY } : a));
     } else if (resizing !== null) {
       const { index, corner, startX, startY, origAnn } = resizing;
       const dx = pos.x - startX, dy = pos.y - startY;
-      setAnnotations(prev => prev.map((a, i) => {
+      setCurrentAnnotations(prev => prev.map((a, i) => {
         if (i !== index) return a;
         let n = { ...a };
         if (corner === 'br') { n.width = Math.max(40, origAnn.width + dx); n.height = Math.max(20, origAnn.height + dy); }
@@ -381,41 +394,83 @@ const StatementAnnotator = ({ images, initialIndex = 0, expenses, existingAnnota
   };
 
   const handleEnd = () => { setDragging(null); setResizing(null); };
-  const removeAnnotation = (ref) => setAnnotations(prev => prev.filter(a => a.ref !== ref));
+  const removeAnnotation = (ref) => setCurrentAnnotations(prev => prev.filter(a => a.ref !== ref));
   
-  // Save current statement's annotated image before switching
-  const saveCurrentAnnotatedImage = () => {
-    if (canvasRef.current) {
-      const newAnnotated = { ...annotatedImages };
-      newAnnotated[currentIndex] = canvasRef.current.toDataURL('image/png');
-      setAnnotatedImages(newAnnotated);
+  // Save current statement's annotations before switching
+  const saveCurrentToState = () => {
+    if (imgDimensions.width > 0) {
+      // Convert to percentages and store
+      const asPercent = currentAnnotations.map(a => ({
+        ref: a.ref,
+        statementIndex: currentIndex,
+        xPct: a.x / imgDimensions.width,
+        yPct: a.y / imgDimensions.height,
+        widthPct: a.width / imgDimensions.width,
+        heightPct: a.height / imgDimensions.height
+      }));
+      setAnnotationsByStatement(prev => ({ ...prev, [currentIndex]: asPercent }));
+      
+      // Save annotated image
+      if (canvasRef.current) {
+        setAnnotatedImages(prev => ({ ...prev, [currentIndex]: canvasRef.current.toDataURL('image/png') }));
+      }
     }
   };
 
   // Switch to different statement
   const switchStatement = (newIndex) => {
     if (newIndex === currentIndex) return;
-    saveCurrentAnnotatedImage();
+    saveCurrentToState();
     setCurrentIndex(newIndex);
   };
   
-  // Save annotations as percentages for cross-device compatibility
+  // Final save - combine all annotations from all statements
   const handleSave = () => {
-    const annotationsAsPercent = annotations.map(a => ({
-      ref: a.ref,
-      xPct: a.x / imgDimensions.width,
-      yPct: a.y / imgDimensions.height,
-      widthPct: a.width / imgDimensions.width,
-      heightPct: a.height / imgDimensions.height
-    }));
-    // Get final annotated image for current statement
-    const finalAnnotated = { ...annotatedImages };
-    finalAnnotated[currentIndex] = canvasRef.current.toDataURL('image/png');
-    onSave(finalAnnotated, annotationsAsPercent);
+    // First save current statement
+    saveCurrentToState();
+    
+    // Wait a tick for state to update, then collect all
+    setTimeout(() => {
+      // Collect all annotations from all statements
+      const allAnnotations = [];
+      const finalAnnotatedImages = { ...annotatedImages };
+      
+      // Add current statement's data
+      if (canvasRef.current) {
+        finalAnnotatedImages[currentIndex] = canvasRef.current.toDataURL('image/png');
+      }
+      
+      // Convert current annotations to percent format
+      const currentAsPercent = currentAnnotations.map(a => ({
+        ref: a.ref,
+        statementIndex: currentIndex,
+        xPct: a.x / imgDimensions.width,
+        yPct: a.y / imgDimensions.height,
+        widthPct: a.width / imgDimensions.width,
+        heightPct: a.height / imgDimensions.height
+      }));
+      
+      // Merge: use annotationsByStatement for other statements, currentAsPercent for current
+      Object.keys(annotationsByStatement).forEach(idx => {
+        if (parseInt(idx) !== currentIndex) {
+          allAnnotations.push(...annotationsByStatement[idx]);
+        }
+      });
+      allAnnotations.push(...currentAsPercent);
+      
+      onSave(finalAnnotatedImages, allAnnotations);
+    }, 50);
   };
 
+  // Get ALL tagged refs across ALL statements for the expense list display
+  const allTaggedRefs = new Set();
+  Object.values(annotationsByStatement).forEach(anns => {
+    anns.forEach(a => allTaggedRefs.add(a.ref));
+  });
+  currentAnnotations.forEach(a => allTaggedRefs.add(a.ref));
+
   const foreignExpenses = expenses.filter(e => e.isForeignCurrency);
-  const untaggedExpenses = foreignExpenses.filter(e => !annotations.some(a => a.ref === e.ref));
+  const untaggedExpenses = foreignExpenses.filter(e => !allTaggedRefs.has(e.ref));
 
   return (
     <div className="fixed inset-0 bg-black/90 flex flex-col z-[100]">
@@ -426,38 +481,55 @@ const StatementAnnotator = ({ images, initialIndex = 0, expenses, existingAnnota
       {/* Statement selector tabs */}
       {images.length > 1 && (
         <div className="bg-slate-700 p-2 flex gap-2 overflow-x-auto shrink-0">
-          {images.map((img, idx) => (
-            <button 
-              key={idx} 
-              onClick={() => switchStatement(idx)}
-              className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium whitespace-nowrap ${
-                currentIndex === idx 
-                  ? 'bg-amber-500 text-white' 
-                  : annotatedImages[idx] 
-                    ? 'bg-green-600 text-white' 
-                    : 'bg-slate-600 text-slate-200'
-              }`}
-            >
-              <span>📄 Statement {idx + 1}</span>
-              {annotatedImages[idx] && <span>✓</span>}
-            </button>
-          ))}
+          {images.map((img, idx) => {
+            const hasAnnotations = (annotationsByStatement[idx] && annotationsByStatement[idx].length > 0) || 
+                                   (idx === currentIndex && currentAnnotations.length > 0);
+            return (
+              <button 
+                key={idx} 
+                onClick={() => switchStatement(idx)}
+                className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium whitespace-nowrap ${
+                  currentIndex === idx 
+                    ? 'bg-amber-500 text-white' 
+                    : hasAnnotations
+                      ? 'bg-green-600 text-white' 
+                      : 'bg-slate-600 text-slate-200'
+                }`}
+              >
+                <span>📄 Statement {idx + 1}</span>
+                {hasAnnotations && currentIndex !== idx && <span>✓</span>}
+              </button>
+            );
+          })}
         </div>
       )}
       <div className="bg-white p-3 shrink-0 max-h-[35vh] overflow-auto">
         <p className="font-semibold mb-2 text-sm">Select expense to place:</p>
         <div className="flex flex-wrap gap-2">
           {foreignExpenses.map(exp => {
-            const isPlaced = annotations.some(a => a.ref === exp.ref);
+            const isOnCurrentStatement = currentAnnotations.some(a => a.ref === exp.ref);
+            const isOnOtherStatement = !isOnCurrentStatement && allTaggedRefs.has(exp.ref);
+            const isPlaced = isOnCurrentStatement || isOnOtherStatement;
             const isSelected = selectedLabel === exp.ref;
             return (
               <button key={exp.ref} onClick={() => setSelectedLabel(isSelected ? null : exp.ref)}
-                className={`px-2 py-1.5 rounded-lg text-xs font-medium text-left ${isSelected ? 'bg-orange-500 text-white ring-2 ring-orange-300' : isPlaced ? 'bg-green-100 text-green-700 border-2 border-green-400' : 'bg-slate-100 text-slate-700'}`}>
+                className={`px-2 py-1.5 rounded-lg text-xs font-medium text-left ${
+                  isSelected ? 'bg-orange-500 text-white ring-2 ring-orange-300' : 
+                  isOnCurrentStatement ? 'bg-green-100 text-green-700 border-2 border-green-400' : 
+                  isOnOtherStatement ? 'bg-blue-100 text-blue-700 border-2 border-blue-300' :
+                  'bg-slate-100 text-slate-700'
+                }`}>
                 <div className="font-bold">{exp.ref} - {exp.merchant}</div>
-                <div className={`text-[10px] ${isSelected ? 'text-orange-100' : isPlaced ? 'text-green-600' : 'text-slate-500'}`}>
+                <div className={`text-[10px] ${
+                  isSelected ? 'text-orange-100' : 
+                  isOnCurrentStatement ? 'text-green-600' : 
+                  isOnOtherStatement ? 'text-blue-500' :
+                  'text-slate-500'
+                }`}>
                   {exp.currency} {parseFloat(exp.amount).toFixed(2)} → SGD {parseFloat(exp.reimbursementAmount || exp.amount).toFixed(2)}
+                  {isOnOtherStatement && ' (other stmt)'}
                 </div>
-                {isPlaced && <span className="ml-1 text-xs" onClick={(e) => { e.stopPropagation(); removeAnnotation(exp.ref); }}>✕</span>}
+                {isOnCurrentStatement && <span className="ml-1 text-xs" onClick={(e) => { e.stopPropagation(); removeAnnotation(exp.ref); }}>✕</span>}
               </button>
             );
           })}
