@@ -2,10 +2,11 @@
 
 /*
  * BERKELEY INTERNATIONAL EXPENSE MANAGEMENT SYSTEM
- * Version: 4.7 - Per-statement annotations
- * - Each statement has its own separate annotations
- * - Tab shows which statements have annotations
- * - Expense list shows if tagged on current vs other statement
+ * Version: 4.8 - Forex rate display and spot rate checking
+ * - Calculate and display forex rate (foreign → reimbursement currency)
+ * - Check against spot rate for the transaction date
+ * - Flag unreasonable rates (>5% variance from spot)
+ * - Show forex info in expense list, receipt PDF, and reviewer view
  */
 
 const SUPABASE_URL = 'https://wlhoyjsicvkncfjbexoi.supabase.co';
@@ -90,6 +91,43 @@ const DEVELOPMENTS = [
   'TwelveTrees Park', 'Wallingford', 'Wandsworth Mills', 'West End Gate', 'White City',
   'Winterbrook', 'Woodberry Down'
 ];
+
+// --- FOREX RATE HELPERS ---
+const calculateForexRate = (foreignAmount, reimbursementAmount) => {
+  const foreign = parseFloat(foreignAmount);
+  const reimburse = parseFloat(reimbursementAmount);
+  if (!foreign || !reimburse || foreign === 0) return null;
+  return reimburse / foreign; // Rate = SGD per 1 unit of foreign currency
+};
+
+const SPOT_RATE_CACHE = {};
+
+const fetchSpotRate = async (fromCurrency, toCurrency, date) => {
+  const cacheKey = `${fromCurrency}_${toCurrency}_${date}`;
+  if (SPOT_RATE_CACHE[cacheKey]) return SPOT_RATE_CACHE[cacheKey];
+  
+  try {
+    // Use frankfurter.app free API for historical rates
+    const response = await fetch(`https://api.frankfurter.app/${date}?from=${fromCurrency}&to=${toCurrency}`);
+    if (!response.ok) throw new Error('API error');
+    const data = await response.json();
+    const rate = data.rates?.[toCurrency];
+    if (rate) {
+      SPOT_RATE_CACHE[cacheKey] = rate;
+      return rate;
+    }
+  } catch (e) {
+    console.log('Forex API error:', e);
+  }
+  return null;
+};
+
+const checkForexReasonableness = (actualRate, spotRate, tolerance = 0.03) => {
+  if (!actualRate || !spotRate) return { isReasonable: true, variance: null };
+  const variance = (actualRate - spotRate) / spotRate;
+  const isReasonable = Math.abs(variance) <= tolerance;
+  return { isReasonable, variance, variancePercent: (variance * 100).toFixed(1) };
+};
 
 const EMPLOYEES = [
   { id: 101, name: 'Fang Yi', office: 'BEJ', role: 'employee', reimburseCurrency: 'CNY', password: 'berkeley123' },
@@ -810,7 +848,11 @@ export default function BerkeleyExpenseSystem() {
       const perPaxHTML = isEntertaining && paxCount > 0 ? `<br><span style="color:#6366f1;font-weight:bold;font-size:9px;">👥 ${paxCount} pax • ${reimburseCurrency} ${perPaxAmount.toFixed(2)} per pax</span>` : '';
       const attendeesHTML = exp.attendees ? `<br><span style="color:#059669;font-size:9px;">Attendees: ${exp.attendees.replace(/\n/g, ', ')}</span>` : '';
       const backchargeHTML = exp.hasBackcharge && exp.backcharges?.length > 0 ? `<div class="backcharge-inline"><strong style="color:#1565c0;">📊 Backcharges:</strong> ${exp.backcharges.map(bc => `${bc.development}: ${bc.percentage}%`).join(' | ')}</div>` : '';
-      receiptsHTML += `<div class="page receipt-page"><div class="receipt-header"><div class="receipt-ref">${exp.ref}</div><div class="receipt-info"><strong>${exp.merchant}</strong><br>Date: ${formatShortDate(exp.date)} | Original: ${formatCurrency(exp.amount, exp.currency)}${exp.isForeignCurrency ? ` | Reimburse: ${formatCurrency(exp.reimbursementAmount, reimburseCurrency)}` : ''}<br>${exp.description || ''}${oldWarningHTML}${duplicateHTML}${perPaxHTML}${attendeesHTML}${adminNotesHTML}</div></div>${imgs.map((img, idx) => `<div>${imgs.length > 1 && isCNY ? `<p style="font-size:9px;color:#666;margin:2px 0;">${idx === 0 ? '发票 Fapiao' : '小票 Xiaopiao'}</p>` : ''}<img src="${img}" class="receipt-img" /></div>`).join('')}${imgs.length === 0 ? '<div class="no-receipt">No receipt image</div>' : ''}${backchargeHTML}</div>`;
+      
+      // Forex rate info
+      const forexRateHTML = exp.isForeignCurrency && exp.forexRate ? `<br><span style="color:#d97706;font-weight:bold;font-size:9px;">💱 Rate: 1 ${exp.currency} = ${exp.forexRate.toFixed(4)} ${reimburseCurrency}${exp.forexSpotRate ? ` (Spot: ${exp.forexSpotRate.toFixed(4)})` : ''}${exp.forexVariance !== null && exp.forexVariance !== undefined ? ` <span style="color:${Math.abs(exp.forexVariance) > 3 ? '#dc2626' : '#059669'};">[${exp.forexVariance > 0 ? '+' : ''}${exp.forexVariance}%]</span>` : ''}</span>` : '';
+      
+      receiptsHTML += `<div class="page receipt-page"><div class="receipt-header"><div class="receipt-ref">${exp.ref}</div><div class="receipt-info"><strong>${exp.merchant}</strong><br>Date: ${formatShortDate(exp.date)} | Original: ${formatCurrency(exp.amount, exp.currency)}${exp.isForeignCurrency ? ` | Reimburse: ${formatCurrency(exp.reimbursementAmount, reimburseCurrency)}` : ''}<br>${exp.description || ''}${oldWarningHTML}${duplicateHTML}${forexRateHTML}${perPaxHTML}${attendeesHTML}${adminNotesHTML}</div></div>${imgs.map((img, idx) => `<div>${imgs.length > 1 && isCNY ? `<p style="font-size:9px;color:#666;margin:2px 0;">${idx === 0 ? '发票 Fapiao' : '小票 Xiaopiao'}</p>` : ''}<img src="${img}" class="receipt-img" /></div>`).join('')}${imgs.length === 0 ? '<div class="no-receipt">No receipt image</div>' : ''}${backchargeHTML}</div>`;
     }
 
     const travelDetailHTML = travelExpenses.length > 0 ? `<div class="page"><h2 class="detail-title">Travel Expense Detail</h2><div class="detail-info">Name: <strong>${userName}</strong></div><p class="detail-note">Please do not include any travel expenses associated with Employee Entertaining. (See Staff Entertaining)</p><table class="detail-table"><thead><tr><th>Receipt No.</th><th>B<br>Parking</th><th colspan="5">C - Travel Expenses</th><th colspan="2">D - Motor Vehicles</th><th>Full Description</th></tr><tr><th>VAT</th><th>Parking</th><th>Public Transport</th><th>Taxis</th><th>Tolls</th><th>Cong.Chg</th><th>Subsistence</th><th>Repairs</th><th>Parts</th><th></th></tr></thead><tbody>${travelExpenses.map((exp, idx) => `<tr><td>${idx + 1}</td><td>${exp.subcategory === 'Off-Street Parking' ? (exp.reimbursementAmount||exp.amount) : ''}</td><td>${exp.subcategory === 'Public Transport' ? (exp.reimbursementAmount||exp.amount) : ''}</td><td>${exp.subcategory === 'Taxis' ? (exp.reimbursementAmount||exp.amount) : ''}</td><td>${exp.subcategory === 'Tolls' ? (exp.reimbursementAmount||exp.amount) : ''}</td><td>${exp.subcategory === 'Congestion Charging' ? (exp.reimbursementAmount||exp.amount) : ''}</td><td>${exp.subcategory === 'Subsistence' ? (exp.reimbursementAmount||exp.amount) : ''}</td><td>${exp.subcategory === 'Repairs' ? (exp.reimbursementAmount||exp.amount) : ''}</td><td>${exp.subcategory === 'Parts' ? (exp.reimbursementAmount||exp.amount) : ''}</td><td class="desc">${exp.ref} - ${exp.description || ''}${isOlderThan2Months(exp.date) ? ' ⚠️ (>2 Months Old)' : ''}${exp.adminNotes ? `<br><span style="color:#d97706;">Notes: ${exp.adminNotes}</span>` : ''}</td></tr>`).join('')}<tr class="subtotal-row"><td><strong>SUBTOTAL</strong></td><td><strong>${travelSub.parking||''}</strong></td><td><strong>${travelSub.publicTransport||''}</strong></td><td><strong>${travelSub.taxis||''}</strong></td><td><strong>${travelSub.tolls||''}</strong></td><td><strong>${travelSub.congestion||''}</strong></td><td><strong>${travelSub.subsistence||''}</strong></td><td><strong>${travelSub.repairs||''}</strong></td><td><strong>${travelSub.parts||''}</strong></td><td><strong>TOTAL: ${reimburseCurrency} ${travelTotal.toFixed(2)}</strong></td></tr></tbody></table></div>` : '';
@@ -1095,6 +1137,35 @@ export default function BerkeleyExpenseSystem() {
     const isForeignCurrency = formData.currency !== userReimburseCurrency;
     const isCNY = formData.currency === 'CNY';
     const [duplicateWarning, setDuplicateWarning] = useState(null);
+    const [spotRate, setSpotRate] = useState(null);
+    const [spotRateLoading, setSpotRateLoading] = useState(false);
+
+    // Calculate forex rate from entered amounts
+    const calculatedRate = isForeignCurrency && formData.amount && formData.reimbursementAmount 
+      ? calculateForexRate(formData.amount, formData.reimbursementAmount) 
+      : null;
+    
+    // Check forex reasonableness
+    const forexCheck = calculatedRate && spotRate 
+      ? checkForexReasonableness(calculatedRate, spotRate) 
+      : { isReasonable: true, variance: null };
+
+    // Fetch spot rate when currency/date changes
+    useEffect(() => {
+      if (!isForeignCurrency || !formData.date || !formData.currency) {
+        setSpotRate(null);
+        return;
+      }
+      
+      const fetchRate = async () => {
+        setSpotRateLoading(true);
+        const rate = await fetchSpotRate(formData.currency, userReimburseCurrency, formData.date);
+        setSpotRate(rate);
+        setSpotRateLoading(false);
+      };
+      
+      fetchRate();
+    }, [formData.currency, formData.date, isForeignCurrency, userReimburseCurrency]);
 
     // Duplicate Check Effect (Scans Drafts AND History)
     useEffect(() => {
@@ -1154,14 +1225,18 @@ export default function BerkeleyExpenseSystem() {
       }
 
       try {
+        const forexRate = isForeignCurrency ? calculatedRate : null;
+        const forexSpotRate = isForeignCurrency ? spotRate : null;
+        const forexVariance = isForeignCurrency && forexCheck.variancePercent ? parseFloat(forexCheck.variancePercent) : null;
+        
         if (editExpense) { 
           setExpenses(prev => {
-            const updated = prev.map(e => e.id === editExpense.id ? { ...e, ...formData, amount: parseFloat(formData.amount), reimbursementAmount: isForeignCurrency ? parseFloat(formData.reimbursementAmount) : parseFloat(formData.amount), receiptPreview: receiptPreview || e.receiptPreview, receiptPreview2: isCNY ? (receiptPreview2 || e.receiptPreview2) : null, isForeignCurrency, isPotentialDuplicate: !!duplicateWarning } : e);
+            const updated = prev.map(e => e.id === editExpense.id ? { ...e, ...formData, amount: parseFloat(formData.amount), reimbursementAmount: isForeignCurrency ? parseFloat(formData.reimbursementAmount) : parseFloat(formData.amount), receiptPreview: receiptPreview || e.receiptPreview, receiptPreview2: isCNY ? (receiptPreview2 || e.receiptPreview2) : null, isForeignCurrency, isPotentialDuplicate: !!duplicateWarning, forexRate, forexSpotRate, forexVariance } : e);
             return sortAndReassignRefs(updated);
           });
         } else { 
           setExpenses(prev => {
-            const newExpense = { id: Date.now(), ref: 'temp', ...formData, amount: parseFloat(formData.amount) || 0, reimbursementAmount: isForeignCurrency ? (parseFloat(formData.reimbursementAmount) || 0) : (parseFloat(formData.amount) || 0), receiptPreview: receiptPreview || null, receiptPreview2: isCNY ? (receiptPreview2 || null) : null, status: 'draft', isForeignCurrency: isForeignCurrency || false, isOld: isOlderThan2Months(formData.date), createdAt: new Date().toISOString(), isPotentialDuplicate: !!duplicateWarning };
+            const newExpense = { id: Date.now(), ref: 'temp', ...formData, amount: parseFloat(formData.amount) || 0, reimbursementAmount: isForeignCurrency ? (parseFloat(formData.reimbursementAmount) || 0) : (parseFloat(formData.amount) || 0), receiptPreview: receiptPreview || null, receiptPreview2: isCNY ? (receiptPreview2 || null) : null, status: 'draft', isForeignCurrency: isForeignCurrency || false, isOld: isOlderThan2Months(formData.date), createdAt: new Date().toISOString(), isPotentialDuplicate: !!duplicateWarning, forexRate, forexSpotRate, forexVariance };
             return sortAndReassignRefs([...prev, newExpense]);
           });
         }
@@ -1190,7 +1265,36 @@ export default function BerkeleyExpenseSystem() {
                 )}
                 <div><label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Merchant *</label><input type="text" className="w-full p-3 border-2 border-slate-200 rounded-xl focus:border-blue-500 outline-none" value={formData.merchant} onChange={e => setFormData(prev => ({ ...prev, merchant: e.target.value }))} /></div>
                 <div className="bg-slate-50 rounded-xl p-4 space-y-3"><p className="text-xs font-semibold text-slate-600 uppercase">💵 Original Expense</p><div className="grid grid-cols-2 gap-4"><input type="number" step="0.01" className="p-3 border-2 border-slate-200 rounded-xl" placeholder="Amount" value={formData.amount} onChange={e => setFormData(prev => ({ ...prev, amount: e.target.value }))} /><select className="p-3 border-2 border-slate-200 rounded-xl bg-white" value={formData.currency} onChange={e => setFormData(prev => ({ ...prev, currency: e.target.value }))}>{CURRENCIES.map(c => <option key={c} value={c}>{c}</option>)}</select></div></div>
-                {isForeignCurrency && (<div className="bg-amber-50 border-2 border-amber-300 rounded-xl p-4"><p className="text-sm font-bold text-amber-800 mb-2">💳 Credit Card Statement Amount</p><p className="text-xs text-amber-600 mb-2">Enter the {userReimburseCurrency} amount shown on your card statement</p><input type="number" step="0.01" className="w-full p-3 border-2 border-amber-300 rounded-xl bg-white" placeholder={`Amount in ${userReimburseCurrency}`} value={formData.reimbursementAmount} onChange={e => setFormData(prev => ({ ...prev, reimbursementAmount: e.target.value }))} /></div>)}
+                {isForeignCurrency && (<div className="bg-amber-50 border-2 border-amber-300 rounded-xl p-4">
+                  <p className="text-sm font-bold text-amber-800 mb-2">💳 Credit Card Statement Amount</p>
+                  <p className="text-xs text-amber-600 mb-2">Enter the {userReimburseCurrency} amount shown on your card statement</p>
+                  <input type="number" step="0.01" className="w-full p-3 border-2 border-amber-300 rounded-xl bg-white" placeholder={`Amount in ${userReimburseCurrency}`} value={formData.reimbursementAmount} onChange={e => setFormData(prev => ({ ...prev, reimbursementAmount: e.target.value }))} />
+                  
+                  {/* Forex Rate Display */}
+                  {calculatedRate && (
+                    <div className="mt-3 p-3 bg-white rounded-lg border border-amber-200">
+                      <div className="flex justify-between items-center">
+                        <span className="text-xs text-slate-600">Your Rate:</span>
+                        <span className="font-bold text-slate-800">1 {formData.currency} = {calculatedRate.toFixed(4)} {userReimburseCurrency}</span>
+                      </div>
+                      {spotRateLoading && <p className="text-xs text-slate-400 mt-1">Loading spot rate...</p>}
+                      {spotRate && (
+                        <>
+                          <div className="flex justify-between items-center mt-1">
+                            <span className="text-xs text-slate-600">Spot Rate ({formData.date}):</span>
+                            <span className="text-sm text-slate-700">1 {formData.currency} = {spotRate.toFixed(4)} {userReimburseCurrency}</span>
+                          </div>
+                          <div className={`mt-2 p-2 rounded text-xs font-bold text-center ${forexCheck.isReasonable ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
+                            {forexCheck.isReasonable 
+                              ? `✅ Rate OK (${forexCheck.variancePercent > 0 ? '+' : ''}${forexCheck.variancePercent}% vs spot)` 
+                              : `⚠️ Rate differs ${forexCheck.variancePercent > 0 ? '+' : ''}${forexCheck.variancePercent}% from spot rate`}
+                          </div>
+                        </>
+                      )}
+                      {!spotRate && !spotRateLoading && <p className="text-xs text-slate-400 mt-1">Spot rate unavailable for this currency</p>}
+                    </div>
+                  )}
+                </div>)}
                 <div className="grid grid-cols-2 gap-4"><input type="date" className="p-3 border-2 border-slate-200 rounded-xl" value={formData.date} onChange={e => setFormData(prev => ({ ...prev, date: e.target.value }))} /><select className="p-3 border-2 border-slate-200 rounded-xl bg-white" value={formData.category} onChange={e => setFormData(prev => ({ ...prev, category: e.target.value, subcategory: EXPENSE_CATEGORIES[e.target.value].subcategories[0] }))}>{Object.entries(EXPENSE_CATEGORIES).map(([key, val]) => <option key={key} value={key}>{val.icon} {key}. {val.name}</option>)}</select></div>
                 <select className="w-full p-3 border-2 border-slate-200 rounded-xl bg-white" value={formData.subcategory} onChange={e => setFormData(prev => ({ ...prev, subcategory: e.target.value }))}>{EXPENSE_CATEGORIES[formData.category].subcategories.map(sub => <option key={sub} value={sub}>{sub}</option>)}</select>
                 <input type="text" className="w-full p-3 border-2 border-slate-200 rounded-xl" placeholder="Description *" value={formData.description} onChange={e => setFormData(prev => ({ ...prev, description: e.target.value }))} />
@@ -1307,7 +1411,7 @@ export default function BerkeleyExpenseSystem() {
         <div className="bg-white rounded-2xl shadow-lg p-6">
           <h3 className="font-bold text-slate-800 mb-4">📋 Pending</h3>
           {pendingExpenses.length === 0 ? (<div className="text-center py-12 text-slate-400">📭 No pending</div>) : (
-            <div className="space-y-2">{Object.entries(groupedExpenses).sort().map(([cat, exps]) => (<div key={cat}><p className="text-xs font-semibold text-slate-500 mb-2">{EXPENSE_CATEGORIES[cat]?.icon} {cat}. {EXPENSE_CATEGORIES[cat]?.name}</p>{exps.map(exp => (<div key={exp.id} className="flex items-center justify-between p-3 rounded-xl bg-slate-50 border mb-2"><div className="flex-1"><div className="flex items-center gap-2"><span className="bg-blue-100 text-blue-700 text-xs font-bold px-2 py-1 rounded">{exp.ref}</span><span className="font-semibold text-sm">{exp.merchant}</span>{exp.isForeignCurrency && <span className="text-amber-600 text-xs">💳</span>}{exp.receiptPreview2 && <span className="text-slate-500 text-xs">📑</span>}</div><p className="text-xs text-slate-500 mt-1">{exp.description}</p></div><div className="flex items-center gap-2"><span className="font-bold text-green-700">{formatCurrency(exp.reimbursementAmount || exp.amount, userReimburseCurrency)}</span><button onClick={() => setEditingExpense(exp)} className="text-blue-500 p-2">✏️</button><button onClick={() => setExpenses(prev => sortAndReassignRefs(prev.filter(e => e.id !== exp.id)))} className="text-red-500 p-2">🗑️</button></div></div>))}</div>))}</div>
+            <div className="space-y-2">{Object.entries(groupedExpenses).sort().map(([cat, exps]) => (<div key={cat}><p className="text-xs font-semibold text-slate-500 mb-2">{EXPENSE_CATEGORIES[cat]?.icon} {cat}. {EXPENSE_CATEGORIES[cat]?.name}</p>{exps.map(exp => (<div key={exp.id} className="flex items-center justify-between p-3 rounded-xl bg-slate-50 border mb-2"><div className="flex-1"><div className="flex items-center gap-2 flex-wrap"><span className="bg-blue-100 text-blue-700 text-xs font-bold px-2 py-1 rounded">{exp.ref}</span><span className="font-semibold text-sm">{exp.merchant}</span>{exp.isForeignCurrency && <span className="text-amber-600 text-xs">💳</span>}{exp.receiptPreview2 && <span className="text-slate-500 text-xs">📑</span>}{exp.forexVariance !== null && exp.forexVariance !== undefined && Math.abs(exp.forexVariance) > 3 && <span className="bg-red-100 text-red-600 text-xs px-1 rounded">⚠️ FX</span>}</div><p className="text-xs text-slate-500 mt-1">{exp.description}</p>{exp.isForeignCurrency && exp.forexRate && <p className="text-xs text-amber-600 mt-0.5">💱 {exp.currency} → {userReimburseCurrency} @ {exp.forexRate.toFixed(4)}{exp.forexVariance !== null && ` (${exp.forexVariance > 0 ? '+' : ''}${exp.forexVariance}%)`}</p>}</div><div className="flex items-center gap-2"><span className="font-bold text-green-700">{formatCurrency(exp.reimbursementAmount || exp.amount, userReimburseCurrency)}</span><button onClick={() => setEditingExpense(exp)} className="text-blue-500 p-2">✏️</button><button onClick={() => setExpenses(prev => sortAndReassignRefs(prev.filter(e => e.id !== exp.id)))} className="text-red-500 p-2">🗑️</button></div></div>))}</div>))}</div>
           )}
         </div>
         <div className="bg-white rounded-2xl shadow-lg p-6">
@@ -1375,7 +1479,7 @@ export default function BerkeleyExpenseSystem() {
           <h3 className="font-bold mb-4">📊 To Review ({reviewableClaims.length})</h3>
           {reviewableClaims.length === 0 ? <div className="text-center py-12 text-slate-400">✅ Nothing to review</div> : (<div className="space-y-2">{reviewableClaims.map(claim => (<div key={claim.id} onClick={() => setSelectedClaim(claim)} className="flex items-center justify-between p-4 rounded-xl bg-slate-50 border cursor-pointer hover:border-blue-300"><div><span className="font-semibold">{claim.user_name}</span><span className={`ml-2 text-xs px-2 py-0.5 rounded-full ${claim.approval_level === 2 ? 'bg-blue-100 text-blue-700' : 'bg-amber-100 text-amber-700'}`}>L{claim.approval_level || 1}</span><p className="text-sm text-slate-500">{claim.office}</p></div><span className="font-bold">{formatCurrency(claim.total_amount, claim.currency)}</span></div>))}</div>)}
         </div>
-        {selectedClaim && (<div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50" onClick={() => setSelectedClaim(null)}><div className="bg-white rounded-2xl max-w-2xl w-full max-h-[90vh] overflow-auto" onClick={e => e.stopPropagation()}><div className="p-6 border-b flex justify-between"><div><h2 className="text-xl font-bold">{selectedClaim.user_name}</h2><p className="text-sm text-slate-500">{selectedClaim.claim_number} • Level {selectedClaim.approval_level || 1}</p></div><button onClick={() => setSelectedClaim(null)} className="text-2xl text-slate-400">×</button></div><div className="p-6"><button onClick={() => handleDownloadPDF(selectedClaim)} className="w-full bg-green-600 text-white py-3 rounded-xl font-semibold mb-4">📥 Download PDF</button>{selectedClaim.expenses?.map((exp, i) => (<div key={i} className="py-3 border-b"><div className="flex justify-between items-start"><div className="flex-1"><div className="flex items-center gap-2 flex-wrap"><span className="bg-blue-100 text-blue-700 text-xs px-2 py-0.5 rounded font-bold">{exp.ref}</span><span className="font-semibold">{exp.merchant}</span>{exp.isPotentialDuplicate && <span className="bg-red-100 text-red-600 text-xs px-2 py-0.5 rounded">⚠️ Duplicate?</span>}{exp.numberOfPax && <span className="bg-purple-100 text-purple-600 text-xs px-2 py-0.5 rounded">👥 {exp.numberOfPax} pax</span>}</div><p className="text-xs text-slate-500 mt-1">{exp.description}</p>{exp.adminNotes && <p className="text-xs text-amber-600 mt-1 bg-amber-50 px-2 py-1 rounded">📝 Notes: {exp.adminNotes}</p>}</div><span className="font-bold text-green-700 ml-2">{formatCurrency(exp.reimbursementAmount || exp.amount, selectedClaim.currency)}</span></div></div>))}</div><div className="p-4 border-t bg-slate-50 space-y-3"><div className="flex gap-3"><button onClick={() => setEditingClaim(selectedClaim)} className="flex-1 py-3 rounded-xl bg-purple-500 text-white font-semibold">✏️ Edit / Add Notes</button><button onClick={() => setShowRequestChanges(true)} className="flex-1 py-3 rounded-xl bg-amber-500 text-white font-semibold">📝 Return</button></div><div className="flex gap-3"><button onClick={() => handleReject(selectedClaim.id)} disabled={loading} className="flex-1 py-3 rounded-xl bg-red-500 text-white font-semibold disabled:opacity-50">↩️ Reject</button><button onClick={() => handleApprove(selectedClaim)} disabled={loading} className="flex-[2] py-3 rounded-xl bg-green-600 text-white font-semibold disabled:opacity-50">{(() => { const workflow = SENIOR_STAFF_ROUTING[selectedClaim.user_id]; const isSingleLevel = workflow?.singleLevel; const level = selectedClaim.approval_level || 1; if (level === 1 && isSingleLevel) return workflow?.externalApproval ? '✓ Approve (→ Chairman)' : '✓ Final Approve'; if (level === 1) return '✓ Approve → L2'; return '✓ Final Approve'; })()}</button></div></div></div></div>)}
+        {selectedClaim && (<div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50" onClick={() => setSelectedClaim(null)}><div className="bg-white rounded-2xl max-w-2xl w-full max-h-[90vh] overflow-auto" onClick={e => e.stopPropagation()}><div className="p-6 border-b flex justify-between"><div><h2 className="text-xl font-bold">{selectedClaim.user_name}</h2><p className="text-sm text-slate-500">{selectedClaim.claim_number} • Level {selectedClaim.approval_level || 1}</p></div><button onClick={() => setSelectedClaim(null)} className="text-2xl text-slate-400">×</button></div><div className="p-6"><button onClick={() => handleDownloadPDF(selectedClaim)} className="w-full bg-green-600 text-white py-3 rounded-xl font-semibold mb-4">📥 Download PDF</button>{selectedClaim.expenses?.map((exp, i) => (<div key={i} className="py-3 border-b"><div className="flex justify-between items-start"><div className="flex-1"><div className="flex items-center gap-2 flex-wrap"><span className="bg-blue-100 text-blue-700 text-xs px-2 py-0.5 rounded font-bold">{exp.ref}</span><span className="font-semibold">{exp.merchant}</span>{exp.isPotentialDuplicate && <span className="bg-red-100 text-red-600 text-xs px-2 py-0.5 rounded">⚠️ Duplicate?</span>}{exp.numberOfPax && <span className="bg-purple-100 text-purple-600 text-xs px-2 py-0.5 rounded">👥 {exp.numberOfPax} pax</span>}{exp.isForeignCurrency && exp.forexVariance !== null && Math.abs(exp.forexVariance) > 3 && <span className="bg-red-100 text-red-600 text-xs px-2 py-0.5 rounded">⚠️ FX Rate</span>}</div><p className="text-xs text-slate-500 mt-1">{exp.description}</p>{exp.isForeignCurrency && exp.forexRate && <p className="text-xs text-amber-600 mt-1">💱 Rate: 1 {exp.currency} = {exp.forexRate.toFixed(4)} {selectedClaim.currency}{exp.forexSpotRate ? ` (Spot: ${exp.forexSpotRate.toFixed(4)}, ${exp.forexVariance > 0 ? '+' : ''}${exp.forexVariance}%)` : ''}</p>}{exp.adminNotes && <p className="text-xs text-amber-600 mt-1 bg-amber-50 px-2 py-1 rounded">📝 Notes: {exp.adminNotes}</p>}</div><span className="font-bold text-green-700 ml-2">{formatCurrency(exp.reimbursementAmount || exp.amount, selectedClaim.currency)}</span></div></div>))}</div><div className="p-4 border-t bg-slate-50 space-y-3"><div className="flex gap-3"><button onClick={() => setEditingClaim(selectedClaim)} className="flex-1 py-3 rounded-xl bg-purple-500 text-white font-semibold">✏️ Edit / Add Notes</button><button onClick={() => setShowRequestChanges(true)} className="flex-1 py-3 rounded-xl bg-amber-500 text-white font-semibold">📝 Return</button></div><div className="flex gap-3"><button onClick={() => handleReject(selectedClaim.id)} disabled={loading} className="flex-1 py-3 rounded-xl bg-red-500 text-white font-semibold disabled:opacity-50">↩️ Reject</button><button onClick={() => handleApprove(selectedClaim)} disabled={loading} className="flex-[2] py-3 rounded-xl bg-green-600 text-white font-semibold disabled:opacity-50">{(() => { const workflow = SENIOR_STAFF_ROUTING[selectedClaim.user_id]; const isSingleLevel = workflow?.singleLevel; const level = selectedClaim.approval_level || 1; if (level === 1 && isSingleLevel) return workflow?.externalApproval ? '✓ Approve (→ Chairman)' : '✓ Final Approve'; if (level === 1) return '✓ Approve → L2'; return '✓ Final Approve'; })()}</button></div></div></div></div>)}
         {editingClaim && <EditClaimModal claim={editingClaim} onClose={() => setEditingClaim(null)} />}
         {showRequestChanges && selectedClaim && (<div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50"><div className="bg-white rounded-2xl max-w-md w-full"><div className="bg-amber-500 text-white p-5"><h2 className="font-bold">📝 Request Changes</h2></div><div className="p-6"><textarea className="w-full p-3 border-2 rounded-xl" rows={4} placeholder="What needs fixing?" value={changeRequestComment} onChange={(e) => setChangeRequestComment(e.target.value)} /></div><div className="p-4 border-t flex gap-3"><button onClick={() => setShowRequestChanges(false)} className="flex-1 py-3 rounded-xl border-2 font-semibold">Cancel</button><button onClick={() => handleRequestChanges(selectedClaim.id, changeRequestComment)} disabled={!changeRequestComment.trim()} className="flex-[2] py-3 rounded-xl bg-amber-500 text-white font-semibold disabled:opacity-50">Send 📤</button></div></div></div>)}
       </div>
