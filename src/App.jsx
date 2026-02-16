@@ -1294,7 +1294,7 @@ export default function BerkeleyExpenseSystem() {
     const attendeeCount = attendeeLines.length;
     const attendeePaxMatch = !needsAttendees || (paxCount > 0 && paxCount === attendeeCount);
 
-    const handleSave = () => {
+    const handleSave = async () => {
       // BLOCKER POPUP logic
       if (duplicateWarning) {
         const confirmSave = window.confirm("⚠️ DUPLICATE DETECTED\n\nWe found another expense with the same Date, Amount, and Currency.\n\nAre you sure you want to save this?");
