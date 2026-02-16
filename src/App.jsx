@@ -2,11 +2,11 @@
 
 /*
  * BERKELEY INTERNATIONAL EXPENSE MANAGEMENT SYSTEM
- * Version: 5.0 - Multi-device sync with merge strategy
- * - Merges expenses from multiple devices instead of overwriting
- * - Tracks deleted expenses to prevent "resurrection"
- * - Timestamps for conflict resolution (newer wins)
- * - Visual save indicator: ● pending, 💾 saving, ✓ saved
+ * Version: 5.1 - Atomic Clear + Enhanced Sync Protection
+ * - Atomic Clear: Database cleared FIRST on submission (prevents resurrection)
+ * - Tombstone tracking: Submitted expense IDs added to deleted_ids
+ * - Local changes protection: Won't reload from server if unsaved changes exist
+ * - Save indicator: ● pending, 💾 saving, ✓ saved
  */
 
 const SUPABASE_URL = 'https://wlhoyjsicvkncfjbexoi.supabase.co';
@@ -732,13 +732,23 @@ export default function BerkeleyExpenseSystem() {
   const modalOpenRef = useRef(false);
   const isSavingRef = useRef(false); // Prevent loads while saving
   const pendingSaveRef = useRef(null); // Track pending save timeout
+  const hasLocalChangesRef = useRef(false); // Track if we have unsaved local changes
   
   useEffect(() => { modalOpenRef.current = showAddExpense || editingExpense || showPreview; }, [showAddExpense, editingExpense, showPreview]);
 
+  // Track when local state changes (mark as having unsaved changes)
+  useEffect(() => {
+    hasLocalChangesRef.current = true;
+  }, [expenses, annotatedStatements, statementAnnotations]);
+
   useEffect(() => {
     const handleFocus = () => { 
-      // Don't reload if a modal is open or if we're in the middle of saving
-      if (currentUser && !modalOpenRef.current && !isSavingRef.current && !pendingSaveRef.current) { 
+      // Don't reload if:
+      // - A modal is open
+      // - We're in the middle of saving
+      // - A save is pending (waiting for debounce)
+      // - We have local unsaved changes (would overwrite them!)
+      if (currentUser && !modalOpenRef.current && !isSavingRef.current && !pendingSaveRef.current && !hasLocalChangesRef.current) { 
         loadDrafts(); 
         loadClaims(); 
       } 
@@ -829,6 +839,7 @@ export default function BerkeleyExpenseSystem() {
           if (serverData && serverData.length > 0) await supabase.from('user_drafts').update(draftData).eq('user_id', currentUser.id);
           else await supabase.from('user_drafts').insert([draftData]);
           
+          hasLocalChangesRef.current = false; // Mark as synced - safe to load from server now
           setSavingStatus('saved');
           // Clear "saved" indicator after 2 seconds
           setTimeout(() => setSavingStatus(null), 2000);
@@ -853,7 +864,14 @@ export default function BerkeleyExpenseSystem() {
     };
   }, [expenses, annotatedStatements, statementAnnotations, originalStatementImages, deletedExpenseIds, currentUser]);
 
-  const handleManualSync = async () => { setLoading(true); await loadDrafts(); await loadClaims(); setLoading(false); alert('✅ Synced!'); };
+  const handleManualSync = async () => { 
+    setLoading(true); 
+    hasLocalChangesRef.current = false; // Allow loading from server
+    await loadDrafts(); 
+    await loadClaims(); 
+    setLoading(false); 
+    alert('✅ Synced from server!'); 
+  };
 
   const clearDraftStorage = async () => {
     if (currentUser) {
@@ -1008,10 +1026,23 @@ export default function BerkeleyExpenseSystem() {
   };
   const handleSubmitClaim = async () => {
     setLoading(true);
+    setSavingStatus('saving');
+    
+    // STEP 0: Cancel any pending auto-save to prevent race condition
+    if (pendingSaveRef.current) {
+      clearTimeout(pendingSaveRef.current);
+      pendingSaveRef.current = null;
+    }
+    isSavingRef.current = true; // Block any sync attempts
+    
     try {
       const returned = claims.find(c => c.user_id === currentUser.id && c.status === 'changes_requested');
       const workflow = getApprovalWorkflow(currentUser.id, currentUser.office);
       const isSelfSubmit = workflow?.selfSubmit === true;
+      
+      // Collect IDs of expenses being submitted (for tombstone)
+      const submittedExpenseIds = pendingExpenses.map(e => e.id);
+      
       if (returned) {
         const updateData = { 
           total_amount: reimbursementTotal, 
@@ -1064,16 +1095,44 @@ export default function BerkeleyExpenseSystem() {
         const { error } = await supabase.from('claims').insert([insertData]);
         if (error) throw new Error(error.message);
       }
+      
+      // STEP 1: ATOMIC CLEAR - Update database FIRST before touching local state
+      // This prevents other devices from resurrecting the submitted expenses
+      const newDeletedIds = [...new Set([...deletedExpenseIds, ...submittedExpenseIds])];
+      await supabase.from('user_drafts').update({ 
+        expenses: JSON.stringify([]), 
+        statements: JSON.stringify([]), 
+        annotations: JSON.stringify([]),
+        originals: JSON.stringify([]),
+        deleted_ids: JSON.stringify(newDeletedIds),
+        updated_at: new Date().toISOString() 
+      }).eq('user_id', currentUser.id);
+      
+      // STEP 2: Clear local storage
+      localStorage.removeItem(`draft_expenses_${currentUser.id}`);
+      localStorage.removeItem(`draft_statements_${currentUser.id}`);
+      
+      // STEP 3: NOW clear local state (after database is already clean)
       setExpenses([]); 
       setAnnotatedStatements([]); 
       setStatementAnnotations([]); 
       setStatementImages([]);
-      clearDraftStorage();
+      setOriginalStatementImages([]);
+      setDeletedExpenseIds(newDeletedIds);
+      
       await loadClaims(); 
+      setSavingStatus('saved');
+      
       if (isSelfSubmit) alert(`✅ Saved! Please download the PDF and send to ${workflow?.externalApproval || 'Chairman'} for approval.`);
       else alert('✅ Submitted!');
-    } catch (err) { console.error('Submit error:', err); alert(`❌ Failed to submit: ${err.message}`); }
-    setLoading(false);
+    } catch (err) { 
+      console.error('Submit error:', err); 
+      alert(`❌ Failed to submit: ${err.message}`);
+      setSavingStatus('error');
+    } finally {
+      isSavingRef.current = false;
+      setLoading(false);
+    }
   };
 
   const handleApprove = async (claim) => {
