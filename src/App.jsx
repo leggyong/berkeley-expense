@@ -695,6 +695,13 @@ export default function BerkeleyExpenseSystem() {
   const [passwordInput, setPasswordInput] = useState('');
   const [loginError, setLoginError] = useState('');
 
+  // --- REFS for sync control ---
+  const modalOpenRef = useRef(false);
+  const isSavingRef = useRef(false); // Prevent loads while saving
+  const pendingSaveRef = useRef(null); // Track pending save timeout
+  const hasLocalChangesRef = useRef(false); // Track if we have unsaved local changes
+  const initialLoadDoneRef = useRef(false); // Track if initial load is complete
+
   // --- SYNC LOGIC ---
   const loadDrafts = async () => {
     if (!currentUser) return;
@@ -725,20 +732,25 @@ export default function BerkeleyExpenseSystem() {
         if (savedStatements) setAnnotatedStatements(JSON.parse(savedStatements));
       }
     } catch (err) { console.error('Error loading drafts:', err); }
+    finally {
+      initialLoadDoneRef.current = true; // Mark initial load complete
+    }
   };
 
-  useEffect(() => { loadDrafts(); }, [currentUser]);
-
-  const modalOpenRef = useRef(false);
-  const isSavingRef = useRef(false); // Prevent loads while saving
-  const pendingSaveRef = useRef(null); // Track pending save timeout
-  const hasLocalChangesRef = useRef(false); // Track if we have unsaved local changes
+  useEffect(() => { 
+    initialLoadDoneRef.current = false; // Reset on user change
+    hasLocalChangesRef.current = false;
+    loadDrafts(); 
+  }, [currentUser]);
   
   useEffect(() => { modalOpenRef.current = showAddExpense || editingExpense || showPreview; }, [showAddExpense, editingExpense, showPreview]);
 
   // Track when local state changes (mark as having unsaved changes)
+  // Skip on initial load to allow loadDrafts to work
   useEffect(() => {
-    hasLocalChangesRef.current = true;
+    if (initialLoadDoneRef.current) {
+      hasLocalChangesRef.current = true;
+    }
   }, [expenses, annotatedStatements, statementAnnotations]);
 
   useEffect(() => {
