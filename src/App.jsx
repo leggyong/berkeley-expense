@@ -2,11 +2,11 @@
 
 /*
  * BERKELEY INTERNATIONAL EXPENSE MANAGEMENT SYSTEM
- * Version: 5.1 - Atomic Clear + Enhanced Sync Protection
- * - Atomic Clear: Database cleared FIRST on submission (prevents resurrection)
- * - Tombstone tracking: Submitted expense IDs added to deleted_ids
- * - Local changes protection: Won't reload from server if unsaved changes exist
- * - Save indicator: ● pending, 💾 saving, ✓ saved
+ * Version: 5.2 - Sync Lock + Modal Protection
+ * - SYNC LOCK: Background sync completely pauses when any modal is open
+ * - Prevents: Uploads disappearing during file selection
+ * - Prevents: Data overwrite while user is editing
+ * - Visual indicator: 🔒 shows when sync is paused
  */
 
 const SUPABASE_URL = 'https://wlhoyjsicvkncfjbexoi.supabase.co';
@@ -684,6 +684,9 @@ export default function BerkeleyExpenseSystem() {
   const [activeTab, setActiveTab] = useState('my_expenses');
   const [editingExpense, setEditingExpense] = useState(null);
   const [editingClaim, setEditingClaim] = useState(null);
+  
+  // SYNC LOCK: True when any modal is open - completely pauses background sync
+  const syncLocked = showAddExpense || showPreview || showStatementUpload || showStatementAnnotator || editingExpense;
   const [backchargeFromDate, setBackchargeFromDate] = useState('');
   const [backchargeToDate, setBackchargeToDate] = useState('');
   const [showBackchargeReport, setShowBackchargeReport] = useState(false);
@@ -743,7 +746,7 @@ export default function BerkeleyExpenseSystem() {
     loadDrafts(); 
   }, [currentUser]);
   
-  useEffect(() => { modalOpenRef.current = showAddExpense || editingExpense || showPreview; }, [showAddExpense, editingExpense, showPreview]);
+  useEffect(() => { modalOpenRef.current = showAddExpense || editingExpense || showPreview || showStatementUpload || showStatementAnnotator; }, [showAddExpense, editingExpense, showPreview, showStatementUpload, showStatementAnnotator]);
 
   // Track when local state changes (mark as having unsaved changes)
   // Skip on initial load to allow loadDrafts to work
@@ -770,6 +773,11 @@ export default function BerkeleyExpenseSystem() {
   }, [currentUser]);
 
   useEffect(() => {
+    // SYNC LOCK: Don't save/merge while modal is open
+    if (syncLocked) {
+      return;
+    }
+    
     // Clear any existing timeout
     if (pendingSaveRef.current) {
       clearTimeout(pendingSaveRef.current);
@@ -781,6 +789,12 @@ export default function BerkeleyExpenseSystem() {
     }
     
     const saveDrafts = async () => {
+      // Double-check syncLocked before actually saving
+      if (syncLocked) {
+        pendingSaveRef.current = null;
+        return;
+      }
+      
       isSavingRef.current = true;
       setSavingStatus('saving');
       try {
@@ -874,7 +888,7 @@ export default function BerkeleyExpenseSystem() {
         pendingSaveRef.current = null;
       }
     };
-  }, [expenses, annotatedStatements, statementAnnotations, originalStatementImages, deletedExpenseIds, currentUser]);
+  }, [expenses, annotatedStatements, statementAnnotations, originalStatementImages, deletedExpenseIds, currentUser, syncLocked]);
 
   const handleManualSync = async () => { 
     setLoading(true); 
@@ -1685,9 +1699,10 @@ export default function BerkeleyExpenseSystem() {
           <div>
             <div className="font-semibold text-sm flex items-center gap-2">
               Berkeley Expenses
-              {savingStatus === 'pending' && <span className="text-yellow-400 text-xs animate-pulse">●</span>}
-              {savingStatus === 'saving' && <span className="text-yellow-400 text-xs animate-pulse">💾</span>}
-              {savingStatus === 'saved' && <span className="text-green-400 text-xs">✓</span>}
+              {syncLocked && <span className="text-blue-400 text-xs" title="Sync paused while editing">🔒</span>}
+              {!syncLocked && savingStatus === 'pending' && <span className="text-yellow-400 text-xs animate-pulse">●</span>}
+              {!syncLocked && savingStatus === 'saving' && <span className="text-yellow-400 text-xs animate-pulse">💾</span>}
+              {!syncLocked && savingStatus === 'saved' && <span className="text-green-400 text-xs">✓</span>}
               {savingStatus === 'error' && <span className="text-red-400 text-xs">⚠️</span>}
             </div>
             <div className="text-xs text-slate-400">{userOffice?.name} • {getUserReimburseCurrency(currentUser)}</div>
