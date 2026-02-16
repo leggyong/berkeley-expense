@@ -2,11 +2,15 @@
 
 /*
  * BERKELEY INTERNATIONAL EXPENSE MANAGEMENT SYSTEM
- * Version: 5.2 - Sync Lock + Modal Protection
- * - SYNC LOCK: Background sync completely pauses when any modal is open
- * - Prevents: Uploads disappearing during file selection
- * - Prevents: Data overwrite while user is editing
- * - Visual indicator: 🔒 shows when sync is paused
+ * Version: 6.0 - Complete Sync Rewrite (Simple & Reliable)
+ * 
+ * SYNC PHILOSOPHY (like Notion, Todoist, Google Keep):
+ * 1. Load from server ONLY on app start
+ * 2. Save local → server (simple push, no merge)
+ * 3. NO auto-reload from server (no focus listener)
+ * 4. Manual sync button for explicit server pull
+ * 
+ * This eliminates: race conditions, data loss, ghosting issues
  */
 
 const SUPABASE_URL = 'https://wlhoyjsicvkncfjbexoi.supabase.co';
@@ -699,204 +703,144 @@ export default function BerkeleyExpenseSystem() {
   const [loginError, setLoginError] = useState('');
 
   // --- REFS for sync control ---
-  const modalOpenRef = useRef(false);
-  const isSavingRef = useRef(false); // Prevent loads while saving
-  const pendingSaveRef = useRef(null); // Track pending save timeout
-  const hasLocalChangesRef = useRef(false); // Track if we have unsaved local changes
-  const initialLoadDoneRef = useRef(false); // Track if initial load is complete
+  const isSavingRef = useRef(false);
+  const saveTimeoutRef = useRef(null);
 
-  // --- SYNC LOGIC ---
-  const loadDrafts = async () => {
+  // --- SIMPLE SYNC LOGIC ---
+  // Principle: Local state is king. Save to server, but never auto-pull from server.
+  
+  // 1. LOAD FROM SERVER - Only on initial app load
+  const loadFromServer = async () => {
     if (!currentUser) return;
     try {
       const { data, error } = await supabase.from('user_drafts').select('*').eq('user_id', currentUser.id);
       if (!error && data && data.length > 0) {
         const draft = data[0];
-        const serverDeletedIds = draft.deleted_ids ? JSON.parse(draft.deleted_ids) : [];
-        
-        // Load deleted IDs first
-        if (serverDeletedIds.length > 0) {
-          setDeletedExpenseIds(prev => [...new Set([...prev, ...serverDeletedIds])]);
-        }
-        
         if (draft.expenses) { 
           const parsed = JSON.parse(draft.expenses);
-          // Filter out any expenses that were deleted
-          const filtered = parsed.filter(e => !serverDeletedIds.includes(e.id));
-          if (filtered && filtered.length > 0) setExpenses(filtered); 
+          if (parsed && parsed.length > 0) setExpenses(parsed); 
         }
-        if (draft.statements) { const parsed = JSON.parse(draft.statements); if (parsed && parsed.length > 0) setAnnotatedStatements(parsed); }
-        if (draft.annotations) { const parsed = JSON.parse(draft.annotations); if (parsed && parsed.length > 0) setStatementAnnotations(parsed); }
-        if (draft.originals) { const parsed = JSON.parse(draft.originals); if (parsed && parsed.length > 0) setOriginalStatementImages(parsed); }
-      } else {
-        const savedExpenses = localStorage.getItem(`draft_expenses_${currentUser.id}`);
-        if (savedExpenses) setExpenses(JSON.parse(savedExpenses));
-        const savedStatements = localStorage.getItem(`draft_statements_${currentUser.id}`);
-        if (savedStatements) setAnnotatedStatements(JSON.parse(savedStatements));
+        if (draft.statements) { 
+          const parsed = JSON.parse(draft.statements); 
+          if (parsed && parsed.length > 0) setAnnotatedStatements(parsed); 
+        }
+        if (draft.annotations) { 
+          const parsed = JSON.parse(draft.annotations); 
+          if (parsed && parsed.length > 0) setStatementAnnotations(parsed); 
+        }
+        if (draft.originals) { 
+          const parsed = JSON.parse(draft.originals); 
+          if (parsed && parsed.length > 0) setOriginalStatementImages(parsed); 
+        }
+        if (draft.deleted_ids) {
+          const parsed = JSON.parse(draft.deleted_ids);
+          if (parsed && parsed.length > 0) setDeletedExpenseIds(parsed);
+        }
       }
-    } catch (err) { console.error('Error loading drafts:', err); }
-    finally {
-      initialLoadDoneRef.current = true; // Mark initial load complete
+    } catch (err) { 
+      console.error('Error loading from server:', err); 
     }
   };
 
+  // Load from server ONCE when user logs in
   useEffect(() => { 
-    initialLoadDoneRef.current = false; // Reset on user change
-    hasLocalChangesRef.current = false;
-    loadDrafts(); 
-  }, [currentUser]);
-  
-  useEffect(() => { modalOpenRef.current = showAddExpense || editingExpense || showPreview || showStatementUpload || showStatementAnnotator; }, [showAddExpense, editingExpense, showPreview, showStatementUpload, showStatementAnnotator]);
-
-  // Track when local state changes (mark as having unsaved changes)
-  // Skip on initial load to allow loadDrafts to work
-  useEffect(() => {
-    if (initialLoadDoneRef.current) {
-      hasLocalChangesRef.current = true;
+    if (currentUser) {
+      loadFromServer(); 
     }
-  }, [expenses, annotatedStatements, statementAnnotations]);
-
-  useEffect(() => {
-    const handleFocus = () => { 
-      // Don't reload if:
-      // - A modal is open
-      // - We're in the middle of saving
-      // - A save is pending (waiting for debounce)
-      // - We have local unsaved changes (would overwrite them!)
-      if (currentUser && !modalOpenRef.current && !isSavingRef.current && !pendingSaveRef.current && !hasLocalChangesRef.current) { 
-        loadDrafts(); 
-        loadClaims(); 
-      } 
-    };
-    window.addEventListener('focus', handleFocus);
-    return () => window.removeEventListener('focus', handleFocus);
   }, [currentUser]);
 
-  useEffect(() => {
-    // SYNC LOCK: Don't save/merge while modal is open
-    if (syncLocked) {
-      return;
-    }
+  // 2. SAVE TO SERVER - Simple push, no merge
+  const saveToServer = async () => {
+    if (!currentUser || isSavingRef.current) return;
     
-    // Clear any existing timeout
-    if (pendingSaveRef.current) {
-      clearTimeout(pendingSaveRef.current);
-    }
+    isSavingRef.current = true;
+    setSavingStatus('saving');
     
-    // Show "pending" indicator when there are unsaved changes
-    if (expenses.length > 0 || annotatedStatements.length > 0) {
-      setSavingStatus('pending');
-    }
-    
-    const saveDrafts = async () => {
-      // Double-check syncLocked before actually saving
-      if (syncLocked) {
-        pendingSaveRef.current = null;
-        return;
+    try {
+      // Save local storage first (for offline resilience)
+      if (expenses.length > 0) {
+        localStorage.setItem(`draft_expenses_${currentUser.id}`, JSON.stringify(expenses));
+      } else {
+        localStorage.removeItem(`draft_expenses_${currentUser.id}`);
       }
       
-      isSavingRef.current = true;
-      setSavingStatus('saving');
-      try {
-        if (currentUser) {
-          // MERGE STRATEGY: Fetch server state first, then merge with local
-          const { data: serverData } = await supabase.from('user_drafts').select('*').eq('user_id', currentUser.id);
-          
-          let mergedExpenses = [...expenses];
-          let mergedDeletedIds = [...deletedExpenseIds];
-          
-          if (serverData && serverData.length > 0) {
-            const serverExpenses = serverData[0].expenses ? JSON.parse(serverData[0].expenses) : [];
-            const serverDeletedIds = serverData[0].deleted_ids ? JSON.parse(serverData[0].deleted_ids) : [];
-            
-            // Combine deleted IDs from both sources
-            mergedDeletedIds = [...new Set([...deletedExpenseIds, ...serverDeletedIds])];
-            
-            // Create a map of local expenses by ID
-            const localById = new Map(expenses.map(e => [e.id, e]));
-            
-            // Merge: Add server expenses that don't exist locally AND weren't deleted
-            serverExpenses.forEach(serverExp => {
-              // Skip if this expense was deleted locally or on server
-              if (mergedDeletedIds.includes(serverExp.id)) return;
-              
-              if (!localById.has(serverExp.id)) {
-                // This expense exists on server but not locally - it was added on another device
-                mergedExpenses.push(serverExp);
-              } else {
-                // Expense exists both places - keep the one with newer updatedAt
-                const localExp = localById.get(serverExp.id);
-                const serverTime = new Date(serverExp.updatedAt || serverExp.createdAt || 0).getTime();
-                const localTime = new Date(localExp.updatedAt || localExp.createdAt || 0).getTime();
-                
-                if (serverTime > localTime) {
-                  // Server version is newer - replace local with server
-                  mergedExpenses = mergedExpenses.map(e => e.id === serverExp.id ? serverExp : e);
-                }
-              }
-            });
-            
-            // Remove any expenses that were deleted on server
-            mergedExpenses = mergedExpenses.filter(e => !mergedDeletedIds.includes(e.id));
-          }
-          
-          // Update local state if merge changed expenses
-          if (JSON.stringify(mergedExpenses.map(e => e.id).sort()) !== JSON.stringify(expenses.map(e => e.id).sort())) {
-            setExpenses(sortAndReassignRefs(mergedExpenses));
-          }
-          if (mergedDeletedIds.length !== deletedExpenseIds.length) {
-            setDeletedExpenseIds(mergedDeletedIds);
-          }
-          
-          // Save merged data
-          if (mergedExpenses && mergedExpenses.length > 0) localStorage.setItem(`draft_expenses_${currentUser.id}`, JSON.stringify(mergedExpenses));
-          else localStorage.removeItem(`draft_expenses_${currentUser.id}`);
-          
-          const draftData = { 
-            user_id: currentUser.id, 
-            expenses: JSON.stringify(mergedExpenses || []), 
-            statements: JSON.stringify(annotatedStatements || []), 
-            annotations: JSON.stringify(statementAnnotations || []),
-            originals: JSON.stringify(originalStatementImages || []),
-            deleted_ids: JSON.stringify(mergedDeletedIds || []),
-            updated_at: new Date().toISOString() 
-          };
-          
-          if (serverData && serverData.length > 0) await supabase.from('user_drafts').update(draftData).eq('user_id', currentUser.id);
-          else await supabase.from('user_drafts').insert([draftData]);
-          
-          hasLocalChangesRef.current = false; // Mark as synced - safe to load from server now
-          setSavingStatus('saved');
-          // Clear "saved" indicator after 2 seconds
-          setTimeout(() => setSavingStatus(null), 2000);
-        }
-      } catch (err) { 
-        console.error('Failed to save drafts:', err);
-        setSavingStatus('error');
-        setTimeout(() => setSavingStatus(null), 3000);
+      const draftData = { 
+        user_id: currentUser.id, 
+        expenses: JSON.stringify(expenses), 
+        statements: JSON.stringify(annotatedStatements), 
+        annotations: JSON.stringify(statementAnnotations),
+        originals: JSON.stringify(originalStatementImages),
+        deleted_ids: JSON.stringify(deletedExpenseIds),
+        updated_at: new Date().toISOString() 
+      };
+      
+      // Check if record exists
+      const { data: existing } = await supabase.from('user_drafts').select('id').eq('user_id', currentUser.id);
+      
+      if (existing && existing.length > 0) {
+        await supabase.from('user_drafts').update(draftData).eq('user_id', currentUser.id);
+      } else {
+        await supabase.from('user_drafts').insert([draftData]);
       }
-      finally {
-        isSavingRef.current = false;
-        pendingSaveRef.current = null;
-      }
-    };
+      
+      setSavingStatus('saved');
+      setTimeout(() => setSavingStatus(null), 2000);
+    } catch (err) { 
+      console.error('Failed to save:', err);
+      setSavingStatus('error');
+      setTimeout(() => setSavingStatus(null), 3000);
+    } finally {
+      isSavingRef.current = false;
+    }
+  };
+
+  // 3. AUTO-SAVE with debounce - triggers when state changes
+  useEffect(() => {
+    // Don't save if no user or if modal is open (let user finish their work first)
+    if (!currentUser || syncLocked) return;
     
-    pendingSaveRef.current = setTimeout(saveDrafts, 1500); // Increased to 1.5s for merge safety
+    // Clear existing timeout
+    if (saveTimeoutRef.current) {
+      clearTimeout(saveTimeoutRef.current);
+    }
+    
+    // Show pending indicator
+    setSavingStatus('pending');
+    
+    // Debounced save (2 seconds after last change)
+    saveTimeoutRef.current = setTimeout(() => {
+      saveToServer();
+      saveTimeoutRef.current = null;
+    }, 2000);
+    
     return () => {
-      if (pendingSaveRef.current) {
-        clearTimeout(pendingSaveRef.current);
-        pendingSaveRef.current = null;
+      if (saveTimeoutRef.current) {
+        clearTimeout(saveTimeoutRef.current);
       }
     };
   }, [expenses, annotatedStatements, statementAnnotations, originalStatementImages, deletedExpenseIds, currentUser, syncLocked]);
 
+  // 4. MANUAL SYNC - Pull from server (user-initiated only)
   const handleManualSync = async () => { 
-    setLoading(true); 
-    hasLocalChangesRef.current = false; // Allow loading from server
-    await loadDrafts(); 
+    if (isSavingRef.current) {
+      alert('Please wait for save to complete');
+      return;
+    }
+    
+    const confirmSync = window.confirm('This will replace your local drafts with server data. Continue?');
+    if (!confirmSync) return;
+    
+    setLoading(true);
+    setExpenses([]);
+    setAnnotatedStatements([]);
+    setStatementAnnotations([]);
+    setOriginalStatementImages([]);
+    setDeletedExpenseIds([]);
+    
+    await loadFromServer();
     await loadClaims(); 
     setLoading(false); 
-    alert('✅ Synced from server!'); 
+    alert('✅ Loaded from server!'); 
   };
 
   const clearDraftStorage = async () => {
@@ -1054,20 +998,17 @@ export default function BerkeleyExpenseSystem() {
     setLoading(true);
     setSavingStatus('saving');
     
-    // STEP 0: Cancel any pending auto-save to prevent race condition
-    if (pendingSaveRef.current) {
-      clearTimeout(pendingSaveRef.current);
-      pendingSaveRef.current = null;
+    // Cancel any pending auto-save
+    if (saveTimeoutRef.current) {
+      clearTimeout(saveTimeoutRef.current);
+      saveTimeoutRef.current = null;
     }
-    isSavingRef.current = true; // Block any sync attempts
+    isSavingRef.current = true;
     
     try {
       const returned = claims.find(c => c.user_id === currentUser.id && c.status === 'changes_requested');
       const workflow = getApprovalWorkflow(currentUser.id, currentUser.office);
       const isSelfSubmit = workflow?.selfSubmit === true;
-      
-      // Collect IDs of expenses being submitted (for tombstone)
-      const submittedExpenseIds = pendingExpenses.map(e => e.id);
       
       if (returned) {
         const updateData = { 
@@ -1086,10 +1027,8 @@ export default function BerkeleyExpenseSystem() {
         const { error } = await supabase.from('claims').update(updateData).eq('id', returned.id);
         if (error) throw new Error(error.message);
       } else {
-        // --- NEW CLAIM NUMBER LOGIC: FirstName-YYYY-XX ---
         const year = new Date().getFullYear();
         const firstName = currentUser.name.trim().split(' ')[0];
-        // Count claims submitted by this user in this year (check created_at or submitted_at)
         const userClaimsThisYear = claims.filter(c => c.user_id === currentUser.id && new Date(c.created_at).getFullYear() === year);
         const count = userClaimsThisYear.length + 1;
         const claimNumber = `${firstName}-${year}-${String(count).padStart(2, '0')}`;
@@ -1122,29 +1061,27 @@ export default function BerkeleyExpenseSystem() {
         if (error) throw new Error(error.message);
       }
       
-      // STEP 1: ATOMIC CLEAR - Update database FIRST before touching local state
-      // This prevents other devices from resurrecting the submitted expenses
-      const newDeletedIds = [...new Set([...deletedExpenseIds, ...submittedExpenseIds])];
+      // Clear drafts on server
       await supabase.from('user_drafts').update({ 
         expenses: JSON.stringify([]), 
         statements: JSON.stringify([]), 
         annotations: JSON.stringify([]),
         originals: JSON.stringify([]),
-        deleted_ids: JSON.stringify(newDeletedIds),
+        deleted_ids: JSON.stringify([]),
         updated_at: new Date().toISOString() 
       }).eq('user_id', currentUser.id);
       
-      // STEP 2: Clear local storage
+      // Clear local storage
       localStorage.removeItem(`draft_expenses_${currentUser.id}`);
       localStorage.removeItem(`draft_statements_${currentUser.id}`);
       
-      // STEP 3: NOW clear local state (after database is already clean)
+      // Clear local state
       setExpenses([]); 
       setAnnotatedStatements([]); 
       setStatementAnnotations([]); 
       setStatementImages([]);
       setOriginalStatementImages([]);
-      setDeletedExpenseIds(newDeletedIds);
+      setDeletedExpenseIds([]);
       
       await loadClaims(); 
       setSavingStatus('saved');
