@@ -2,15 +2,13 @@
 
 /*
  * BERKELEY INTERNATIONAL EXPENSE MANAGEMENT SYSTEM
- * Version: 6.0 - Complete Sync Rewrite (Simple & Reliable)
+ * Version: 7.0 - Ultra Simple (Server Only, No localStorage)
  * 
- * SYNC PHILOSOPHY (like Notion, Todoist, Google Keep):
- * 1. Load from server ONLY on app start
- * 2. Save local → server (simple push, no merge)
- * 3. NO auto-reload from server (no focus listener)
- * 4. Manual sync button for explicit server pull
- * 
- * This eliminates: race conditions, data loss, ghosting issues
+ * HOW IT WORKS:
+ * 1. Load from server on login
+ * 2. Save to server immediately after each add/edit/delete
+ * 3. No localStorage, no complex sync, no race conditions
+ * 4. What you see is what's on the server
  */
 
 const SUPABASE_URL = 'https://wlhoyjsicvkncfjbexoi.supabase.co';
@@ -687,9 +685,6 @@ export default function BerkeleyExpenseSystem() {
   const [activeTab, setActiveTab] = useState('my_expenses');
   const [editingExpense, setEditingExpense] = useState(null);
   const [editingClaim, setEditingClaim] = useState(null);
-  
-  // SYNC LOCK: True when any modal is open - completely pauses background sync
-  const syncLocked = showAddExpense || showPreview || showStatementUpload || showStatementAnnotator || editingExpense;
   const [backchargeFromDate, setBackchargeFromDate] = useState('');
   const [backchargeToDate, setBackchargeToDate] = useState('');
   const [showBackchargeReport, setShowBackchargeReport] = useState(false);
@@ -701,58 +696,25 @@ export default function BerkeleyExpenseSystem() {
   const [passwordInput, setPasswordInput] = useState('');
   const [loginError, setLoginError] = useState('');
 
-  // --- REFS for sync control ---
-  const saveTimeoutRef = useRef(null);
-
-  // --- SIMPLE SYNC LOGIC ---
-  // PRIMARY: localStorage (always works, instant)
-  // SECONDARY: Server (for multi-device sync, best-effort)
+  // --- ULTRA-SIMPLE SYNC (Server Only, No localStorage) ---
+  // Version 7.0: Dead simple - just save to server, load from server
   
-  // Helper: Save to localStorage immediately
-  const saveToLocalStorage = () => {
-    if (!currentUser) return;
-    const data = {
-      expenses,
-      annotatedStatements,
-      statementAnnotations,
-      originalStatementImages,
-      savedAt: new Date().toISOString()
-    };
-    localStorage.setItem(`berkeley_drafts_${currentUser.id}`, JSON.stringify(data));
-  };
-
-  // Helper: Load from localStorage
-  const loadFromLocalStorage = () => {
+  const saveToServer = async (expensesToSave, statementsToSave, annotationsToSave, originalsToSave) => {
     if (!currentUser) return false;
-    try {
-      const saved = localStorage.getItem(`berkeley_drafts_${currentUser.id}`);
-      if (saved) {
-        const data = JSON.parse(saved);
-        if (data.expenses?.length > 0) setExpenses(data.expenses);
-        if (data.annotatedStatements?.length > 0) setAnnotatedStatements(data.annotatedStatements);
-        if (data.statementAnnotations?.length > 0) setStatementAnnotations(data.statementAnnotations);
-        if (data.originalStatementImages?.length > 0) setOriginalStatementImages(data.originalStatementImages);
-        return true;
-      }
-    } catch (err) {
-      console.error('Failed to load from localStorage:', err);
-    }
-    return false;
-  };
-
-  // Helper: Save to server (best-effort, non-blocking)
-  const saveToServerBackground = async () => {
-    if (!currentUser) return;
+    
+    setSavingStatus('saving');
+    
     try {
       const draftData = { 
         user_id: currentUser.id, 
-        expenses: JSON.stringify(expenses), 
-        statements: JSON.stringify(annotatedStatements), 
-        annotations: JSON.stringify(statementAnnotations),
-        originals: JSON.stringify(originalStatementImages),
+        expenses: JSON.stringify(expensesToSave || []), 
+        statements: JSON.stringify(statementsToSave || []), 
+        annotations: JSON.stringify(annotationsToSave || []),
+        originals: JSON.stringify(originalsToSave || []),
         updated_at: new Date().toISOString() 
       };
       
+      // Check if record exists
       const { data: existing } = await supabase.from('user_drafts').select('id').eq('user_id', currentUser.id);
       
       if (existing && existing.length > 0) {
@@ -760,113 +722,87 @@ export default function BerkeleyExpenseSystem() {
       } else {
         await supabase.from('user_drafts').insert([draftData]);
       }
-    } catch (err) {
-      console.error('Server save failed (data safe in localStorage):', err);
-    }
-  };
-
-  // Helper: Load from server
-  const loadFromServer = async () => {
-    if (!currentUser) return false;
-    try {
-      const { data, error } = await supabase.from('user_drafts').select('*').eq('user_id', currentUser.id);
-      if (!error && data && data.length > 0) {
-        const draft = data[0];
-        if (draft.expenses) { 
-          const parsed = JSON.parse(draft.expenses);
-          if (parsed?.length > 0) setExpenses(parsed); 
-        }
-        if (draft.statements) { 
-          const parsed = JSON.parse(draft.statements); 
-          if (parsed?.length > 0) setAnnotatedStatements(parsed); 
-        }
-        if (draft.annotations) { 
-          const parsed = JSON.parse(draft.annotations); 
-          if (parsed?.length > 0) setStatementAnnotations(parsed); 
-        }
-        if (draft.originals) { 
-          const parsed = JSON.parse(draft.originals); 
-          if (parsed?.length > 0) setOriginalStatementImages(parsed); 
-        }
-        return true;
-      }
-    } catch (err) { 
-      console.error('Server load failed:', err); 
-    }
-    return false;
-  };
-
-  // On login: Load from localStorage first (instant), then try server
-  useEffect(() => { 
-    if (currentUser) {
-      const hasLocal = loadFromLocalStorage();
-      // If no local data, try server
-      if (!hasLocal) {
-        loadFromServer();
-      }
-    }
-  }, [currentUser]);
-
-  // Auto-save: Save to localStorage immediately, server in background
-  useEffect(() => {
-    if (!currentUser || syncLocked) return;
-    
-    // IMMEDIATE: Save to localStorage
-    saveToLocalStorage();
-    setSavingStatus('pending');
-    
-    // Clear existing timeout
-    if (saveTimeoutRef.current) {
-      clearTimeout(saveTimeoutRef.current);
-    }
-    
-    // BACKGROUND: Save to server after 2 seconds
-    saveTimeoutRef.current = setTimeout(async () => {
-      setSavingStatus('saving');
-      await saveToServerBackground();
+      
       setSavingStatus('saved');
-      setTimeout(() => setSavingStatus(null), 2000);
-      saveTimeoutRef.current = null;
-    }, 2000);
-    
-    return () => {
-      if (saveTimeoutRef.current) {
-        clearTimeout(saveTimeoutRef.current);
-      }
-    };
-  }, [expenses, annotatedStatements, statementAnnotations, originalStatementImages, currentUser, syncLocked]);
+      setTimeout(() => setSavingStatus(null), 1500);
+      return true;
+    } catch (err) { 
+      console.error('Save failed:', err);
+      setSavingStatus('error');
+      setTimeout(() => setSavingStatus(null), 3000);
+      return false;
+    }
+  };
 
-  // Manual sync: Pull from server (replaces local)
-  const handleManualSync = async () => { 
-    const confirmSync = window.confirm('Pull latest from server? This will replace your current drafts.');
-    if (!confirmSync) return;
+  const loadFromServer = async () => {
+    if (!currentUser) return;
     
     setLoading(true);
     
-    // Clear local state
-    setExpenses([]);
-    setAnnotatedStatements([]);
-    setStatementAnnotations([]);
-    setOriginalStatementImages([]);
-    
-    // Load from server
-    const success = await loadFromServer();
-    await loadClaims();
-    
-    if (success) {
-      // Save to localStorage
-      saveToLocalStorage();
-      alert('✅ Loaded from server!');
-    } else {
-      alert('No data found on server.');
+    try {
+      const { data, error } = await supabase.from('user_drafts').select('*').eq('user_id', currentUser.id);
+      
+      if (!error && data && data.length > 0) {
+        const draft = data[0];
+        
+        if (draft.expenses) {
+          try {
+            const parsed = JSON.parse(draft.expenses);
+            if (Array.isArray(parsed)) setExpenses(parsed);
+          } catch (e) { console.error('Parse expenses error:', e); }
+        }
+        
+        if (draft.statements) {
+          try {
+            const parsed = JSON.parse(draft.statements);
+            if (Array.isArray(parsed)) setAnnotatedStatements(parsed);
+          } catch (e) { console.error('Parse statements error:', e); }
+        }
+        
+        if (draft.annotations) {
+          try {
+            const parsed = JSON.parse(draft.annotations);
+            if (Array.isArray(parsed)) setStatementAnnotations(parsed);
+          } catch (e) { console.error('Parse annotations error:', e); }
+        }
+        
+        if (draft.originals) {
+          try {
+            const parsed = JSON.parse(draft.originals);
+            if (Array.isArray(parsed)) setOriginalStatementImages(parsed);
+          } catch (e) { console.error('Parse originals error:', e); }
+        }
+      }
+    } catch (err) { 
+      console.error('Load failed:', err); 
     }
     
     setLoading(false);
   };
 
+  // Load from server when user logs in
+  useEffect(() => { 
+    if (currentUser) {
+      loadFromServer();
+    }
+  }, [currentUser]);
+
+  // Manual refresh button
+  const handleManualSync = async () => { 
+    await loadFromServer();
+    await loadClaims();
+    alert('✅ Refreshed from server!');
+  };
+
+  // Delete expense and save immediately
+  const handleDeleteExpense = async (expenseId) => {
+    const newExpenses = sortAndReassignRefs(expenses.filter(e => e.id !== expenseId));
+    setExpenses(newExpenses);
+    await saveToServer(newExpenses, annotatedStatements, statementAnnotations, originalStatementImages);
+  };
+
   const clearDraftStorage = async () => {
     if (currentUser) {
-      localStorage.removeItem(`berkeley_drafts_${currentUser.id}`);
       try { await supabase.from('user_drafts').delete().eq('user_id', currentUser.id); } catch (err) {}
     }
   };
@@ -1079,7 +1015,7 @@ export default function BerkeleyExpenseSystem() {
         if (error) throw new Error('Failed to create claim');
       }
       
-      // Clear drafts on server (best effort)
+      // Clear drafts on server
       try {
         await supabase.from('user_drafts').update({ 
           expenses: JSON.stringify([]), 
@@ -1089,9 +1025,6 @@ export default function BerkeleyExpenseSystem() {
           updated_at: new Date().toISOString() 
         }).eq('user_id', currentUser.id);
       } catch (e) { console.error('Failed to clear server drafts:', e); }
-      
-      // Clear localStorage
-      localStorage.removeItem(`berkeley_drafts_${currentUser.id}`);
       
       // Clear local state
       setExpenses([]); 
@@ -1373,19 +1306,25 @@ export default function BerkeleyExpenseSystem() {
         const forexSpotRate = isForeignCurrency ? spotRate : null;
         const forexVariance = isForeignCurrency && forexCheck.variancePercent ? parseFloat(forexCheck.variancePercent) : null;
         
+        let newExpenses;
         if (editExpense) { 
-          setExpenses(prev => {
-            const updated = prev.map(e => e.id === editExpense.id ? { ...e, ...formData, amount: parseFloat(formData.amount), reimbursementAmount: isForeignCurrency ? parseFloat(formData.reimbursementAmount) : parseFloat(formData.amount), receiptPreview: receiptPreview || e.receiptPreview, receiptPreview2: isCNY ? (receiptPreview2 || e.receiptPreview2) : null, isForeignCurrency, isPotentialDuplicate: !!duplicateWarning, forexRate, forexSpotRate, forexVariance, updatedAt: new Date().toISOString() } : e);
-            return sortAndReassignRefs(updated);
-          });
+          newExpenses = expenses.map(e => e.id === editExpense.id ? { ...e, ...formData, amount: parseFloat(formData.amount), reimbursementAmount: isForeignCurrency ? parseFloat(formData.reimbursementAmount) : parseFloat(formData.amount), receiptPreview: receiptPreview || e.receiptPreview, receiptPreview2: isCNY ? (receiptPreview2 || e.receiptPreview2) : null, isForeignCurrency, isPotentialDuplicate: !!duplicateWarning, forexRate, forexSpotRate, forexVariance, updatedAt: new Date().toISOString() } : e);
+          newExpenses = sortAndReassignRefs(newExpenses);
+          setExpenses(newExpenses);
         } else { 
-          setExpenses(prev => {
-            const newExpense = { id: Date.now(), ref: 'temp', ...formData, amount: parseFloat(formData.amount) || 0, reimbursementAmount: isForeignCurrency ? (parseFloat(formData.reimbursementAmount) || 0) : (parseFloat(formData.amount) || 0), receiptPreview: receiptPreview || null, receiptPreview2: isCNY ? (receiptPreview2 || null) : null, status: 'draft', isForeignCurrency: isForeignCurrency || false, isOld: isOlderThan2Months(formData.date), createdAt: new Date().toISOString(), isPotentialDuplicate: !!duplicateWarning, forexRate, forexSpotRate, forexVariance };
-            return sortAndReassignRefs([...prev, newExpense]);
-          });
+          const newExpense = { id: Date.now(), ref: 'temp', ...formData, amount: parseFloat(formData.amount) || 0, reimbursementAmount: isForeignCurrency ? (parseFloat(formData.reimbursementAmount) || 0) : (parseFloat(formData.amount) || 0), receiptPreview: receiptPreview || null, receiptPreview2: isCNY ? (receiptPreview2 || null) : null, status: 'draft', isForeignCurrency: isForeignCurrency || false, isOld: isOlderThan2Months(formData.date), createdAt: new Date().toISOString(), isPotentialDuplicate: !!duplicateWarning, forexRate, forexSpotRate, forexVariance };
+          newExpenses = sortAndReassignRefs([...expenses, newExpense]);
+          setExpenses(newExpenses);
         }
+        
+        // IMMEDIATELY save to server
+        await saveToServer(newExpenses, annotatedStatements, statementAnnotations, originalStatementImages);
+        
         onClose();
-      } catch (err) { alert('❌ Error saving expense. Please try again.'); }
+      } catch (err) { 
+        console.error('Save error:', err);
+        alert('❌ Error saving expense. Please try again.'); 
+      }
     };
     
     const canSave = formData.merchant && formData.amount && formData.date && formData.description && (!needsAttendees || (formData.attendees && formData.numberOfPax)) && (!isForeignCurrency || formData.reimbursementAmount) && backchargeValid && attendeePaxMatch;
@@ -1555,7 +1494,7 @@ export default function BerkeleyExpenseSystem() {
         <div className="bg-white rounded-2xl shadow-lg p-6">
           <h3 className="font-bold text-slate-800 mb-4">📋 Pending</h3>
           {pendingExpenses.length === 0 ? (<div className="text-center py-12 text-slate-400">📭 No pending</div>) : (
-            <div className="space-y-2">{Object.entries(groupedExpenses).sort().map(([cat, exps]) => (<div key={cat}><p className="text-xs font-semibold text-slate-500 mb-2">{EXPENSE_CATEGORIES[cat]?.icon} {cat}. {EXPENSE_CATEGORIES[cat]?.name}</p>{exps.map(exp => (<div key={exp.id} className="flex items-center justify-between p-3 rounded-xl bg-slate-50 border mb-2"><div className="flex-1"><div className="flex items-center gap-2 flex-wrap"><span className="bg-blue-100 text-blue-700 text-xs font-bold px-2 py-1 rounded">{exp.ref}</span><span className="font-semibold text-sm">{exp.merchant}</span>{exp.isForeignCurrency && <span className="text-amber-600 text-xs">💳</span>}{exp.receiptPreview2 && <span className="text-slate-500 text-xs">📑</span>}{exp.forexVariance !== null && exp.forexVariance !== undefined && Math.abs(exp.forexVariance) > 3 && <span className="bg-red-100 text-red-600 text-xs px-1 rounded">⚠️ FX</span>}</div><p className="text-xs text-slate-500 mt-1">{exp.description}</p>{exp.isForeignCurrency && exp.forexRate && <p className="text-xs text-amber-600 mt-0.5">💱 {exp.currency} → {userReimburseCurrency} @ {exp.forexRate.toFixed(4)}{exp.forexVariance !== null && ` (${exp.forexVariance > 0 ? '+' : ''}${exp.forexVariance}%)`}</p>}</div><div className="flex items-center gap-2"><span className="font-bold text-green-700">{formatCurrency(exp.reimbursementAmount || exp.amount, userReimburseCurrency)}</span><button onClick={() => setEditingExpense(exp)} className="text-blue-500 p-2">✏️</button><button onClick={() => setExpenses(prev => sortAndReassignRefs(prev.filter(e => e.id !== exp.id)))} className="text-red-500 p-2">🗑️</button></div></div>))}</div>))}</div>
+            <div className="space-y-2">{Object.entries(groupedExpenses).sort().map(([cat, exps]) => (<div key={cat}><p className="text-xs font-semibold text-slate-500 mb-2">{EXPENSE_CATEGORIES[cat]?.icon} {cat}. {EXPENSE_CATEGORIES[cat]?.name}</p>{exps.map(exp => (<div key={exp.id} className="flex items-center justify-between p-3 rounded-xl bg-slate-50 border mb-2"><div className="flex-1"><div className="flex items-center gap-2 flex-wrap"><span className="bg-blue-100 text-blue-700 text-xs font-bold px-2 py-1 rounded">{exp.ref}</span><span className="font-semibold text-sm">{exp.merchant}</span>{exp.isForeignCurrency && <span className="text-amber-600 text-xs">💳</span>}{exp.receiptPreview2 && <span className="text-slate-500 text-xs">📑</span>}{exp.forexVariance !== null && exp.forexVariance !== undefined && Math.abs(exp.forexVariance) > 3 && <span className="bg-red-100 text-red-600 text-xs px-1 rounded">⚠️ FX</span>}</div><p className="text-xs text-slate-500 mt-1">{exp.description}</p>{exp.isForeignCurrency && exp.forexRate && <p className="text-xs text-amber-600 mt-0.5">💱 {exp.currency} → {userReimburseCurrency} @ {exp.forexRate.toFixed(4)}{exp.forexVariance !== null && ` (${exp.forexVariance > 0 ? '+' : ''}${exp.forexVariance}%)`}</p>}</div><div className="flex items-center gap-2"><span className="font-bold text-green-700">{formatCurrency(exp.reimbursementAmount || exp.amount, userReimburseCurrency)}</span><button onClick={() => setEditingExpense(exp)} className="text-blue-500 p-2">✏️</button><button onClick={() => handleDeleteExpense(exp.id)} className="text-red-500 p-2">🗑️</button></div></div>))}</div>))}</div>
           )}
         </div>
         <div className="bg-white rounded-2xl shadow-lg p-6">
@@ -1632,15 +1571,18 @@ export default function BerkeleyExpenseSystem() {
 
   const canReview = currentUser.role === 'admin' || currentUser.role === 'manager' || currentUser.role === 'finance' || getReviewableClaims().length > 0 || getClaimsForSubmission().length > 0;
   
-  const handleStatementAnnotationSave = (annotatedImagesObj, newAnnotations) => { 
+  const handleStatementAnnotationSave = async (annotatedImagesObj, newAnnotations) => { 
     // annotatedImagesObj is an object with keys being statement indices
     // Convert to array, filling in original images for any not annotated
     const newAnnotated = statementImages.map((origImg, idx) => 
       annotatedImagesObj[idx] || annotatedStatements[idx] || origImg
     );
     setAnnotatedStatements(newAnnotated);
-    // Replace all annotations with the new ones
     setStatementAnnotations(newAnnotations);
+    
+    // Save to server immediately
+    await saveToServer(expenses, newAnnotated, newAnnotations, originalStatementImages);
+    
     setShowStatementAnnotator(false); 
     setShowPreview(true);
   };
@@ -1652,11 +1594,9 @@ export default function BerkeleyExpenseSystem() {
           <div>
             <div className="font-semibold text-sm flex items-center gap-2">
               Berkeley Expenses
-              {syncLocked && <span className="text-blue-400 text-xs" title="Sync paused while editing">🔒</span>}
-              {!syncLocked && savingStatus === 'pending' && <span className="text-yellow-400 text-xs animate-pulse">●</span>}
-              {!syncLocked && savingStatus === 'saving' && <span className="text-yellow-400 text-xs animate-pulse">💾</span>}
-              {!syncLocked && savingStatus === 'saved' && <span className="text-green-400 text-xs">✓</span>}
-              {savingStatus === 'error' && <span className="text-red-400 text-xs">⚠️</span>}
+              {savingStatus === 'saving' && <span className="text-yellow-400 text-xs animate-pulse">💾 Saving...</span>}
+              {savingStatus === 'saved' && <span className="text-green-400 text-xs">✓ Saved</span>}
+              {savingStatus === 'error' && <span className="text-red-400 text-xs">⚠️ Error</span>}
             </div>
             <div className="text-xs text-slate-400">{userOffice?.name} • {getUserReimburseCurrency(currentUser)}</div>
           </div>
