@@ -308,6 +308,7 @@ const StatementAnnotator = ({ images, initialIndex = 0, expenses, existingAnnota
   const [imgDimensions, setImgDimensions] = useState({ width: 0, height: 0 });
   const [baseImage, setBaseImage] = useState(null);
   const [annotatedImages, setAnnotatedImages] = useState({}); // Store annotated versions per index
+  const [saving, setSaving] = useState(false); // Loading state for save button
   
   // Store annotations PER statement index
   const [annotationsByStatement, setAnnotationsByStatement] = useState(() => {
@@ -465,17 +466,19 @@ const StatementAnnotator = ({ images, initialIndex = 0, expenses, existingAnnota
   };
   
   // Final save - combine all annotations from all statements
-  const handleSave = () => {
-    // First save current statement
-    saveCurrentToState();
+  const handleSave = async () => {
+    if (saving) return;
+    setSaving(true);
     
-    // Wait a tick for state to update, then collect all
-    setTimeout(() => {
+    try {
+      // First save current statement
+      saveCurrentToState();
+      
       // Collect all annotations from all statements
       const allAnnotations = [];
       const finalAnnotatedImages = { ...annotatedImages };
       
-      // Add current statement's data
+      // Add current statement's annotated image
       if (canvasRef.current) {
         finalAnnotatedImages[currentIndex] = canvasRef.current.toDataURL('image/png');
       }
@@ -498,8 +501,12 @@ const StatementAnnotator = ({ images, initialIndex = 0, expenses, existingAnnota
       });
       allAnnotations.push(...currentAsPercent);
       
-      onSave(finalAnnotatedImages, allAnnotations);
-    }, 50);
+      await onSave(finalAnnotatedImages, allAnnotations);
+    } catch (err) {
+      console.error('Save annotation error:', err);
+      alert('Failed to save annotations');
+      setSaving(false);
+    }
   };
 
   // Get ALL tagged refs across ALL statements for the expense list display
@@ -603,8 +610,8 @@ const StatementAnnotator = ({ images, initialIndex = 0, expenses, existingAnnota
         )}
       </div>
       <div className="bg-slate-100 p-3 flex gap-3 justify-end shrink-0">
-        <button onClick={onCancel} className="px-4 py-2 rounded-xl border-2 border-slate-300 font-semibold text-sm">Cancel</button>
-        <button onClick={handleSave} className="px-4 py-2 rounded-xl bg-green-600 text-white font-semibold text-sm">Save ✓</button>
+        <button onClick={onCancel} disabled={saving} className="px-4 py-2 rounded-xl border-2 border-slate-300 font-semibold text-sm disabled:opacity-50">Cancel</button>
+        <button onClick={handleSave} disabled={saving} className="px-4 py-2 rounded-xl bg-green-600 text-white font-semibold text-sm disabled:opacity-50">{saving ? '💾 Saving...' : 'Save ✓'}</button>
       </div>
     </div>
   );
@@ -953,12 +960,6 @@ export default function BerkeleyExpenseSystem() {
     setLoading(true);
     setSavingStatus('saving');
     
-    // Cancel any pending auto-save
-    if (saveTimeoutRef.current) {
-      clearTimeout(saveTimeoutRef.current);
-      saveTimeoutRef.current = null;
-    }
-    
     try {
       const returned = claims.find(c => c.user_id === currentUser.id && c.status === 'changes_requested');
       const workflow = getApprovalWorkflow(currentUser.id, currentUser.office);
@@ -978,8 +979,8 @@ export default function BerkeleyExpenseSystem() {
           updateData.level2_approved_at = new Date().toISOString();
         }
         if (annotatedStatements.length > 0) updateData.annotated_statements = annotatedStatements;
-        const { error } = await supabase.from('claims').update(updateData).eq('id', returned.id);
-        if (error) throw new Error('Failed to update claim');
+        const result = await supabase.from('claims').update(updateData).eq('id', returned.id);
+        if (result.error) throw new Error('Failed to update claim');
       } else {
         const year = new Date().getFullYear();
         const firstName = currentUser.name.trim().split(' ')[0];
@@ -1011,20 +1012,18 @@ export default function BerkeleyExpenseSystem() {
           insertData.level2_approved_at = new Date().toISOString();
         }
         if (annotatedStatements.length > 0) insertData.annotated_statements = annotatedStatements;
-        const { error } = await supabase.from('claims').insert([insertData]);
-        if (error) throw new Error('Failed to create claim');
+        const result = await supabase.from('claims').insert([insertData]);
+        if (result.error) throw new Error('Failed to create claim');
       }
       
       // Clear drafts on server
-      try {
-        await supabase.from('user_drafts').update({ 
-          expenses: JSON.stringify([]), 
-          statements: JSON.stringify([]), 
-          annotations: JSON.stringify([]),
-          originals: JSON.stringify([]),
-          updated_at: new Date().toISOString() 
-        }).eq('user_id', currentUser.id);
-      } catch (e) { console.error('Failed to clear server drafts:', e); }
+      await supabase.from('user_drafts').update({ 
+        expenses: JSON.stringify([]), 
+        statements: JSON.stringify([]), 
+        annotations: JSON.stringify([]),
+        originals: JSON.stringify([]),
+        updated_at: new Date().toISOString() 
+      }).eq('user_id', currentUser.id);
       
       // Clear local state
       setExpenses([]); 
@@ -1032,6 +1031,7 @@ export default function BerkeleyExpenseSystem() {
       setStatementAnnotations([]); 
       setStatementImages([]);
       setOriginalStatementImages([]);
+      setShowPreview(false); // Close preview modal
       
       await loadClaims(); 
       setSavingStatus('saved');
@@ -1040,7 +1040,7 @@ export default function BerkeleyExpenseSystem() {
       else alert('✅ Submitted!');
     } catch (err) { 
       console.error('Submit error:', err); 
-      alert(`❌ Failed to submit: ${err.message}`);
+      alert(`❌ Failed to submit: ${err.message || 'Unknown error'}`);
       setSavingStatus('error');
     } finally {
       setLoading(false);
@@ -1441,7 +1441,7 @@ export default function BerkeleyExpenseSystem() {
               }} className="text-purple-600 text-sm font-semibold" disabled={originalStatementImages.length === 0}>✏️ Edit Tags</button><button onClick={() => { setShowPreview(false); setShowStatementUpload(true); }} className="text-blue-600 text-sm">➕ Add Statement</button></div></div><div className="flex gap-2 mt-2 overflow-x-auto">{annotatedStatements.map((img, idx) => (<img key={idx} src={img} alt={`Statement ${idx+1}`} className="h-20 rounded cursor-pointer border-2 border-green-300" onClick={() => setViewImg(img)} />))}</div>{untaggedExpenses.length > 0 && (<div className="mt-2 bg-amber-100 border border-amber-300 rounded-lg p-2"><p className="text-amber-800 text-sm">⚠️ Untagged: {untaggedExpenses.map(e => e.ref).join(', ')}</p></div>)}</div>)}
             </div>
           </div>
-          <div className="p-4 border-t bg-slate-50 flex gap-3 shrink-0"><button onClick={() => setShowPreview(false)} className="flex-1 py-3 rounded-xl border-2 font-semibold">← Back</button><button onClick={async () => { await handleSubmitClaim(); setShowPreview(false); }} disabled={!canSubmit || loading} className={`flex-[2] py-3 rounded-xl font-semibold ${canSubmit && !loading ? 'bg-green-600 text-white' : 'bg-slate-300 text-slate-500'}`}>{submitButtonText}</button></div>
+          <div className="p-4 border-t bg-slate-50 flex gap-3 shrink-0"><button onClick={() => setShowPreview(false)} className="flex-1 py-3 rounded-xl border-2 font-semibold">← Back</button><button onClick={handleSubmitClaim} disabled={!canSubmit || loading} className={`flex-[2] py-3 rounded-xl font-semibold ${canSubmit && !loading ? 'bg-green-600 text-white' : 'bg-slate-300 text-slate-500'}`}>{submitButtonText}</button></div>
         </div>
         {viewImg && <ImageViewer src={viewImg} onClose={() => setViewImg(null)} />}
       </div>
