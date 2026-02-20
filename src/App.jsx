@@ -1376,14 +1376,35 @@ export default function BerkeleyExpenseSystem() {
 
   const EditClaimModal = ({ claim, onClose }) => {
     const [editedExpenses, setEditedExpenses] = useState(claim.expenses || []);
+    const [newComments, setNewComments] = useState({}); // Track new comments per expense index
     const [saving, setSaving] = useState(false);
+    const reviewerFirstName = currentUser.name.split(' ')[0];
+    
     const updateExpense = (idx, field, value) => setEditedExpenses(prev => prev.map((e, i) => i === idx ? { ...e, [field]: value } : e));
+    const updateNewComment = (idx, value) => setNewComments(prev => ({ ...prev, [idx]: value }));
+    
     const handleSaveEdits = async () => { 
-      setSaving(true); 
-      await handleSaveAdminEdits(claim, editedExpenses);
+      setSaving(true);
+      
+      // Append new comments with reviewer name to adminNotes
+      const expensesWithComments = editedExpenses.map((exp, idx) => {
+        const newComment = newComments[idx]?.trim();
+        if (newComment) {
+          const commentWithName = `${reviewerFirstName}: ${newComment}`;
+          const existingNotes = exp.adminNotes || '';
+          const updatedNotes = existingNotes 
+            ? `${existingNotes}\n${commentWithName}` 
+            : commentWithName;
+          return { ...exp, adminNotes: updatedNotes };
+        }
+        return exp;
+      });
+      
+      await handleSaveAdminEdits(claim, expensesWithComments);
       setSaving(false); 
       onClose(); 
     };
+    
     return (
       <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50">
         <div className="bg-white rounded-2xl max-w-4xl w-full max-h-[90vh] overflow-hidden">
@@ -1399,7 +1420,21 @@ export default function BerkeleyExpenseSystem() {
               <input type="number" className="p-2 border rounded-lg text-sm" placeholder="Amount" value={exp.reimbursementAmount || exp.amount} onChange={e => updateExpense(idx, 'reimbursementAmount', parseFloat(e.target.value))} />
               <input className="p-2 border rounded-lg text-sm col-span-2" placeholder="Description" value={exp.description} onChange={e => updateExpense(idx, 'description', e.target.value)} />
               {exp.attendees && <div className="col-span-2 bg-slate-50 p-2 rounded-lg text-xs text-slate-600">👥 {exp.attendees.replace(/\n/g, ', ')}</div>}
-              <input className="p-2 border-2 border-amber-300 bg-amber-50 rounded-lg text-sm col-span-2" placeholder="Admin Notes (will appear in PDF as 'Notes: ...')" value={exp.adminNotes || ''} onChange={e => updateExpense(idx, 'adminNotes', e.target.value)} />
+              {exp.adminNotes && (
+                <div className="col-span-2 bg-amber-50 border border-amber-200 rounded-lg p-2">
+                  <p className="text-xs font-semibold text-amber-700 mb-1">📝 Previous Comments:</p>
+                  <p className="text-sm text-amber-800 whitespace-pre-line">{exp.adminNotes}</p>
+                </div>
+              )}
+              <div className="col-span-2 flex gap-2 items-center">
+                <span className="text-xs font-semibold text-slate-500 whitespace-nowrap">{reviewerFirstName}:</span>
+                <input 
+                  className="flex-1 p-2 border-2 border-amber-300 bg-amber-50 rounded-lg text-sm" 
+                  placeholder="Add comment..." 
+                  value={newComments[idx] || ''} 
+                  onChange={e => updateNewComment(idx, e.target.value)} 
+                />
+              </div>
             </div>
           </div>))}</div>
           <div className="p-4 border-t flex gap-3"><button onClick={onClose} className="flex-1 py-3 rounded-xl border-2 font-semibold">Cancel</button><button onClick={handleSaveEdits} disabled={saving} className="flex-[2] py-3 rounded-xl bg-purple-600 text-white font-semibold disabled:opacity-50">{saving ? '⏳' : '💾 Save Changes'}</button></div>
