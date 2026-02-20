@@ -24,6 +24,14 @@ const supabase = {
       'Prefer': 'return=representation' 
     };
     
+    // Separate headers for updates - use minimal return to avoid timeout with large data
+    const updateHeaders = { 
+      'apikey': SUPABASE_ANON_KEY, 
+      'Authorization': `Bearer ${SUPABASE_ANON_KEY}`, 
+      'Content-Type': 'application/json', 
+      'Prefer': 'return=minimal' 
+    };
+    
     return {
       select: (columns = '*') => {
         let url = `${SUPABASE_URL}/rest/v1/${table}?select=${columns}`;
@@ -49,9 +57,14 @@ const supabase = {
       update: (updates) => ({
         eq: async (col, val) => {
           try {
-            const res = await fetch(`${SUPABASE_URL}/rest/v1/${table}?${col}=eq.${val}`, { method: 'PATCH', headers, body: JSON.stringify(updates) });
-            const data = await res.json();
-            return { data, error: res.ok ? null : data };
+            const res = await fetch(`${SUPABASE_URL}/rest/v1/${table}?${col}=eq.${val}`, { method: 'PATCH', headers: updateHeaders, body: JSON.stringify(updates) });
+            // With return=minimal, we don't get data back, just check if successful
+            if (res.ok) {
+              return { data: null, error: null };
+            } else {
+              const errorData = await res.json();
+              return { data: null, error: errorData };
+            }
           } catch (e) { return { error: e }; }
         }
       }),
