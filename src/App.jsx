@@ -1220,8 +1220,6 @@ export default function BerkeleyExpenseSystem() {
     printWindow.document.close();
   };
 
-  };
-
 
   const handleDownloadPDF = async (claim) => {
     setDownloading(true);
