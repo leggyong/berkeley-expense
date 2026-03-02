@@ -1033,17 +1033,18 @@ export default function BerkeleyExpenseSystem() {
     const getCategoryTotal = (catKey) => expensesWithRefs.filter(e => e.category === catKey).reduce((sum, e) => sum + parseFloat(e.reimbursementAmount || e.amount || 0), 0);
     const totalAmount = expensesWithRefs.reduce((sum, e) => sum + parseFloat(e.reimbursementAmount || e.amount || 0), 0);
     
-    // Format amount
-    const fmtAmt = (amt) => parseFloat(amt || 0).toFixed(2);
+    // Format amount with comma separator
+    const fmtAmt = (amt) => parseFloat(amt || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
     
     // GBP conversion rate (approximate - would need real FX rates)
     const GBP_RATES = { 'SGD': 0.58, 'USD': 0.79, 'EUR': 0.86, 'CNY': 0.11, 'HKD': 0.10, 'AED': 0.22, 'THB': 0.023, 'MYR': 0.18, 'AUD': 0.52, 'JPY': 0.0053 };
     const toGBP = (amt, cur) => {
       const rate = GBP_RATES[cur] || 0.5;
-      return (parseFloat(amt || 0) * rate).toFixed(2);
+      return parseFloat(amt || 0) * rate;
     };
+    const totalGBP = toGBP(totalAmount, reimburseCurrency);
 
-    // Build category summary rows matching Emma's Excel format
+    // Build category summary rows - FIXED: SGD in middle, GL on right
     const buildCategorySummary = () => {
       const groups = [
         { name: 'TRAVEL', cats: ['A','B','C','D','E','F','G','H'] },
@@ -1058,8 +1059,8 @@ export default function BerkeleyExpenseSystem() {
       let html = '';
       groups.forEach(grp => {
         // Group header
-        html += '<tr class="group-row"><td colspan="2"><strong>' + grp.name + '</strong></td><td></td></tr>';
-        // Category rows
+        html += '<tr class="group-row"><td><strong>' + grp.name + '</strong></td><td></td><td></td></tr>';
+        // Category rows - amount in middle, GL on right
         grp.cats.forEach(catKey => {
           const cat = EXPENSE_CATEGORIES[catKey];
           if (!cat) return;
@@ -1070,18 +1071,19 @@ export default function BerkeleyExpenseSystem() {
       return html;
     };
 
-    // Build detail table matching Emma's Excel - NO MERCHANT column
+    // Build detail table - FIXED: always show currency in receipt column
     const buildDetailTable = () => {
       return expensesWithRefs.map(exp => {
         const cat = EXPENSE_CATEGORIES[exp.category] || { name: 'Unknown' };
         const originalAmt = parseFloat(exp.amount || 0);
         const claimAmt = parseFloat(exp.reimbursementAmount || exp.amount || 0);
+        const originalCurrency = exp.currency || reimburseCurrency;
         const fxRate = exp.isForeignCurrency && originalAmt > 0 ? (claimAmt / originalAmt).toFixed(6) : '';
         const gbpApprox = toGBP(claimAmt, reimburseCurrency);
         const isOld = isOlderThan2Months(exp.date);
         const warnings = [];
-        if (isOld) warnings.push('<span style="color:red;">⚠️ >2 MONTHS</span>');
-        if (exp.isPotentialDuplicate) warnings.push('<span style="color:orange;">⚠️ DUPLICATE?</span>');
+        if (isOld) warnings.push('<span style="color:red;font-weight:bold;">⚠ >2 MONTHS</span>');
+        if (exp.isPotentialDuplicate) warnings.push('<span style="color:orange;font-weight:bold;">⚠ DUPLICATE?</span>');
         if (exp.adminNotes) warnings.push('<span style="color:#d97706;">📝 ' + exp.adminNotes + '</span>');
         
         return '<tr>' +
@@ -1089,10 +1091,10 @@ export default function BerkeleyExpenseSystem() {
           '<td style="text-align:center;">' + formatDDMMYYYY(new Date(exp.date)) + '</td>' +
           '<td>' + cat.name + '</td>' +
           '<td>' + (exp.description || '') + (warnings.length > 0 ? '<br>' + warnings.join('<br>') : '') + '</td>' +
-          '<td style="text-align:right;">' + (exp.isForeignCurrency ? exp.currency + ' ' + fmtAmt(originalAmt) : '') + '</td>' +
+          '<td style="text-align:right;">' + originalCurrency + ' ' + fmtAmt(originalAmt) + '</td>' +
           '<td style="text-align:right;">' + fmtAmt(claimAmt) + '</td>' +
           '<td style="text-align:right;">' + fxRate + '</td>' +
-          '<td style="text-align:right;">£' + gbpApprox + '</td>' +
+          '<td style="text-align:right;">£' + fmtAmt(gbpApprox) + '</td>' +
         '</tr>';
       }).join('');
     };
@@ -1112,13 +1114,17 @@ export default function BerkeleyExpenseSystem() {
       });
     });
 
-    // Receipt pages
+    // Receipt pages - FIXED: add >2 MONTHS badge, fix backcharge colors
     const receiptsHTML = expensesWithRefs.map(exp => {
       const cat = EXPENSE_CATEGORIES[exp.category] || { name: 'Unknown' };
       const pax = parseInt(exp.numberOfPax) || 0;
       const perPax = pax > 0 ? fmtAmt(parseFloat(exp.reimbursementAmount || exp.amount) / pax) : '';
-      const backchargeHTML = exp.hasBackcharge && exp.backcharges?.length > 0 ? '<div style="background:#e3f2fd;padding:4px 8px;margin-top:5px;font-size:10px;border-radius:4px;">📊 ' + exp.backcharges.map(bc => bc.development + ': ' + bc.percentage + '%').join(' | ') + '</div>' : '';
-      return '<div class="page receipt-page"><div class="receipt-header"><div class="receipt-ref">' + exp.seqRef + '</div><div class="receipt-info"><strong>' + exp.merchant + '</strong> | ' + formatDDMMYYYY(new Date(exp.date)) + '<br>' + cat.name + ' | ' + exp.currency + ' ' + fmtAmt(exp.amount) + (exp.isForeignCurrency ? ' → ' + reimburseCurrency + ' ' + fmtAmt(exp.reimbursementAmount) : '') + '<br>' + (exp.description || '') + (pax > 0 ? '<br>👥 ' + pax + ' pax @ ' + reimburseCurrency + ' ' + perPax + '/pax' : '') + (exp.attendees ? '<br>' + exp.attendees.replace(/\n/g, ', ') : '') + (exp.adminNotes ? '<br><span style="color:#fcd34d;">📝 ' + exp.adminNotes + '</span>' : '') + backchargeHTML + '</div></div>' + (exp.receiptPreview ? '<img src="' + exp.receiptPreview + '" class="receipt-img" />' : '<div class="no-receipt">No receipt image</div>') + (exp.receiptPreview2 ? '<div style="margin-top:10px;border-top:2px dashed #ccc;padding-top:10px;"><img src="' + exp.receiptPreview2 + '" class="receipt-img" /></div>' : '') + '</div>';
+      const isOld = isOlderThan2Months(exp.date);
+      const oldBadge = isOld ? '<br><span style="background:#ffcdd2;color:#c62828;padding:2px 6px;border-radius:3px;font-weight:bold;">⚠ >2 MONTHS OLD</span>' : '';
+      const dupBadge = exp.isPotentialDuplicate ? '<br><span style="background:#fff3e0;color:#e65100;padding:2px 6px;border-radius:3px;font-weight:bold;">⚠ DUPLICATE?</span>' : '';
+      // FIXED: backcharge with white background and dark text for visibility
+      const backchargeHTML = exp.hasBackcharge && exp.backcharges?.length > 0 ? '<div style="background:#fff;border:2px solid #9c27b0;color:#6a1b9a;padding:4px 8px;margin-top:5px;font-size:10px;border-radius:4px;"><strong>📊 Backcharge:</strong> ' + exp.backcharges.map(bc => bc.development + ': ' + bc.percentage + '%').join(' | ') + '</div>' : '';
+      return '<div class="page receipt-page"><div class="receipt-header"><div class="receipt-ref">' + exp.seqRef + '</div><div class="receipt-info"><strong>' + exp.merchant + '</strong> | ' + formatDDMMYYYY(new Date(exp.date)) + '<br>' + cat.name + ' | ' + exp.currency + ' ' + fmtAmt(exp.amount) + (exp.isForeignCurrency ? ' → ' + reimburseCurrency + ' ' + fmtAmt(exp.reimbursementAmount) : '') + '<br>' + (exp.description || '') + oldBadge + dupBadge + (pax > 0 ? '<br>👥 ' + pax + ' pax @ ' + reimburseCurrency + ' ' + perPax + '/pax' : '') + (exp.attendees ? '<br>' + exp.attendees.replace(/\n/g, ', ') : '') + (exp.adminNotes ? '<br><span style="background:#fff8e1;color:#f57c00;padding:2px 4px;border-radius:3px;">📝 ' + exp.adminNotes + '</span>' : '') + backchargeHTML + '</div></div>' + (exp.receiptPreview ? '<img src="' + exp.receiptPreview + '" class="receipt-img" />' : '<div class="no-receipt">No receipt image</div>') + (exp.receiptPreview2 ? '<div style="margin-top:10px;border-top:2px dashed #ccc;padding-top:10px;"><img src="' + exp.receiptPreview2 + '" class="receipt-img" /></div>' : '') + '</div>';
     }).join('');
 
     // Statement pages
@@ -1126,35 +1132,31 @@ export default function BerkeleyExpenseSystem() {
     const statementsHTML = statementsArray.map((img, idx) => '<div class="page statement-page"><div class="statement-header">Bank/Card Statement ' + (statementsArray.length > 1 ? (idx + 1) + ' of ' + statementsArray.length : '') + '</div><img src="' + img + '" class="statement-img" /></div>').join('');
 
     // Backcharge report
-    const backchargeHTML = Object.keys(backchargeSummary).length > 0 ? '<div class="page"><h2 style="text-align:center;color:#9c27b0;">Backcharge Summary</h2><table class="detail-table"><thead><tr><th>Development</th><th>Line #</th><th>Date</th><th>%</th><th style="text-align:right;">Amount</th></tr></thead><tbody>' + Object.entries(backchargeSummary).map(([dev, data]) => data.items.map((item, idx) => '<tr><td>' + (idx === 0 ? '<strong>' + dev + '</strong>' : '') + '</td><td>' + item.ref + '</td><td>' + formatDDMMYYYY(new Date(item.date)) + '</td><td>' + item.percentage + '%</td><td style="text-align:right;">' + fmtAmt(item.amount) + '</td></tr>').join('') + '<tr style="background:#e1bee7;"><td colspan="4"><strong>Subtotal</strong></td><td style="text-align:right;"><strong>' + fmtAmt(data.total) + '</strong></td></tr>').join('') + '</tbody></table></div>' : '';
+    const backchargeReportHTML = Object.keys(backchargeSummary).length > 0 ? '<div class="page"><h2 style="text-align:center;color:#9c27b0;">Backcharge Summary</h2><table class="detail-table"><thead><tr><th>Development</th><th>Line #</th><th>Date</th><th>%</th><th style="text-align:right;">Amount</th></tr></thead><tbody>' + Object.entries(backchargeSummary).map(([dev, data]) => data.items.map((item, idx) => '<tr><td>' + (idx === 0 ? '<strong>' + dev + '</strong>' : '') + '</td><td>' + item.ref + '</td><td>' + formatDDMMYYYY(new Date(item.date)) + '</td><td>' + item.percentage + '%</td><td style="text-align:right;">' + fmtAmt(item.amount) + '</td></tr>').join('') + '<tr style="background:#e1bee7;"><td colspan="4"><strong>Subtotal</strong></td><td style="text-align:right;"><strong>' + fmtAmt(data.total) + '</strong></td></tr>').join('') + '</tbody></table></div>' : '';
 
     const html = '<!DOCTYPE html><html><head><title>Expense Claim</title><style>' +
       '*{margin:0;padding:0;box-sizing:border-box;}' +
-      'body{font-family:Arial,sans-serif;font-size:10px;}' +
-      '@page{margin:10mm;size:A4;}' +
-      '.page{page-break-after:always;padding:5mm;}' +
+      'body{font-family:Arial,sans-serif;font-size:9px;}' +
+      '@page{margin:8mm;size:A4;}' +
+      '.page{page-break-after:always;padding:3mm;}' +
       '.page:last-child{page-break-after:avoid;}' +
-      'h1{text-align:center;font-size:14px;font-weight:bold;margin-bottom:15px;}' +
-      '.info-table{width:100%;border-collapse:collapse;margin-bottom:10px;}' +
-      '.info-table td{padding:4px 8px;border:1px solid #ccc;}' +
+      'h1{text-align:center;font-size:12px;font-weight:bold;margin-bottom:8px;}' +
+      '.info-table{width:100%;border-collapse:collapse;margin-bottom:6px;}' +
+      '.info-table td{padding:3px 6px;border:1px solid #ccc;font-size:9px;}' +
       '.info-table .label{background:#f5f5f5;font-weight:bold;width:40%;}' +
       '.info-table .value{background:#fffde7;}' +
-      '.summary-table{width:100%;border-collapse:collapse;margin-top:10px;}' +
-      '.summary-table th,.summary-table td{padding:3px 6px;border:1px solid #ccc;font-size:9px;}' +
+      '.summary-table{width:100%;border-collapse:collapse;margin-top:6px;}' +
+      '.summary-table th,.summary-table td{padding:2px 4px;border:1px solid #ccc;font-size:8px;}' +
       '.summary-table th{background:#e0e0e0;text-align:left;}' +
       '.group-row td{background:#f5f5f5;font-weight:bold;}' +
       '.total-row td{background:#000;color:#fff;font-weight:bold;}' +
-      '.sig-section{margin-top:15px;display:grid;grid-template-columns:1fr 1fr;gap:10px;}' +
-      '.sig-box{border:1px solid #ccc;padding:8px;}' +
-      '.sig-label{font-size:8px;color:#666;}' +
-      '.sig-value{min-height:20px;border-bottom:1px solid #000;margin-top:5px;}' +
-      '.detail-table{width:100%;border-collapse:collapse;font-size:9px;}' +
-      '.detail-table th,.detail-table td{border:1px solid #ccc;padding:4px;}' +
+      '.detail-table{width:100%;border-collapse:collapse;font-size:8px;}' +
+      '.detail-table th,.detail-table td{border:1px solid #ccc;padding:3px;}' +
       '.detail-table th{background:#e8eaf6;text-align:left;}' +
       '.receipt-page{padding:5mm;}' +
       '.receipt-header{background:#1565c0;color:#fff;padding:10px;display:flex;align-items:flex-start;border-radius:4px;margin-bottom:10px;}' +
       '.receipt-ref{font-size:24px;font-weight:bold;margin-right:15px;}' +
-      '.receipt-info{font-size:10px;line-height:1.5;}' +
+      '.receipt-info{font-size:10px;line-height:1.6;}' +
       '.receipt-img{max-width:100%;max-height:220mm;object-fit:contain;display:block;margin:0 auto;}' +
       '.no-receipt{background:#f5f5f5;padding:40px;text-align:center;color:#999;}' +
       '.statement-page{padding:5mm;}' +
@@ -1163,56 +1165,57 @@ export default function BerkeleyExpenseSystem() {
       '@media print{body{-webkit-print-color-adjust:exact;print-color-adjust:exact;}}' +
       '</style></head><body>' +
       
-      // PAGE 1: Summary (matching Emma's Excel)
+      // PAGE 1: Summary - FIXED: removed e-signature, compact to fit 1 page
       '<div class="page">' +
       '<h1>BERKELEY INTERNATIONAL EMPLOYEE EXPENSE CLAIM FORM</h1>' +
       '<table class="info-table">' +
       '<tr><td class="label">EMPLOYEE FULL NAME</td><td class="value">' + userName + '</td></tr>' +
       '<tr><td class="label">OFFICE MAKING PAYMENT</td><td class="value">' + (office?.name || '') + '</td></tr>' +
       '<tr><td class="label">CURRENCY OF PAYMENT</td><td class="value">' + reimburseCurrency + '</td></tr>' +
-      '<tr><td class="label">DATE OF SUBMISSION BY CLAIMANT</td><td class="value">' + formatDDMMYYYY(new Date(submittedDate || new Date())) + '</td></tr>' +
+      '<tr><td class="label">DATE OF SUBMISSION BY CLAIMANT (dd/mm/yyyy)</td><td class="value">' + formatDDMMYYYY(new Date(submittedDate || new Date())) + '</td></tr>' +
       '</table>' +
       '<table class="info-table">' +
       '<tr><td class="label">PRINT APPROVERS NAME</td><td class="value">' + (level2ApprovedBy || '') + '</td></tr>' +
-      '<tr><td class="label">DATE OF APPROVAL</td><td class="value">' + (level2ApprovedAt ? formatDDMMYYYY(new Date(level2ApprovedAt)) : '') + '</td></tr>' +
-      '<tr><td class="label">APPROVERS SIGNATURE / E-SIGNATURE</td><td class="value" style="min-height:30px;"></td></tr>' +
+      '<tr><td class="label">DATE OF APPROVAL (dd/mm/yyyy)</td><td class="value">' + (level2ApprovedAt ? formatDDMMYYYY(new Date(level2ApprovedAt)) : '') + '</td></tr>' +
       '</table>' +
-      '<table class="info-table" style="margin-top:10px;">' +
-      '<tr><td class="label">DATE OF OLDEST EXPENSE CLAIMED</td><td class="value" style="' + (isOldestOver2Months ? 'background:#ffcdd2;color:red;' : '') + '">' + formatDDMMYYYY(oldestDate) + '</td></tr>' +
+      '<table class="info-table" style="margin-top:6px;">' +
+      '<tr><td class="label">DATE OF OLDEST EXPENSE CLAIMED <span style="color:red;font-size:7px;">(Red if >2months old)</span></td><td class="value" style="' + (isOldestOver2Months ? 'background:#ffcdd2;color:red;' : '') + '">' + formatDDMMYYYY(oldestDate) + '</td></tr>' +
       '<tr><td class="label">DATE OF NEWEST EXPENSE CLAIMED</td><td class="value">' + formatDDMMYYYY(newestDate) + '</td></tr>' +
       '</table>' +
+      // FIXED: 3 columns - Category | Amount (with currency header) | GL Code
       '<table class="summary-table">' +
-      '<thead><tr><th colspan="2" style="background:#e0e0e0;">CLAIM SUMMARY</th><th style="text-align:right;">' + reimburseCurrency + '</th></tr></thead>' +
+      '<thead><tr><th style="background:#e0e0e0;">CLAIM SUMMARY</th><th style="text-align:right;background:#e0e0e0;">' + reimburseCurrency + '</th><th style="text-align:right;background:#e0e0e0;"></th></tr></thead>' +
       '<tbody>' + buildCategorySummary() + '</tbody>' +
-      '<tfoot><tr class="total-row"><td colspan="2">CLAIM TOTAL</td><td style="text-align:right;">' + fmtAmt(totalAmount) + '</td></tr></tfoot>' +
+      '<tfoot><tr class="total-row"><td>CLAIM TOTAL</td><td style="text-align:right;">' + fmtAmt(totalAmount) + '</td><td></td></tr></tfoot>' +
       '</table>' +
       '</div>' +
       
-      // PAGE 2: Detail (matching Emma's Excel - NO MERCHANT)
+      // PAGE 2: Detail - FIXED: totals with currency and commas
       (expensesWithRefs.length > 0 ? '<div class="page">' +
-      '<h2 style="text-align:center;margin-bottom:10px;">Expense Claim Detail</h2>' +
-      '<p style="margin-bottom:10px;">Name: <strong>' + userName + '</strong> | Claim: <strong>' + (claimNumber || 'DRAFT') + '</strong> | ' + expensesWithRefs.length + ' items</p>' +
+      '<h2 style="text-align:center;margin-bottom:8px;font-size:11px;">Expense Claim Detail</h2>' +
+      '<p style="margin-bottom:8px;font-size:9px;">Name: <strong>' + userName + '</strong> | Claim: <strong>' + (claimNumber || 'DRAFT') + '</strong> | ' + expensesWithRefs.length + ' items</p>' +
       '<table class="detail-table">' +
       '<thead><tr>' +
-      '<th style="width:4%;">REF</th>' +
-      '<th style="width:10%;">RECEIPT DATE</th>' +
-      '<th style="width:18%;">CATEGORY</th>' +
+      '<th style="width:3%;">REF</th>' +
+      '<th style="width:8%;">RECEIPT<br>DATE</th>' +
+      '<th style="width:14%;">CATEGORY</th>' +
       '<th style="width:30%;">DESCRIPTION OF EXPENSE BEING CLAIMED</th>' +
-      '<th style="width:10%;text-align:right;">TOTAL SHOWN ON THE RECEIPT<br><small>(Original currency)</small></th>' +
-      '<th style="width:10%;text-align:right;">TOTAL IN CLAIM CURRENCY<br><small>(As per bank or card statement)</small></th>' +
-      '<th style="width:8%;text-align:right;">FX RATE</th>' +
-      '<th style="width:10%;text-align:right;">GBP APPROX</th>' +
+      '<th style="width:12%;text-align:right;">TOTAL SHOWN<br>ON THE RECEIPT<br><small>(Original currency)</small></th>' +
+      '<th style="width:12%;text-align:right;">TOTAL IN CLAIM<br>CURRENCY<br><small>(As per bank or<br>card statement)</small></th>' +
+      '<th style="width:9%;text-align:right;">FX RATE</th>' +
+      '<th style="width:12%;text-align:right;">GBP<br>APPROX</th>' +
       '</tr></thead>' +
       '<tbody>' + buildDetailTable() + '</tbody>' +
       '<tfoot><tr style="background:#1565c0;color:#fff;font-weight:bold;">' +
-      '<td colspan="5">TOTAL</td>' +
-      '<td style="text-align:right;">' + fmtAmt(totalAmount) + '</td>' +
+      '<td colspan="4">TOTAL</td>' +
       '<td></td>' +
-      '<td style="text-align:right;">£' + toGBP(totalAmount, reimburseCurrency) + '</td>' +
+      '<td style="text-align:right;">' + reimburseCurrency + ' ' + fmtAmt(totalAmount) + '</td>' +
+      '<td></td>' +
+      '<td style="text-align:right;">£' + fmtAmt(totalGBP) + '</td>' +
       '</tr></tfoot>' +
       '</table></div>' : '') +
       
-      backchargeHTML + receiptsHTML + statementsHTML +
+      backchargeReportHTML + receiptsHTML + statementsHTML +
       '<script>window.onload=function(){window.print();setTimeout(function(){window.close();},500);};<\/script>' +
       '</body></html>';
     
