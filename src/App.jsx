@@ -853,22 +853,45 @@ export default function BerkeleyExpenseSystem() {
     setSavingStatus('saving');
     
     try {
+      // Check data size to warn about potential issues
+      const expensesJson = JSON.stringify(expensesToSave || []);
+      const statementsJson = JSON.stringify(statementsToSave || []);
+      const annotationsJson = JSON.stringify(annotationsToSave || []);
+      const originalsJson = JSON.stringify(originalsToSave || []);
+      const totalSize = expensesJson.length + statementsJson.length + annotationsJson.length + originalsJson.length;
+      
+      // Log warning if data is getting large (over 500KB)
+      if (totalSize > 500000) {
+        console.warn('⚠️ Draft data is large:', Math.round(totalSize / 1024), 'KB. This may cause sync issues.');
+      }
+      
       const draftData = { 
         user_id: currentUser.id, 
-        expenses: JSON.stringify(expensesToSave || []), 
-        statements: JSON.stringify(statementsToSave || []), 
-        annotations: JSON.stringify(annotationsToSave || []),
-        originals: JSON.stringify(originalsToSave || []),
+        expenses: expensesJson, 
+        statements: statementsJson, 
+        annotations: annotationsJson,
+        originals: originalsJson,
         updated_at: new Date().toISOString() 
       };
       
       // Check if record exists
-      const { data: existing } = await supabase.from('user_drafts').select('id').eq('user_id', currentUser.id);
+      const { data: existing, error: selectError } = await supabase.from('user_drafts').select('id').eq('user_id', currentUser.id);
       
+      if (selectError) {
+        console.error('Select error:', selectError);
+        throw selectError;
+      }
+      
+      let result;
       if (existing && existing.length > 0) {
-        await supabase.from('user_drafts').update(draftData).eq('user_id', currentUser.id);
+        result = await supabase.from('user_drafts').update(draftData).eq('user_id', currentUser.id);
       } else {
-        await supabase.from('user_drafts').insert([draftData]);
+        result = await supabase.from('user_drafts').insert([draftData]);
+      }
+      
+      if (result.error) {
+        console.error('Save error:', result.error);
+        throw result.error;
       }
       
       setSavingStatus('saved');
@@ -877,6 +900,10 @@ export default function BerkeleyExpenseSystem() {
     } catch (err) { 
       console.error('Save failed:', err);
       setSavingStatus('error');
+      // Show error to user if it's a data size issue
+      if (err.message?.includes('too large') || err.code === '54000') {
+        alert('⚠️ Error: Too much data. Try reducing image quality or remove some receipts.');
+      }
       setTimeout(() => setSavingStatus(null), 3000);
       return false;
     }
@@ -1000,12 +1027,10 @@ export default function BerkeleyExpenseSystem() {
         const dateB = b?.date ? new Date(b.date) : new Date();
         return dateA - dateB;
       });
-      const categoryCount = {};
-      return sorted.map(exp => {
+      // Use sequential numbering (1, 2, 3...) sorted by date
+      return sorted.map((exp, idx) => {
         if (!exp) return exp;
-        const cat = exp.category || 'C';
-        categoryCount[cat] = (categoryCount[cat] || 0) + 1;
-        return { ...exp, ref: `${cat}${categoryCount[cat]}` };
+        return { ...exp, ref: String(idx + 1) };
       });
     } catch (err) { return expenseList || []; }
   };
@@ -1071,7 +1096,7 @@ export default function BerkeleyExpenseSystem() {
       return html;
     };
 
-    // Build detail table - FIXED: always show currency in receipt column
+    // Build detail table - FIXED: always show currency in receipt column, add per pax rates
     const buildDetailTable = () => {
       return expensesWithRefs.map(exp => {
         const cat = EXPENSE_CATEGORIES[exp.category] || { name: 'Unknown' };
@@ -1081,10 +1106,15 @@ export default function BerkeleyExpenseSystem() {
         const fxRate = exp.isForeignCurrency && originalAmt > 0 ? (claimAmt / originalAmt).toFixed(6) : '';
         const gbpApprox = toGBP(claimAmt, reimburseCurrency);
         const isOld = isOlderThan2Months(exp.date);
+        const pax = parseInt(exp.numberOfPax) || 0;
+        const perPax = pax > 0 ? claimAmt / pax : 0;
+        const perPaxGBP = pax > 0 ? toGBP(perPax, reimburseCurrency) : 0;
         const warnings = [];
         if (isOld) warnings.push('<span style="color:red;font-weight:bold;">⚠ >2 MONTHS</span>');
         if (exp.isPotentialDuplicate) warnings.push('<span style="color:orange;font-weight:bold;">⚠ DUPLICATE?</span>');
         if (exp.adminNotes) warnings.push('<span style="color:#d97706;">📝 ' + exp.adminNotes + '</span>');
+        // Add per pax info if applicable
+        if (pax > 0) warnings.push('<span style="color:#7c3aed;">' + pax + ' pax @ ' + fmtAmt(perPax) + ' (£' + fmtAmt(perPaxGBP) + ')/pax</span>');
         
         return '<tr>' +
           '<td style="text-align:center;">' + exp.seqRef + '</td>' +
@@ -1114,17 +1144,20 @@ export default function BerkeleyExpenseSystem() {
       });
     });
 
-    // Receipt pages - FIXED: add >2 MONTHS badge, fix backcharge colors
+    // Receipt pages - FIXED: add >2 MONTHS badge, fix backcharge colors, add GBP per pax
     const receiptsHTML = expensesWithRefs.map(exp => {
       const cat = EXPENSE_CATEGORIES[exp.category] || { name: 'Unknown' };
       const pax = parseInt(exp.numberOfPax) || 0;
-      const perPax = pax > 0 ? fmtAmt(parseFloat(exp.reimbursementAmount || exp.amount) / pax) : '';
+      const claimAmt = parseFloat(exp.reimbursementAmount || exp.amount);
+      const perPax = pax > 0 ? claimAmt / pax : 0;
+      const perPaxGBP = pax > 0 ? toGBP(perPax, reimburseCurrency) : 0;
       const isOld = isOlderThan2Months(exp.date);
       const oldBadge = isOld ? '<br><span style="background:#ffcdd2;color:#c62828;padding:2px 6px;border-radius:3px;font-weight:bold;">⚠ >2 MONTHS OLD</span>' : '';
       const dupBadge = exp.isPotentialDuplicate ? '<br><span style="background:#fff3e0;color:#e65100;padding:2px 6px;border-radius:3px;font-weight:bold;">⚠ DUPLICATE?</span>' : '';
       // FIXED: backcharge with white background and dark text for visibility
       const backchargeHTML = exp.hasBackcharge && exp.backcharges?.length > 0 ? '<div style="background:#fff;border:2px solid #9c27b0;color:#6a1b9a;padding:4px 8px;margin-top:5px;font-size:10px;border-radius:4px;"><strong>📊 Backcharge:</strong> ' + exp.backcharges.map(bc => bc.development + ': ' + bc.percentage + '%').join(' | ') + '</div>' : '';
-      return '<div class="page receipt-page"><div class="receipt-header"><div class="receipt-ref">' + exp.seqRef + '</div><div class="receipt-info"><strong>' + exp.merchant + '</strong> | ' + formatDDMMYYYY(new Date(exp.date)) + '<br>' + cat.name + ' | ' + exp.currency + ' ' + fmtAmt(exp.amount) + (exp.isForeignCurrency ? ' → ' + reimburseCurrency + ' ' + fmtAmt(exp.reimbursementAmount) : '') + '<br>' + (exp.description || '') + oldBadge + dupBadge + (pax > 0 ? '<br>👥 ' + pax + ' pax @ ' + reimburseCurrency + ' ' + perPax + '/pax' : '') + (exp.attendees ? '<br>' + exp.attendees.replace(/\n/g, ', ') : '') + (exp.adminNotes ? '<br><span style="background:#fff8e1;color:#f57c00;padding:2px 4px;border-radius:3px;">📝 ' + exp.adminNotes + '</span>' : '') + backchargeHTML + '</div></div>' + (exp.receiptPreview ? '<img src="' + exp.receiptPreview + '" class="receipt-img" />' : '<div class="no-receipt">No receipt image</div>') + (exp.receiptPreview2 ? '<div style="margin-top:10px;border-top:2px dashed #ccc;padding-top:10px;"><img src="' + exp.receiptPreview2 + '" class="receipt-img" /></div>' : '') + '</div>';
+      const paxInfo = pax > 0 ? '<br>👥 ' + pax + ' pax @ ' + reimburseCurrency + ' ' + fmtAmt(perPax) + '/pax (£' + fmtAmt(perPaxGBP) + '/pax)' : '';
+      return '<div class="page receipt-page"><div class="receipt-header"><div class="receipt-ref">' + exp.seqRef + '</div><div class="receipt-info"><strong>' + exp.merchant + '</strong> | ' + formatDDMMYYYY(new Date(exp.date)) + '<br>' + cat.name + ' | ' + exp.currency + ' ' + fmtAmt(exp.amount) + (exp.isForeignCurrency ? ' → ' + reimburseCurrency + ' ' + fmtAmt(exp.reimbursementAmount) : '') + '<br>' + (exp.description || '') + oldBadge + dupBadge + paxInfo + (exp.attendees ? '<br>' + exp.attendees.replace(/\n/g, ', ') : '') + (exp.adminNotes ? '<br><span style="background:#fff8e1;color:#f57c00;padding:2px 4px;border-radius:3px;">📝 ' + exp.adminNotes + '</span>' : '') + backchargeHTML + '</div></div>' + (exp.receiptPreview ? '<img src="' + exp.receiptPreview + '" class="receipt-img" />' : '<div class="no-receipt">No receipt image</div>') + (exp.receiptPreview2 ? '<div style="margin-top:10px;border-top:2px dashed #ccc;padding-top:10px;"><img src="' + exp.receiptPreview2 + '" class="receipt-img" /></div>' : '') + '</div>';
     }).join('');
 
     // Statement pages
@@ -1626,7 +1659,17 @@ export default function BerkeleyExpenseSystem() {
           setExpenses(newExpenses);
         } else { 
           const newExpense = { id: Date.now(), ref: 'temp', ...formData, attendees: attendeesForSave, amount: parseFloat(formData.amount) || 0, reimbursementAmount: isForeignCurrency ? (parseFloat(formData.reimbursementAmount) || 0) : (parseFloat(formData.amount) || 0), receiptPreview: receiptPreview || null, receiptPreview2: receiptPreview2 || null, status: 'draft', isForeignCurrency: isForeignCurrency || false, isOld: isOlderThan2Months(formData.date), createdAt: new Date().toISOString(), isPotentialDuplicate: !!duplicateWarning, forexRate };
-          newExpenses = sortAndReassignRefs([...expenses, newExpense]);
+          // If this is a duplicate, also mark the matching expense as duplicate
+          let existingExpenses = [...expenses];
+          if (duplicateWarning) {
+            existingExpenses = expenses.map(e => {
+              if (parseFloat(e.amount) === parseFloat(formData.amount) && e.date === formData.date && e.currency === formData.currency) {
+                return { ...e, isPotentialDuplicate: true };
+              }
+              return e;
+            });
+          }
+          newExpenses = sortAndReassignRefs([...existingExpenses, newExpense]);
           setExpenses(newExpenses);
         }
         
@@ -1698,7 +1741,7 @@ export default function BerkeleyExpenseSystem() {
                     </optgroup>
                   </select>
                 </div>
-                <input type="text" className="w-full p-3 border-2 border-slate-200 rounded-xl" placeholder={EXPENSE_CATEGORIES[formData.category]?.example || 'Description *'} value={formData.description} onChange={e => setFormData(prev => ({ ...prev, description: e.target.value }))} />
+                <textarea className="w-full p-3 border-2 border-slate-200 rounded-xl resize-none" rows="2" placeholder={EXPENSE_CATEGORIES[formData.category]?.example || 'Description *'} value={formData.description} onChange={e => setFormData(prev => ({ ...prev, description: e.target.value }))} />
                 {needsAttendees && (
                   <div className="space-y-3">
                     <div><label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Number of Pax *</label><input type="number" min="1" className="w-full p-3 border-2 border-slate-200 rounded-xl" placeholder="e.g. 4" value={formData.numberOfPax} onChange={e => setFormData(prev => ({ ...prev, numberOfPax: e.target.value }))} /></div>
@@ -1892,7 +1935,8 @@ export default function BerkeleyExpenseSystem() {
     const myClaims = claims.filter(c => c.user_id === currentUser.id);
     const returnedClaims = myClaims.filter(c => c.status === 'changes_requested');
     const userReimburseCurrency = getUserReimburseCurrency(currentUser);
-    const groupedExpenses = pendingExpenses.reduce((acc, exp) => { if (!acc[exp.category]) acc[exp.category] = []; acc[exp.category].push(exp); return acc; }, {});
+    // Sort by date for sequential display (same order as PDF)
+    const sortedExpenses = [...pendingExpenses].sort((a, b) => new Date(a.date) - new Date(b.date));
     return (
       <div className="space-y-4">
         {returnedClaims.length > 0 && (<div className="bg-amber-50 border-2 border-amber-400 rounded-xl p-4">
@@ -1920,7 +1964,7 @@ export default function BerkeleyExpenseSystem() {
         <div className="grid grid-cols-2 gap-4"><div className="bg-white rounded-2xl shadow-lg p-6 text-center"><div className="text-4xl font-bold text-slate-800">{pendingExpenses.length}</div><div className="text-sm text-slate-500">Pending</div></div><div className="bg-white rounded-2xl shadow-lg p-6 text-center"><div className="text-2xl font-bold text-green-600">{formatCurrency(reimbursementTotal, userReimburseCurrency)}</div><div className="text-sm text-slate-500">To Reimburse</div></div></div>
         <div className="bg-white rounded-2xl shadow-lg p-6"><div className="flex flex-wrap gap-3"><button onClick={() => setShowAddExpense(true)} className="bg-blue-600 text-white px-6 py-3 rounded-xl font-semibold shadow-lg">📸 Add Receipt</button>{pendingExpenses.length > 0 && (<button onClick={() => setShowPreview(true)} className="border-2 border-green-500 text-green-600 px-6 py-3 rounded-xl font-semibold">📋 Preview ({pendingExpenses.length})</button>)}<button onClick={handleManualSync} disabled={loading} className="border-2 border-slate-300 text-slate-600 px-4 py-3 rounded-xl font-semibold">{loading ? '⏳' : '🔄'} Sync</button></div></div>
         <div className="bg-white rounded-2xl shadow-lg p-6">
-          <h3 className="font-bold text-slate-800 mb-4">📋 Pending</h3>
+          <h3 className="font-bold text-slate-800 mb-4">📋 Pending Expenses (sorted by date)</h3>
           {/* Warning banner for approaching/expired receipts */}
           {pendingExpenses.some(exp => isOlderThan2Months(exp.date)) && (
             <div className="bg-red-100 border-2 border-red-400 rounded-xl p-3 mb-4">
@@ -1933,37 +1977,37 @@ export default function BerkeleyExpenseSystem() {
             </div>
           )}
           {pendingExpenses.length === 0 ? (<div className="text-center py-12 text-slate-400">📭 No pending</div>) : (
-            <div className="space-y-2">{Object.entries(groupedExpenses).sort().map(([cat, exps]) => {
-              // Get flagged refs from returned claims
+            <div className="space-y-2">{sortedExpenses.map((exp, idx) => {
               const flaggedRefs = returnedClaims.flatMap(c => c.flagged_expenses || []);
-              return (<div key={cat}><p className="text-xs font-semibold text-slate-500 mb-2">{EXPENSE_CATEGORIES[cat]?.icon} {cat}. {EXPENSE_CATEGORIES[cat]?.name}</p>{exps.map(exp => { 
-                const isOld = isOlderThan2Months(exp.date); 
-                const isApproaching = isApproaching2Months(exp.date); 
-                const daysLeft = getDaysUntil2Months(exp.date);
-                const isFlagged = flaggedRefs.includes(exp.ref);
-                return (<div key={exp.id} className={`flex items-center justify-between p-3 rounded-xl border-2 mb-2 ${isFlagged ? 'bg-red-50 border-red-500 ring-2 ring-red-300' : isOld ? 'bg-red-50 border-red-300' : isApproaching ? 'bg-amber-50 border-amber-300' : 'bg-slate-50 border-slate-200'}`}>
-                  <div className="flex-1">
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <span className={`text-xs font-bold px-2 py-1 rounded ${isFlagged ? 'bg-red-500 text-white' : 'bg-blue-100 text-blue-700'}`}>{isFlagged && '🚩 '}{exp.ref}</span>
-                      <span className="font-semibold text-sm">{exp.merchant}</span>
-                      {isFlagged && <span className="bg-red-100 text-red-600 text-xs font-bold px-2 py-1 rounded animate-pulse">⚠️ Needs Attention</span>}
-                      {isOld && <span className="bg-red-100 text-red-600 text-xs font-bold px-2 py-1 rounded animate-pulse">🚨 &gt;2 Months</span>}
-                      {isApproaching && <span className="bg-amber-100 text-amber-700 text-xs font-bold px-2 py-1 rounded">⏰ {daysLeft}d left</span>}
-                      {exp.isForeignCurrency && <span className="text-amber-600 text-xs">💳</span>}
-                      {exp.receiptPreview2 && <span className="text-slate-500 text-xs">📑</span>}
-                    </div>
-                    <p className="text-xs text-slate-500 mt-1">{exp.description}</p>
-                    {exp.adminNotes && <p className="text-xs text-amber-700 mt-1 bg-amber-50 border border-amber-200 px-2 py-1 rounded">📝 {exp.adminNotes}</p>}
-                    {exp.isForeignCurrency && exp.forexRate && <p className="text-xs text-amber-600 mt-0.5">💱 {exp.currency} → {userReimburseCurrency} @ {exp.forexRate.toFixed(4)}</p>}
+              const isOld = isOlderThan2Months(exp.date); 
+              const isApproaching = isApproaching2Months(exp.date); 
+              const daysLeft = getDaysUntil2Months(exp.date);
+              const isFlagged = flaggedRefs.includes(exp.ref);
+              const cat = EXPENSE_CATEGORIES[exp.category];
+              return (<div key={exp.id} className={`flex items-center justify-between p-3 rounded-xl border-2 ${isFlagged ? 'bg-red-50 border-red-500 ring-2 ring-red-300' : exp.isPotentialDuplicate ? 'bg-orange-50 border-orange-400' : isOld ? 'bg-red-50 border-red-300' : isApproaching ? 'bg-amber-50 border-amber-300' : 'bg-slate-50 border-slate-200'}`}>
+                <div className="flex-1">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className={`text-xs font-bold px-2 py-1 rounded ${isFlagged ? 'bg-red-500 text-white' : 'bg-blue-100 text-blue-700'}`}>{isFlagged && '🚩 '}{exp.ref}</span>
+                    <span className="font-semibold text-sm">{exp.merchant}</span>
+                    <span className="text-xs text-slate-400">{formatShortDate(exp.date)}</span>
+                    {isFlagged && <span className="bg-red-100 text-red-600 text-xs font-bold px-2 py-1 rounded animate-pulse">⚠️ Needs Attention</span>}
+                    {exp.isPotentialDuplicate && <span className="bg-orange-100 text-orange-700 text-xs font-bold px-2 py-1 rounded">⚠️ Duplicate?</span>}
+                    {isOld && <span className="bg-red-100 text-red-600 text-xs font-bold px-2 py-1 rounded animate-pulse">🚨 &gt;2 Months</span>}
+                    {isApproaching && <span className="bg-amber-100 text-amber-700 text-xs font-bold px-2 py-1 rounded">⏰ {daysLeft}d left</span>}
+                    {exp.isForeignCurrency && <span className="text-amber-600 text-xs">💳</span>}
+                    {exp.receiptPreview2 && <span className="text-slate-500 text-xs">📑</span>}
                   </div>
-                  <div className="flex items-center gap-2">
-                    <span className="font-bold text-green-700">{formatCurrency(exp.reimbursementAmount || exp.amount, userReimburseCurrency)}</span>
-                    <button onClick={() => setEditingExpense(exp)} className="text-blue-500 p-2">✏️</button>
-                    <button onClick={() => handleDeleteExpense(exp.id)} className="text-red-500 p-2">🗑️</button>
+                  <p className="text-xs text-slate-500 mt-1">{cat?.icon} {cat?.name} • {exp.description}</p>
+                  {exp.adminNotes && <p className="text-xs text-amber-700 mt-1 bg-amber-50 border border-amber-200 px-2 py-1 rounded">📝 {exp.adminNotes}</p>}
+                  {exp.isForeignCurrency && exp.forexRate && <p className="text-xs text-amber-600 mt-0.5">💱 {exp.currency} → {userReimburseCurrency} @ {exp.forexRate.toFixed(4)}</p>}
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="font-bold text-green-700">{formatCurrency(exp.reimbursementAmount || exp.amount, userReimburseCurrency)}</span>
+                  <button onClick={() => setEditingExpense(exp)} className="text-blue-500 p-2">✏️</button>
+                  <button onClick={() => handleDeleteExpense(exp.id)} className="text-red-500 p-2">🗑️</button>
                   </div>
                 </div>); 
-              })}</div>);
-            })}</div>
+              })}</div>
           )}
         </div>
         <div className="bg-white rounded-2xl shadow-lg p-6">
