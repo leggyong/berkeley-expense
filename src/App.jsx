@@ -77,6 +77,76 @@ const supabase = {
         }
       })
     };
+  },
+  // Supabase Storage API
+  storage: {
+    from: (bucket) => ({
+      upload: async (path, file, options = {}) => {
+        try {
+          const headers = {
+            'apikey': SUPABASE_ANON_KEY,
+            'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
+          };
+          // If file is a Blob/File, upload directly. If base64, convert first.
+          let body = file;
+          let contentType = options.contentType || 'image/jpeg';
+          
+          if (typeof file === 'string' && file.startsWith('data:')) {
+            // Convert base64 to blob
+            const response = await fetch(file);
+            body = await response.blob();
+            contentType = body.type || 'image/jpeg';
+          }
+          
+          headers['Content-Type'] = contentType;
+          
+          const res = await fetch(
+            `${SUPABASE_URL}/storage/v1/object/${bucket}/${path}`,
+            { method: 'POST', headers, body }
+          );
+          
+          if (res.ok) {
+            const data = await res.json();
+            return { data: { path }, error: null };
+          } else {
+            // If file exists, try upsert
+            if (res.status === 400) {
+              const upsertRes = await fetch(
+                `${SUPABASE_URL}/storage/v1/object/${bucket}/${path}`,
+                { method: 'PUT', headers, body }
+              );
+              if (upsertRes.ok) {
+                return { data: { path }, error: null };
+              }
+            }
+            const errorData = await res.json();
+            return { data: null, error: errorData };
+          }
+        } catch (e) {
+          console.error('Storage upload error:', e);
+          return { data: null, error: e };
+        }
+      },
+      getPublicUrl: (path) => {
+        return { data: { publicUrl: `${SUPABASE_URL}/storage/v1/object/public/${bucket}/${path}` } };
+      },
+      remove: async (paths) => {
+        try {
+          const headers = {
+            'apikey': SUPABASE_ANON_KEY,
+            'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
+            'Content-Type': 'application/json'
+          };
+          const res = await fetch(
+            `${SUPABASE_URL}/storage/v1/object/${bucket}`,
+            { method: 'DELETE', headers, body: JSON.stringify({ prefixes: paths }) }
+          );
+          return { error: res.ok ? null : await res.json() };
+        } catch (e) {
+          return { error: e };
+        }
+      }
+    })
   }
 };
 
@@ -313,6 +383,43 @@ const compressImage = (dataUrl, maxWidth = 1200, quality = 0.7) => {
     img.onerror = () => resolve(dataUrl); // Return original if compression fails
     img.src = dataUrl;
   });
+};
+
+// Upload image to Supabase Storage and return URL
+const uploadImageToStorage = async (dataUrl, userId, type = 'receipt') => {
+  try {
+    // First compress the image
+    const compressed = await compressImage(dataUrl);
+    
+    // Generate unique filename
+    const timestamp = Date.now();
+    const random = Math.random().toString(36).substring(7);
+    const filename = `${userId}/${type}_${timestamp}_${random}.jpg`;
+    
+    // Upload to storage bucket named 'receipts'
+    const { data, error } = await supabase.storage.from('receipts').upload(filename, compressed);
+    
+    if (error) {
+      console.error('Storage upload failed:', error);
+      // Fallback: return compressed base64 if storage fails
+      return compressed;
+    }
+    
+    // Get public URL
+    const { data: urlData } = supabase.storage.from('receipts').getPublicUrl(filename);
+    console.log(`☁️ Image uploaded to storage: ${filename}`);
+    
+    return urlData.publicUrl;
+  } catch (err) {
+    console.error('Upload error:', err);
+    // Fallback: return compressed base64 if upload fails
+    return await compressImage(dataUrl);
+  }
+};
+
+// Check if a string is a storage URL (not base64)
+const isStorageUrl = (str) => {
+  return str && typeof str === 'string' && (str.startsWith('http://') || str.startsWith('https://'));
 };
 
 const APPROVAL_WORKFLOWS = {
@@ -794,7 +901,7 @@ const RequestChangesModal = ({ claim, onClose, onSubmit }) => {
   );
 };
 
-const StatementUploadModal = ({ existingImages, onClose, onContinue }) => {
+const StatementUploadModal = ({ existingImages, userId, onClose, onContinue }) => {
     const [localStatements, setLocalStatements] = useState([...existingImages]);
     const [isProcessing, setIsProcessing] = useState(false);
     const fileInputRef = useRef(null);
@@ -804,12 +911,18 @@ const StatementUploadModal = ({ existingImages, onClose, onContinue }) => {
       const file = e.target.files[0]; 
       if (!file) return;
       setIsProcessing(true);
-      // Convert to base64 for persistence across devices
       const reader = new FileReader();
       reader.onload = async (event) => {
-        // Compress the image before storing
-        const compressed = await compressImage(event.target.result);
-        setLocalStatements(prev => [...prev, compressed]);
+        try {
+          // Upload to Supabase Storage
+          const imageUrl = await uploadImageToStorage(event.target.result, userId, 'statement');
+          setLocalStatements(prev => [...prev, imageUrl]);
+        } catch (err) {
+          console.error('Upload failed:', err);
+          // Fallback to compressed base64
+          const compressed = await compressImage(event.target.result);
+          setLocalStatements(prev => [...prev, compressed]);
+        }
         setIsProcessing(false);
       };
       reader.onerror = () => {
@@ -993,15 +1106,46 @@ export default function BerkeleyExpenseSystem() {
       
       if (!error && data && data.length > 0) {
         const draft = data[0];
+        let needsMigration = false;
+        let migratedExpenses = [];
+        let migratedStatements = [];
+        let migratedOriginals = [];
         
         if (draft.expenses) {
           try {
             const parsed = JSON.parse(draft.expenses);
             if (Array.isArray(parsed)) {
+              // Check if any images need migration (base64 to storage)
+              migratedExpenses = await Promise.all(parsed.map(async (exp) => {
+                let updated = { ...exp };
+                
+                // Migrate receiptPreview if it's base64
+                if (exp.receiptPreview && !isStorageUrl(exp.receiptPreview)) {
+                  console.log(`🔄 Migrating receipt for expense ${exp.ref || exp.id}...`);
+                  const url = await uploadImageToStorage(exp.receiptPreview, currentUser.id, 'receipt');
+                  if (isStorageUrl(url)) {
+                    updated.receiptPreview = url;
+                    needsMigration = true;
+                  }
+                }
+                
+                // Migrate receiptPreview2 if it's base64
+                if (exp.receiptPreview2 && !isStorageUrl(exp.receiptPreview2)) {
+                  const url = await uploadImageToStorage(exp.receiptPreview2, currentUser.id, 'receipt2');
+                  if (isStorageUrl(url)) {
+                    updated.receiptPreview2 = url;
+                    needsMigration = true;
+                  }
+                }
+                
+                return updated;
+              }));
+              
               // IMPORTANT: Reassign sequential refs AND re-check duplicates on load
-              let processed = sortAndReassignRefs(parsed);
+              let processed = sortAndReassignRefs(migratedExpenses);
               processed = markDuplicatePairs(processed);
               setExpenses(processed);
+              migratedExpenses = processed;
             }
           } catch (e) { console.error('Parse expenses error:', e); }
         }
@@ -1009,22 +1153,60 @@ export default function BerkeleyExpenseSystem() {
         if (draft.statements) {
           try {
             const parsed = JSON.parse(draft.statements);
-            if (Array.isArray(parsed)) setAnnotatedStatements(parsed);
+            if (Array.isArray(parsed)) {
+              // Migrate statements if base64
+              migratedStatements = await Promise.all(parsed.map(async (img) => {
+                if (img && !isStorageUrl(img)) {
+                  console.log('🔄 Migrating statement...');
+                  const url = await uploadImageToStorage(img, currentUser.id, 'statement');
+                  if (isStorageUrl(url)) {
+                    needsMigration = true;
+                    return url;
+                  }
+                }
+                return img;
+              }));
+              setAnnotatedStatements(migratedStatements);
+            }
           } catch (e) { console.error('Parse statements error:', e); }
         }
         
+        let parsedAnnotations = [];
         if (draft.annotations) {
           try {
             const parsed = JSON.parse(draft.annotations);
-            if (Array.isArray(parsed)) setStatementAnnotations(parsed);
+            if (Array.isArray(parsed)) {
+              parsedAnnotations = parsed;
+              setStatementAnnotations(parsed);
+            }
           } catch (e) { console.error('Parse annotations error:', e); }
         }
         
         if (draft.originals) {
           try {
             const parsed = JSON.parse(draft.originals);
-            if (Array.isArray(parsed)) setOriginalStatementImages(parsed);
+            if (Array.isArray(parsed)) {
+              // Migrate originals if base64
+              migratedOriginals = await Promise.all(parsed.map(async (img) => {
+                if (img && !isStorageUrl(img)) {
+                  console.log('🔄 Migrating original statement...');
+                  const url = await uploadImageToStorage(img, currentUser.id, 'original');
+                  if (isStorageUrl(url)) {
+                    needsMigration = true;
+                    return url;
+                  }
+                }
+                return img;
+              }));
+              setOriginalStatementImages(migratedOriginals);
+            }
           } catch (e) { console.error('Parse originals error:', e); }
+        }
+        
+        // If we migrated any images, save the updated data
+        if (needsMigration) {
+          console.log('💾 Saving migrated data to database...');
+          await saveToServer(migratedExpenses, migratedStatements, parsedAnnotations, migratedOriginals);
         }
       }
     } catch (err) { 
@@ -1678,15 +1860,27 @@ export default function BerkeleyExpenseSystem() {
         }
     }, [formData.amount, formData.date, formData.currency, existingClaims, expenses, editExpense]);
 
+    const [isUploading, setIsUploading] = useState(false);
+    
     const handleFileChange = async (e, isSecond = false) => { 
       const file = e.target.files?.[0]; 
       if (!file) return;
+      setIsUploading(true);
       const reader = new FileReader();
       reader.onload = async (event) => {
-        // Compress the image before storing
-        const compressed = await compressImage(event.target.result);
-        if (isSecond) setReceiptPreview2(compressed); 
-        else { setReceiptPreview(compressed); setStep(2); }
+        try {
+          // Upload to Supabase Storage (falls back to compressed base64 if storage fails)
+          const imageUrl = await uploadImageToStorage(event.target.result, currentUser.id, 'receipt');
+          if (isSecond) setReceiptPreview2(imageUrl); 
+          else { setReceiptPreview(imageUrl); setStep(2); }
+        } catch (err) {
+          console.error('Upload failed:', err);
+          // Fallback to compressed base64
+          const compressed = await compressImage(event.target.result);
+          if (isSecond) setReceiptPreview2(compressed); 
+          else { setReceiptPreview(compressed); setStep(2); }
+        }
+        setIsUploading(false);
       };
       reader.readAsDataURL(file);
     };
@@ -1760,7 +1954,7 @@ export default function BerkeleyExpenseSystem() {
         <div className="bg-white rounded-2xl max-w-lg w-full max-h-[90vh] overflow-hidden shadow-2xl">
           <div className="bg-gradient-to-r from-blue-600 to-indigo-600 text-white p-5 flex justify-between items-center"><div><h2 className="text-lg font-bold">{editExpense ? '✏️ Edit' : '📸 Add'} Expense</h2><p className="text-blue-100 text-sm">Reimburse in {userReimburseCurrency}</p></div><button onClick={onClose} className="w-8 h-8 rounded-full bg-white/20">✕</button></div>
           <div className="p-6 overflow-y-auto max-h-[calc(90vh-180px)]">
-            {step === 1 && (<div className="space-y-3"><label className="block border-3 border-dashed border-blue-400 bg-blue-50 rounded-2xl p-6 text-center cursor-pointer hover:border-blue-500"><input type="file" accept="image/*" capture="environment" onChange={(e) => handleFileChange(e, false)} className="hidden" /><div className="text-4xl mb-2">📷</div><p className="font-semibold text-blue-700">Take Photo</p><p className="text-xs text-slate-500">Open camera</p></label><label className="block border-3 border-dashed border-green-400 bg-green-50 rounded-2xl p-6 text-center cursor-pointer hover:border-green-500"><input type="file" accept="image/*" onChange={(e) => handleFileChange(e, false)} className="hidden" /><div className="text-4xl mb-2">🖼️</div><p className="font-semibold text-green-700">Choose from Gallery</p><p className="text-xs text-slate-500">Select existing photo</p></label></div>)}
+            {step === 1 && (<div className="space-y-3">{isUploading ? (<div className="text-center py-12"><div className="text-4xl mb-2 animate-pulse">☁️</div><p className="font-semibold text-blue-700">Uploading...</p><p className="text-xs text-slate-500">Please wait</p></div>) : (<><label className="block border-3 border-dashed border-blue-400 bg-blue-50 rounded-2xl p-6 text-center cursor-pointer hover:border-blue-500"><input type="file" accept="image/*" capture="environment" onChange={(e) => handleFileChange(e, false)} className="hidden" /><div className="text-4xl mb-2">📷</div><p className="font-semibold text-blue-700">Take Photo</p><p className="text-xs text-slate-500">Open camera</p></label><label className="block border-3 border-dashed border-green-400 bg-green-50 rounded-2xl p-6 text-center cursor-pointer hover:border-green-500"><input type="file" accept="image/*" onChange={(e) => handleFileChange(e, false)} className="hidden" /><div className="text-4xl mb-2">🖼️</div><p className="font-semibold text-green-700">Choose from Gallery</p><p className="text-xs text-slate-500">Select existing photo</p></label></>)}</div>)}
             {step === 2 && (
               <div className="space-y-4">
                 {duplicateWarning && <div className="bg-red-100 border-l-4 border-red-500 text-red-700 p-3 text-sm font-bold animate-pulse">{duplicateWarning}</div>}
@@ -2201,6 +2395,7 @@ export default function BerkeleyExpenseSystem() {
       {showStatementUpload && (
         <StatementUploadModal 
           existingImages={originalStatementImages}
+          userId={currentUser?.id}
           onClose={() => setShowStatementUpload(false)}
           onContinue={(imgs) => {
             setStatementImages(imgs);
