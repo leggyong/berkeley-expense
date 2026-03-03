@@ -1578,7 +1578,6 @@ export default function BerkeleyExpenseSystem() {
           insertData.level2_approved_at = new Date().toISOString();
         }
         if (annotatedStatements.length > 0) insertData.annotated_statements = annotatedStatements;
-        if (statementAnnotations.length > 0) insertData.annotations = statementAnnotations;
         const result = await supabase.from('claims').insert([insertData]);
         if (result.error) throw new Error('Failed to create claim');
       }
