@@ -247,7 +247,9 @@ const EMPLOYEES = [
   { id: 1005, name: 'Yasseen Jebara', office: 'DXB', role: 'employee', reimburseCurrency: 'AED', password: 'berkeley123' },
   { id: 1006, name: 'Adham Abu-Salim', office: 'DXB', role: 'employee', reimburseCurrency: 'AED', password: 'berkeley123' },
   { id: 1007, name: 'Olivia Rebecca Wyatt', office: 'DXB', role: 'employee', reimburseCurrency: 'AED', password: 'berkeley123' },
-  { id: 1008, name: 'Keisha Latoya Whitehorne', office: 'DXB', role: 'employee', reimburseCurrency: 'AED', password: 'berkeley123' }
+  { id: 1008, name: 'Keisha Latoya Whitehorne', office: 'DXB', role: 'employee', reimburseCurrency: 'AED', password: 'berkeley123' },
+  // Group Finance - UK-based reviewer
+  { id: 9001, name: 'Emma Fowler', office: 'LON', role: 'group_finance', reimburseCurrency: 'GBP', password: 'berkeley123' }
 ];
 
 // Emma Fowler's restructured categories aligned with IFS accounting (Feb 2026)
@@ -950,7 +952,7 @@ const StatementUploadModal = ({ existingImages, userId, onClose, onContinue }) =
     return (
       <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50">
         <div className="bg-white rounded-2xl max-w-lg w-full shadow-2xl max-h-[90vh] overflow-hidden flex flex-col">
-          <div className="bg-amber-500 text-white p-5 shrink-0"><h2 className="text-lg font-bold">💳 Upload Credit Card Statements</h2><p className="text-amber-100 text-sm">You can upload multiple statements</p></div>
+          <div className="bg-amber-500 text-white p-5 shrink-0"><h2 className="text-lg font-bold">💳 Upload Credit Card/Bank Statements</h2><p className="text-amber-100 text-sm">You can upload multiple statements</p></div>
           <div className="p-6 overflow-y-auto flex-1">
             <div className="grid grid-cols-2 gap-3 mb-4">
               {localStatements.map((img, idx) => (
@@ -1269,7 +1271,7 @@ export default function BerkeleyExpenseSystem() {
   const getReviewableClaims = () => { if (!currentUser) return []; return claims.filter(c => (c.status === 'pending_review' || c.status === 'pending_level2') && canUserReviewClaim(currentUser.id, c)); };
   
 
-  const generatePDFFromHTML = async (expenseList, userName, officeCode, claimNumber, submittedDate, statementImgs, reimburseCurrency, level2ApprovedBy, level2ApprovedAt) => {
+  const generatePDFFromHTML = async (expenseList, userName, officeCode, claimNumber, submittedDate, statementImgs, reimburseCurrency, level2ApprovedBy, level2ApprovedAt, annotations = []) => {
     const printWindow = window.open('', '_blank');
     if (!printWindow) { alert('Please allow popups'); return; }
     const office = OFFICES.find(o => o.code === officeCode);
@@ -1376,7 +1378,10 @@ export default function BerkeleyExpenseSystem() {
       });
     });
 
-    // Receipt pages - FIXED: add >2 MONTHS badge, fix backcharge colors, add GBP per pax
+    // Statement array (declared early so receiptsHTML can use it)
+    const statementsArray = Array.isArray(statementImgs) ? statementImgs : (statementImgs ? [statementImgs] : []);
+
+    // Receipt pages - with matched statement shown beside receipt for foreign currency expenses
     const receiptsHTML = expensesWithRefs.map(exp => {
       const cat = EXPENSE_CATEGORIES[exp.category] || { name: 'Unknown' };
       const pax = parseInt(exp.numberOfPax) || 0;
@@ -1389,12 +1394,19 @@ export default function BerkeleyExpenseSystem() {
       // FIXED: backcharge with white background and dark text for visibility
       const backchargeHTML = exp.hasBackcharge && exp.backcharges?.length > 0 ? '<div style="background:#fff;border:2px solid #9c27b0;color:#6a1b9a;padding:4px 8px;margin-top:5px;font-size:10px;border-radius:4px;"><strong>📊 Backcharge:</strong> ' + exp.backcharges.map(bc => bc.development + ': ' + bc.percentage + '%').join(' | ') + '</div>' : '';
       const paxInfo = pax > 0 ? '<br>👥 ' + pax + ' pax @ ' + reimburseCurrency + ' ' + fmtAmt(perPax) + '/pax (£' + fmtAmt(perPaxGBP) + '/pax)' : '';
-      return '<div class="page receipt-page"><div class="receipt-header"><div class="receipt-ref">' + exp.seqRef + '</div><div class="receipt-info"><strong>' + exp.merchant + '</strong> | ' + formatDDMMYYYY(new Date(exp.date)) + '<br>' + cat.name + ' | ' + exp.currency + ' ' + fmtAmt(exp.amount) + (exp.isForeignCurrency ? ' → ' + reimburseCurrency + ' ' + fmtAmt(exp.reimbursementAmount) : '') + '<br>' + (exp.description || '') + oldBadge + dupBadge + paxInfo + (exp.attendees ? '<br>' + exp.attendees.replace(/\n/g, ', ') : '') + (exp.adminNotes ? '<br><span style="background:#fff8e1;color:#f57c00;padding:2px 4px;border-radius:3px;">📝 ' + exp.adminNotes + '</span>' : '') + backchargeHTML + '</div></div>' + (exp.receiptPreview ? '<img src="' + exp.receiptPreview + '" class="receipt-img" />' : '<div class="no-receipt">No receipt image</div>') + (exp.receiptPreview2 ? '<div style="margin-top:10px;border-top:2px dashed #ccc;padding-top:10px;"><img src="' + exp.receiptPreview2 + '" class="receipt-img" /></div>' : '') + '</div>';
+      // Find matching statement for foreign currency expenses
+      const matchingAnn = exp.isForeignCurrency && annotations ? annotations.find(a => a.ref === exp.ref || a.ref === String(exp.seqRef)) : null;
+      const matchStmtIdx = matchingAnn ? (matchingAnn.statementIndex || 0) : -1;
+      const matchStmtImg = matchStmtIdx >= 0 && statementsArray[matchStmtIdx] ? statementsArray[matchStmtIdx] : null;
+      const receiptContent = (exp.receiptPreview ? '<img src="' + exp.receiptPreview + '" style="max-width:100%;max-height:' + (matchStmtImg ? '150mm' : '220mm') + ';object-fit:contain;" />' : '<div style="background:#f5f5f5;padding:30px;text-align:center;color:#999;">No receipt</div>') + (exp.receiptPreview2 ? '<div style="margin-top:8px;border-top:2px dashed #ccc;padding-top:8px;"><img src="' + exp.receiptPreview2 + '" style="max-width:100%;max-height:60mm;object-fit:contain;" /></div>' : '');
+      const stmtContent = matchStmtImg ? '<div style="flex:1;max-width:48%;border-left:3px solid #ff9800;padding-left:8px;"><div style="background:#ff9800;color:white;padding:5px 10px;font-weight:bold;font-size:9px;margin-bottom:8px;border-radius:4px;">💳 Matched Statement ' + (matchStmtIdx + 1) + '</div><img src="' + matchStmtImg + '" style="max-width:100%;max-height:170mm;object-fit:contain;border:1px solid #ddd;" /></div>' : '';
+      const contentHTML = matchStmtImg ? '<div style="display:flex;gap:10px;align-items:flex-start;"><div style="flex:1;max-width:50%;">' + receiptContent + '</div>' + stmtContent + '</div>' : receiptContent;
+      return '<div class="page receipt-page"><div class="receipt-header"><div class="receipt-ref">' + exp.seqRef + '</div><div class="receipt-info"><strong>' + exp.merchant + '</strong> | ' + formatDDMMYYYY(new Date(exp.date)) + '<br>' + cat.name + ' | ' + exp.currency + ' ' + fmtAmt(exp.amount) + (exp.isForeignCurrency ? ' → ' + reimburseCurrency + ' ' + fmtAmt(exp.reimbursementAmount) : '') + '<br>' + (exp.description || '') + oldBadge + dupBadge + paxInfo + (exp.attendees ? '<br>' + exp.attendees.replace(/\n/g, ', ') : '') + (exp.adminNotes ? '<br><span style="background:#fff8e1;color:#f57c00;padding:2px 4px;border-radius:3px;">📝 ' + exp.adminNotes + '</span>' : '') + backchargeHTML + '</div></div>' + contentHTML + '</div>';
     }).join('');
 
     // Statement pages
     const statementsArray = Array.isArray(statementImgs) ? statementImgs : (statementImgs ? [statementImgs] : []);
-    const statementsHTML = statementsArray.map((img, idx) => '<div class="page statement-page"><div class="statement-header">Bank/Card Statement ' + (statementsArray.length > 1 ? (idx + 1) + ' of ' + statementsArray.length : '') + '</div><img src="' + img + '" class="statement-img" /></div>').join('');
+    const statementsHTML = statementsArray.map((img, idx) => '<div class="page statement-page"><div class="statement-header">Credit Card/Bank Statement ' + (statementsArray.length > 1 ? (idx + 1) + ' of ' + statementsArray.length : '') + '</div><img src="' + img + '" class="statement-img" /></div>').join('');
 
     // Backcharge report
     const backchargeReportHTML = Object.keys(backchargeSummary).length > 0 ? '<div class="page"><h2 style="text-align:center;color:#9c27b0;">Backcharge Summary</h2><table class="detail-table"><thead><tr><th>Development</th><th>Line #</th><th>Date</th><th>%</th><th style="text-align:right;">Amount</th></tr></thead><tbody>' + Object.entries(backchargeSummary).map(([dev, data]) => data.items.map((item, idx) => '<tr><td>' + (idx === 0 ? '<strong>' + dev + '</strong>' : '') + '</td><td>' + item.ref + '</td><td>' + formatDDMMYYYY(new Date(item.date)) + '</td><td>' + item.percentage + '%</td><td style="text-align:right;">' + fmtAmt(item.amount) + '</td></tr>').join('') + '<tr style="background:#e1bee7;"><td colspan="4"><strong>Subtotal</strong></td><td style="text-align:right;"><strong>' + fmtAmt(data.total) + '</strong></td></tr>').join('') + '</tbody></table></div>' : '';
@@ -1494,7 +1506,7 @@ export default function BerkeleyExpenseSystem() {
     try {
       const emp = EMPLOYEES.find(e => e.id === claim.user_id);
       const statements = claim.annotated_statements || (claim.annotated_statement ? [claim.annotated_statement] : []);
-      await generatePDFFromHTML(claim.expenses || [], claim.user_name, emp?.office, claim.claim_number, claim.submitted_at, statements, emp?.reimburseCurrency || claim.currency, claim.level2_approved_by, claim.level2_approved_at);
+      await generatePDFFromHTML(claim.expenses || [], claim.user_name, emp?.office, claim.claim_number, claim.submitted_at, statements, emp?.reimburseCurrency || claim.currency, claim.level2_approved_by, claim.level2_approved_at, claim.annotations || []);
     } catch (err) { alert('❌ Failed'); }
     setDownloading(false);
   };
@@ -1508,7 +1520,7 @@ export default function BerkeleyExpenseSystem() {
         : new Date();
       const lastName = currentUser.name.trim().split(' ').pop();
       const draftClaimNumber = `${lastName} - ${oldestDate.getFullYear()} - ${String(oldestDate.getMonth() + 1).padStart(2, '0')}`;
-      await generatePDFFromHTML(pendingExpenses, currentUser.name, currentUser.office, draftClaimNumber, new Date().toISOString(), annotatedStatements, getUserReimburseCurrency(currentUser), null, null);
+      await generatePDFFromHTML(pendingExpenses, currentUser.name, currentUser.office, draftClaimNumber, new Date().toISOString(), annotatedStatements, getUserReimburseCurrency(currentUser), null, null, statementAnnotations);
     } catch (err) { alert('❌ Failed'); }
     setDownloading(false);
   };
@@ -1567,6 +1579,7 @@ export default function BerkeleyExpenseSystem() {
           insertData.level2_approved_at = new Date().toISOString();
         }
         if (annotatedStatements.length > 0) insertData.annotated_statements = annotatedStatements;
+        if (statementAnnotations.length > 0) insertData.annotations = statementAnnotations;
         const result = await supabase.from('claims').insert([insertData]);
         if (result.error) throw new Error('Failed to create claim');
       }
@@ -1967,6 +1980,27 @@ export default function BerkeleyExpenseSystem() {
                     </div>
                   )}
                 </div>)}
+                {/* Category Guidelines - Collapsible */}
+                <details className="bg-blue-50 border border-blue-200 rounded-xl p-3">
+                  <summary className="font-semibold text-blue-800 cursor-pointer text-sm">📋 Category Guidelines (click to expand)</summary>
+                  <div className="mt-3 text-xs text-slate-700 space-y-2">
+                    <p><strong>🚕 Taxis:</strong> Uber, Grab, cabs - Include pickup/dropoff locations</p>
+                    <p><strong>✈️ Flights:</strong> Business travel only - Include route and purpose</p>
+                    <p><strong>🚇 Public Transport:</strong> Trains, tubes, buses for business</p>
+                    <p><strong>🅿️ Parking & Tolls:</strong> Business-related parking fees</p>
+                    <p><strong>📋 Visas & Tourist Fees:</strong> Work travel permits only</p>
+                    <p><strong>🚗 Car Hire & Petrol:</strong> Business trips - Include mileage/route</p>
+                    <p><strong>📍 Business Mileage:</strong> Personal car for business - £0.45/mile first 10k</p>
+                    <p><strong>🍽️ Meals Self:</strong> When travelling for work</p>
+                    <p><strong>👥 Meals with Berkeley:</strong> Internal team meals - List all attendees</p>
+                    <p><strong>🍷 Meals with Non-Berkeley:</strong> Client entertainment - List all attendees & companies</p>
+                    <p><strong>👔 Hotel Laundry:</strong> Only for trips 5+ days</p>
+                    <p><strong>🎯 Team Activity:</strong> Team building events - Need prior approval</p>
+                    <p><strong>🎁 Staff Gifts:</strong> Max £50 per person - Birthdays/leaving</p>
+                    <p><strong>☕ Pantry Supplies:</strong> Coffee, milk, snacks for office</p>
+                    <p><strong>🖨️ Marketing:</strong> Prints, branded goods, event costs</p>
+                  </div>
+                </details>
                 <div className="grid grid-cols-2 gap-4">
                   <input type="date" className="p-3 border-2 border-slate-200 rounded-xl" value={formData.date} onChange={e => setFormData(prev => ({ ...prev, date: e.target.value }))} />
                   <select className="p-3 border-2 border-slate-200 rounded-xl bg-white text-sm" value={formData.category} onChange={e => setFormData(prev => ({ ...prev, category: e.target.value }))}>
@@ -2342,7 +2376,7 @@ export default function BerkeleyExpenseSystem() {
     );
   };
 
-  const canReview = currentUser.role === 'admin' || currentUser.role === 'manager' || currentUser.role === 'finance' || getReviewableClaims().length > 0 || getClaimsForSubmission().length > 0;
+  const canReview = currentUser.role === 'admin' || currentUser.role === 'manager' || currentUser.role === 'finance' || currentUser.role === 'group_finance' || getReviewableClaims().length > 0 || getClaimsForSubmission().length > 0;
   
   const handleStatementAnnotationSave = async (annotatedImagesObj, newAnnotations) => { 
     // annotatedImagesObj is an object with keys being statement indices
