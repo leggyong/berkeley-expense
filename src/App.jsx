@@ -533,8 +533,13 @@ const StatementAnnotator = ({ images, initialIndex = 0, expenses, existingAnnota
   const [currentAnnotations, setCurrentAnnotations] = useState([]);
 
   useEffect(() => {
+    if (!image) {
+      console.error('No image at index', currentIndex);
+      return;
+    }
     setImageLoaded(false);
     const img = new Image();
+    img.crossOrigin = 'anonymous'; // Handle CORS for storage URLs
     img.onload = () => {
       const maxW = Math.min(800, window.innerWidth - 40);
       const scale = Math.min(maxW / img.width, 1);
@@ -542,8 +547,14 @@ const StatementAnnotator = ({ images, initialIndex = 0, expenses, existingAnnota
       setBaseImage(img);
       setImageLoaded(true);
     };
+    img.onerror = (err) => {
+      console.error('Failed to load statement image:', image, err);
+      // Show error state
+      alert('Failed to load statement image. Please try re-uploading.');
+      setImageLoaded(false);
+    };
     img.src = image;
-  }, [image]);
+  }, [image, currentIndex]);
 
   // Convert annotations for current statement from percentages to pixels when image loads or statement changes
   useEffect(() => {
@@ -1491,7 +1502,13 @@ export default function BerkeleyExpenseSystem() {
   const handleDownloadPreviewPDF = async () => {
     setDownloading(true);
     try {
-      await generatePDFFromHTML(pendingExpenses, currentUser.name, currentUser.office, `DRAFT-${Date.now().toString().slice(-6)}`, new Date().toISOString(), annotatedStatements, getUserReimburseCurrency(currentUser), null, null);
+      // Generate claim number based on oldest expense date
+      const oldestDate = pendingExpenses.length > 0 
+        ? new Date(pendingExpenses.reduce((min, e) => e.date < min ? e.date : min, pendingExpenses[0]?.date))
+        : new Date();
+      const lastName = currentUser.name.trim().split(' ').pop();
+      const draftClaimNumber = `${lastName} - ${oldestDate.getFullYear()} - ${String(oldestDate.getMonth() + 1).padStart(2, '0')}`;
+      await generatePDFFromHTML(pendingExpenses, currentUser.name, currentUser.office, draftClaimNumber, new Date().toISOString(), annotatedStatements, getUserReimburseCurrency(currentUser), null, null);
     } catch (err) { alert('❌ Failed'); }
     setDownloading(false);
   };
