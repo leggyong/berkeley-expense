@@ -1404,8 +1404,7 @@ export default function BerkeleyExpenseSystem() {
       return '<div class="page receipt-page"><div class="receipt-header"><div class="receipt-ref">' + exp.seqRef + '</div><div class="receipt-info"><strong>' + exp.merchant + '</strong> | ' + formatDDMMYYYY(new Date(exp.date)) + '<br>' + cat.name + ' | ' + exp.currency + ' ' + fmtAmt(exp.amount) + (exp.isForeignCurrency ? ' → ' + reimburseCurrency + ' ' + fmtAmt(exp.reimbursementAmount) : '') + '<br>' + (exp.description || '') + oldBadge + dupBadge + paxInfo + (exp.attendees ? '<br>' + exp.attendees.replace(/\n/g, ', ') : '') + (exp.adminNotes ? '<br><span style="background:#fff8e1;color:#f57c00;padding:2px 4px;border-radius:3px;">📝 ' + exp.adminNotes + '</span>' : '') + backchargeHTML + '</div></div>' + contentHTML + '</div>';
     }).join('');
 
-    // Statement pages
-    const statementsArray = Array.isArray(statementImgs) ? statementImgs : (statementImgs ? [statementImgs] : []);
+    // Statement pages (statementsArray already declared above)
     const statementsHTML = statementsArray.map((img, idx) => '<div class="page statement-page"><div class="statement-header">Credit Card/Bank Statement ' + (statementsArray.length > 1 ? (idx + 1) + ' of ' + statementsArray.length : '') + '</div><img src="' + img + '" class="statement-img" /></div>').join('');
 
     // Backcharge report
