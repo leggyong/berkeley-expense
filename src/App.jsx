@@ -324,6 +324,35 @@ const CURRENCIES = [
   'THB', 'TRY', 'TWD', 'USD', 'VND'
 ];
 
+// Format admin notes with different colors for different reviewers (HTML for PDF)
+const formatAdminNotesHTML = (notes) => {
+  if (!notes) return '';
+  const reviewerColors = { 'Ann': '#2563eb', 'John': '#059669', 'Emma': '#7c3aed', 'Cathy': '#dc2626', 'default': '#d97706' };
+  const parts = notes.split(/(?=\b(?:Ann|John|Emma|Cathy|[A-Z][a-z]+):)/g).filter(p => p.trim());
+  if (parts.length <= 1) return '<span style="color:#d97706;">' + notes + '</span>';
+  return parts.map(part => {
+    const match = part.match(/^([A-Z][a-z]+):\s*/);
+    const reviewer = match ? match[1] : 'default';
+    const color = reviewerColors[reviewer] || reviewerColors['default'];
+    return '<div style="color:' + color + ';margin-top:2px;"><strong>' + (match ? reviewer + ':</strong> ' + part.replace(match[0], '') : '</strong>' + part) + '</div>';
+  }).join('');
+};
+
+// Format admin notes with different colors for different reviewers (React for UI)
+const formatAdminNotesReact = (notes) => {
+  if (!notes) return null;
+  const reviewerColors = { 'Ann': 'text-blue-600', 'John': 'text-green-600', 'Emma': 'text-purple-600', 'Cathy': 'text-red-600', 'default': 'text-amber-700' };
+  const parts = notes.split(/(?=\b(?:Ann|John|Emma|Cathy|[A-Z][a-z]+):)/g).filter(p => p.trim());
+  if (parts.length <= 1) return notes;
+  return parts.map((part, idx) => {
+    const match = part.match(/^([A-Z][a-z]+):\s*/);
+    const reviewer = match ? match[1] : 'default';
+    const colorClass = reviewerColors[reviewer] || reviewerColors['default'];
+    const content = match ? part.replace(match[0], '') : part;
+    return `<div class="${colorClass}">${match ? '<strong>' + reviewer + ':</strong> ' : ''}${content}</div>`;
+  }).join('');
+};
+
 const formatCurrency = (amount, currency) => {
   const num = parseFloat(amount || 0);
   return `${currency} ${num.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -841,8 +870,13 @@ const RequestChangesModal = ({ claim, onClose, onSubmit }) => {
   const [flaggedExpenses, setFlaggedExpenses] = useState([]);
   
   const sortedExpenses = [...(claim.expenses || [])].sort((a, b) => {
-    const refA = a.ref || 'Z99';
-    const refB = b.ref || 'Z99';
+    const refA = a.ref || '999';
+    const refB = b.ref || '999';
+    // Try pure numeric sort first
+    const numA = parseInt(refA);
+    const numB = parseInt(refB);
+    if (!isNaN(numA) && !isNaN(numB)) return numA - numB;
+    // Fall back to alphanumeric sort (category letter + number)
     const catA = refA.charAt(0);
     const catB = refB.charAt(0);
     if (catA !== catB) return catA.localeCompare(catB);
@@ -1346,9 +1380,10 @@ export default function BerkeleyExpenseSystem() {
         const warnings = [];
         if (isOld) warnings.push('<span style="color:red;font-weight:bold;">⚠ >2 MONTHS</span>');
         if (exp.isPotentialDuplicate) warnings.push('<span style="color:orange;font-weight:bold;">⚠ DUPLICATE?</span>');
-        if (exp.adminNotes) warnings.push('<span style="color:#d97706;">📝 ' + exp.adminNotes + '</span>');
+        if (exp.adminNotes) warnings.push('<div style="background:#fff8e1;padding:2px 4px;border-radius:3px;">📝 ' + formatAdminNotesHTML(exp.adminNotes) + '</div>');
         // Add per pax info if applicable
-        if (pax > 0) warnings.push('<span style="color:#7c3aed;">' + pax + ' pax @ ' + fmtAmt(perPax) + ' (£' + fmtAmt(perPaxGBP) + ')/pax</span>');
+        // Add per pax info BEFORE comments if applicable
+        if (pax > 0) warnings.unshift('<span style="color:#7c3aed;">' + pax + ' pax: ' + reimburseCurrency + ' ' + fmtAmt(perPax) + ' (£' + fmtAmt(perPaxGBP) + ')/pax</span>');
         
         return '<tr>' +
           '<td style="text-align:center;">' + exp.seqRef + '</td>' +
@@ -1393,7 +1428,7 @@ export default function BerkeleyExpenseSystem() {
       const dupBadge = exp.isPotentialDuplicate ? '<br><span style="background:#fff3e0;color:#e65100;padding:2px 6px;border-radius:3px;font-weight:bold;">⚠ DUPLICATE?</span>' : '';
       // FIXED: backcharge with white background and dark text for visibility
       const backchargeHTML = exp.hasBackcharge && exp.backcharges?.length > 0 ? '<div style="background:#fff;border:2px solid #9c27b0;color:#6a1b9a;padding:4px 8px;margin-top:5px;font-size:10px;border-radius:4px;"><strong>📊 Backcharge:</strong> ' + exp.backcharges.map(bc => bc.development + ': ' + bc.percentage + '%').join(' | ') + '</div>' : '';
-      const paxInfo = pax > 0 ? '<br>👥 ' + pax + ' pax @ ' + reimburseCurrency + ' ' + fmtAmt(perPax) + '/pax (£' + fmtAmt(perPaxGBP) + '/pax)' : '';
+      const paxInfo = pax > 0 ? '<br>👥 ' + pax + ' pax: ' + reimburseCurrency + ' ' + fmtAmt(perPax) + ' (£' + fmtAmt(perPaxGBP) + ')/pax' : '';
       // Find matching statement for foreign currency expenses
       const matchingAnn = exp.isForeignCurrency && annotations ? annotations.find(a => a.ref === exp.ref || a.ref === String(exp.seqRef)) : null;
       const matchStmtIdx = matchingAnn ? (matchingAnn.statementIndex || 0) : -1;
@@ -1401,7 +1436,7 @@ export default function BerkeleyExpenseSystem() {
       const receiptContent = (exp.receiptPreview ? '<img src="' + exp.receiptPreview + '" style="max-width:100%;max-height:' + (matchStmtImg ? '150mm' : '220mm') + ';object-fit:contain;" />' : '<div style="background:#f5f5f5;padding:30px;text-align:center;color:#999;">No receipt</div>') + (exp.receiptPreview2 ? '<div style="margin-top:8px;border-top:2px dashed #ccc;padding-top:8px;"><img src="' + exp.receiptPreview2 + '" style="max-width:100%;max-height:60mm;object-fit:contain;" /></div>' : '');
       const stmtContent = matchStmtImg ? '<div style="flex:1;max-width:48%;border-left:3px solid #ff9800;padding-left:8px;"><div style="background:#ff9800;color:white;padding:5px 10px;font-weight:bold;font-size:9px;margin-bottom:8px;border-radius:4px;">💳 Matched Statement ' + (matchStmtIdx + 1) + '</div><img src="' + matchStmtImg + '" style="max-width:100%;max-height:170mm;object-fit:contain;border:1px solid #ddd;" /></div>' : '';
       const contentHTML = matchStmtImg ? '<div style="display:flex;gap:10px;align-items:flex-start;"><div style="flex:1;max-width:50%;">' + receiptContent + '</div>' + stmtContent + '</div>' : receiptContent;
-      return '<div class="page receipt-page"><div class="receipt-header"><div class="receipt-ref">' + exp.seqRef + '</div><div class="receipt-info"><strong>' + exp.merchant + '</strong> | ' + formatDDMMYYYY(new Date(exp.date)) + '<br>' + cat.name + ' | ' + exp.currency + ' ' + fmtAmt(exp.amount) + (exp.isForeignCurrency ? ' → ' + reimburseCurrency + ' ' + fmtAmt(exp.reimbursementAmount) : '') + '<br>' + (exp.description || '') + oldBadge + dupBadge + paxInfo + (exp.attendees ? '<br>' + exp.attendees.replace(/\n/g, ', ') : '') + (exp.adminNotes ? '<br><span style="background:#fff8e1;color:#f57c00;padding:2px 4px;border-radius:3px;">📝 ' + exp.adminNotes + '</span>' : '') + backchargeHTML + '</div></div>' + contentHTML + '</div>';
+      return '<div class="page receipt-page"><div class="receipt-header"><div class="receipt-ref">' + exp.seqRef + '</div><div class="receipt-info"><strong>' + exp.merchant + '</strong> | ' + formatDDMMYYYY(new Date(exp.date)) + '<br>' + cat.name + ' | ' + exp.currency + ' ' + fmtAmt(exp.amount) + (exp.isForeignCurrency ? ' → ' + reimburseCurrency + ' ' + fmtAmt(exp.reimbursementAmount) : '') + '<br>' + (exp.description || '') + oldBadge + dupBadge + paxInfo + (exp.attendees ? '<br>' + exp.attendees.replace(/\n/g, ', ') : '') + (exp.adminNotes ? '<br><div style="background:#fff8e1;padding:2px 4px;border-radius:3px;">📝 ' + formatAdminNotesHTML(exp.adminNotes) + '</div>' : '') + backchargeHTML + '</div></div>' + contentHTML + '</div>';
     }).join('');
 
     // Statement pages (statementsArray already declared above)
@@ -1688,14 +1723,28 @@ export default function BerkeleyExpenseSystem() {
         : '';
       const fullComment = flaggedText + comment;
       
-      const { error } = await supabase.from('claims').update({ 
+      // Try with flagged_expenses first, fall back without if column doesn't exist
+      const updateData = { 
         status: 'changes_requested', 
         admin_comment: fullComment,
-        flagged_expenses: flaggedExpenses,
         reviewed_by: currentUser.name,
         approval_level: 1
-      }).eq('id', claimId);
-      if (error) throw error;
+      };
+      
+      // Only add flagged_expenses if there are any
+      if (flaggedExpenses.length > 0) {
+        updateData.flagged_expenses = flaggedExpenses;
+      }
+      
+      let result = await supabase.from('claims').update(updateData).eq('id', claimId);
+      
+      // If failed and we tried flagged_expenses, retry without it
+      if (result.error && flaggedExpenses.length > 0) {
+        delete updateData.flagged_expenses;
+        result = await supabase.from('claims').update(updateData).eq('id', claimId);
+      }
+      
+      if (result.error) throw result.error;
       await loadClaims(); 
       setSelectedClaim(null); 
       setShowRequestChanges(false); 
@@ -2182,14 +2231,15 @@ export default function BerkeleyExpenseSystem() {
               {exp.adminNotes && (
                 <div className="col-span-2 bg-amber-50 border border-amber-200 rounded-lg p-2">
                   <p className="text-xs font-semibold text-amber-700 mb-1">📝 Previous Comments:</p>
-                  <p className="text-sm text-amber-800 whitespace-pre-line">{exp.adminNotes}</p>
+                  <div className="text-sm" dangerouslySetInnerHTML={{ __html: formatAdminNotesReact(exp.adminNotes) }} />
                 </div>
               )}
-              <div className="col-span-2 flex gap-2 items-center">
-                <span className="text-xs font-semibold text-slate-500 whitespace-nowrap">{reviewerFirstName}:</span>
-                <input 
-                  className="flex-1 p-2 border-2 border-amber-300 bg-amber-50 rounded-lg text-sm" 
+              <div className="col-span-2 flex gap-2 items-start">
+                <span className="text-xs font-semibold text-slate-500 whitespace-nowrap pt-2">{reviewerFirstName}:</span>
+                <textarea 
+                  className="flex-1 p-2 border-2 border-amber-300 bg-amber-50 rounded-lg text-sm min-h-[40px] resize-y" 
                   placeholder="Add comment..." 
+                  rows={1}
                   value={newComments[idx] || ''} 
                   onChange={e => updateNewComment(idx, e.target.value)} 
                 />
@@ -2282,7 +2332,7 @@ export default function BerkeleyExpenseSystem() {
                     {exp.receiptPreview2 && <span className="text-slate-500 text-xs">📑</span>}
                   </div>
                   <p className="text-xs text-slate-500 mt-1">{cat?.icon} {cat?.name} • {exp.description}</p>
-                  {exp.adminNotes && <p className="text-xs text-amber-700 mt-1 bg-amber-50 border border-amber-200 px-2 py-1 rounded">📝 {exp.adminNotes}</p>}
+                  {exp.adminNotes && <div className="text-xs mt-1 bg-amber-50 border border-amber-200 px-2 py-1 rounded"><span className="font-semibold">📝 Notes:</span><div dangerouslySetInnerHTML={{ __html: formatAdminNotesReact(exp.adminNotes) }} /></div>}
                   {exp.isForeignCurrency && exp.forexRate && <p className="text-xs text-amber-600 mt-0.5">💱 {exp.currency} → {userReimburseCurrency} @ {exp.forexRate.toFixed(4)}</p>}
                 </div>
                 <div className="flex items-center gap-2">
@@ -2359,7 +2409,7 @@ export default function BerkeleyExpenseSystem() {
           <h3 className="font-bold mb-4">📊 To Review ({reviewableClaims.length})</h3>
           {reviewableClaims.length === 0 ? <div className="text-center py-12 text-slate-400">✅ Nothing to review</div> : (<div className="space-y-2">{reviewableClaims.map(claim => (<div key={claim.id} onClick={() => setSelectedClaim(claim)} className="flex items-center justify-between p-4 rounded-xl bg-slate-50 border cursor-pointer hover:border-blue-300"><div><span className="font-semibold">{claim.user_name}</span><span className={`ml-2 text-xs px-2 py-0.5 rounded-full ${claim.approval_level === 2 ? 'bg-blue-100 text-blue-700' : 'bg-amber-100 text-amber-700'}`}>L{claim.approval_level || 1}</span><p className="text-sm text-slate-500">{claim.office}</p></div><span className="font-bold">{formatCurrency(claim.total_amount, claim.currency)}</span></div>))}</div>)}
         </div>
-        {selectedClaim && (<div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50" onClick={() => setSelectedClaim(null)}><div className="bg-white rounded-2xl max-w-2xl w-full max-h-[90vh] overflow-auto" onClick={e => e.stopPropagation()}><div className="p-6 border-b flex justify-between"><div><h2 className="text-xl font-bold">{selectedClaim.user_name}</h2><p className="text-sm text-slate-500">{selectedClaim.claim_number} • Level {selectedClaim.approval_level || 1}</p></div><button onClick={() => setSelectedClaim(null)} className="text-2xl text-slate-400">×</button></div><div className="p-6"><button onClick={() => handleDownloadPDF(selectedClaim)} className="w-full bg-green-600 text-white py-3 rounded-xl font-semibold mb-4">📥 Download PDF</button>{[...(selectedClaim.expenses || [])].sort((a, b) => { const refA = a.ref || 'Z99'; const refB = b.ref || 'Z99'; const catA = refA.charAt(0); const catB = refB.charAt(0); if (catA !== catB) return catA.localeCompare(catB); return (parseInt(refA.slice(1)) || 0) - (parseInt(refB.slice(1)) || 0); }).map((exp, i) => { const isOld = isOlderThan2Months(exp.date); const isApproaching = isApproaching2Months(exp.date); const daysLeft = getDaysUntil2Months(exp.date); const paxCount = parseInt(exp.numberOfPax) || 0; const isEntertaining = EXPENSE_CATEGORIES[exp.category]?.requiresAttendees; const perPaxAmount = isEntertaining && paxCount > 0 ? (parseFloat(exp.reimbursementAmount || exp.amount) / paxCount) : 0; return (<div key={i} className={`py-3 border-b ${isOld ? 'bg-red-50' : isApproaching ? 'bg-amber-50' : ''}`}><div className="flex justify-between items-start"><div className="flex-1"><div className="flex items-center gap-2 flex-wrap"><span className="bg-blue-100 text-blue-700 text-xs px-2 py-0.5 rounded font-bold">{exp.ref}</span><span className="font-semibold">{exp.merchant}</span>{exp.isPotentialDuplicate && <span className="bg-red-100 text-red-600 text-xs px-2 py-0.5 rounded">⚠️ Duplicate?</span>}{isOld && <span className="bg-red-100 text-red-600 text-xs px-2 py-0.5 rounded animate-pulse">🚨 &gt;2 Months</span>}{isApproaching && <span className="bg-amber-100 text-amber-700 text-xs px-2 py-0.5 rounded">⏰ {daysLeft}d left</span>}{paxCount > 0 && <span className="bg-purple-100 text-purple-600 text-xs px-2 py-0.5 rounded">👥 {paxCount} pax</span>}{isEntertaining && paxCount > 0 && <span className="bg-indigo-100 text-indigo-600 text-xs px-2 py-0.5 rounded">💰 {selectedClaim.currency} {perPaxAmount.toFixed(2)}/pax</span>}</div><p className="text-xs text-slate-500 mt-1">{exp.description}</p>{exp.isForeignCurrency && exp.forexRate && <p className="text-xs text-amber-600 mt-1">💱 Rate: 1 {exp.currency} = {exp.forexRate.toFixed(4)} {selectedClaim.currency}</p>}{exp.adminNotes && <p className="text-xs text-amber-600 mt-1 bg-amber-50 px-2 py-1 rounded">📝 Notes: {exp.adminNotes}</p>}</div><span className="font-bold text-green-700 ml-2">{formatCurrency(exp.reimbursementAmount || exp.amount, selectedClaim.currency)}</span></div></div>); })}</div><div className="p-4 border-t bg-slate-50 space-y-3"><div className="flex gap-3"><button onClick={() => setEditingClaim(selectedClaim)} className="flex-1 py-3 rounded-xl bg-purple-500 text-white font-semibold">✏️ Edit / Add Notes</button><button onClick={() => setShowRequestChanges(true)} className="flex-1 py-3 rounded-xl bg-amber-500 text-white font-semibold">📝 Return</button></div><div className="flex gap-3"><button onClick={() => handleReject(selectedClaim.id)} disabled={loading} className="flex-1 py-3 rounded-xl bg-red-500 text-white font-semibold disabled:opacity-50">↩️ Reject</button><button onClick={() => handleApprove(selectedClaim)} disabled={loading} className="flex-[2] py-3 rounded-xl bg-green-600 text-white font-semibold disabled:opacity-50">{(() => { const workflow = SENIOR_STAFF_ROUTING[selectedClaim.user_id]; const isSingleLevel = workflow?.singleLevel; const level = selectedClaim.approval_level || 1; if (level === 1 && isSingleLevel) return workflow?.externalApproval ? '✓ Approve (→ Chairman)' : '✓ Final Approve'; if (level === 1) return '✓ Approve → L2'; return '✓ Final Approve'; })()}</button></div></div></div></div>)}
+        {selectedClaim && (<div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50" onClick={() => setSelectedClaim(null)}><div className="bg-white rounded-2xl max-w-2xl w-full max-h-[90vh] overflow-auto" onClick={e => e.stopPropagation()}><div className="p-6 border-b flex justify-between"><div><h2 className="text-xl font-bold">{selectedClaim.user_name}</h2><p className="text-sm text-slate-500">{selectedClaim.claim_number} • Level {selectedClaim.approval_level || 1}</p></div><button onClick={() => setSelectedClaim(null)} className="text-2xl text-slate-400">×</button></div><div className="p-6"><button onClick={() => handleDownloadPDF(selectedClaim)} className="w-full bg-green-600 text-white py-3 rounded-xl font-semibold mb-4">📥 Download PDF</button>{[...(selectedClaim.expenses || [])].sort((a, b) => { const refA = a.ref || 'Z99'; const refB = b.ref || 'Z99'; const catA = refA.charAt(0); const catB = refB.charAt(0); if (catA !== catB) return catA.localeCompare(catB); return (parseInt(refA.slice(1)) || 0) - (parseInt(refB.slice(1)) || 0); }).map((exp, i) => { const isOld = isOlderThan2Months(exp.date); const isApproaching = isApproaching2Months(exp.date); const daysLeft = getDaysUntil2Months(exp.date); const paxCount = parseInt(exp.numberOfPax) || 0; const isEntertaining = EXPENSE_CATEGORIES[exp.category]?.requiresAttendees; const perPaxAmount = isEntertaining && paxCount > 0 ? (parseFloat(exp.reimbursementAmount || exp.amount) / paxCount) : 0; return (<div key={i} className={`py-3 border-b ${isOld ? 'bg-red-50' : isApproaching ? 'bg-amber-50' : ''}`}><div className="flex justify-between items-start"><div className="flex-1"><div className="flex items-center gap-2 flex-wrap"><span className="bg-blue-100 text-blue-700 text-xs px-2 py-0.5 rounded font-bold">{exp.ref}</span><span className="font-semibold">{exp.merchant}</span>{exp.isPotentialDuplicate && <span className="bg-red-100 text-red-600 text-xs px-2 py-0.5 rounded">⚠️ Duplicate?</span>}{isOld && <span className="bg-red-100 text-red-600 text-xs px-2 py-0.5 rounded animate-pulse">🚨 &gt;2 Months</span>}{isApproaching && <span className="bg-amber-100 text-amber-700 text-xs px-2 py-0.5 rounded">⏰ {daysLeft}d left</span>}{paxCount > 0 && <span className="bg-purple-100 text-purple-600 text-xs px-2 py-0.5 rounded">👥 {paxCount} pax</span>}{isEntertaining && paxCount > 0 && <span className="bg-indigo-100 text-indigo-600 text-xs px-2 py-0.5 rounded">💰 {selectedClaim.currency} {perPaxAmount.toFixed(2)}/pax</span>}</div><p className="text-xs text-slate-500 mt-1">{exp.description}</p>{exp.isForeignCurrency && exp.forexRate && <p className="text-xs text-amber-600 mt-1">💱 Rate: 1 {exp.currency} = {exp.forexRate.toFixed(4)} {selectedClaim.currency}</p>}{exp.adminNotes && <div className="text-xs mt-1 bg-amber-50 px-2 py-1 rounded"><span className="font-semibold">📝 Notes:</span><div dangerouslySetInnerHTML={{ __html: formatAdminNotesReact(exp.adminNotes) }} /></div>}</div><span className="font-bold text-green-700 ml-2">{formatCurrency(exp.reimbursementAmount || exp.amount, selectedClaim.currency)}</span></div></div>); })}</div><div className="p-4 border-t bg-slate-50 space-y-3"><div className="flex gap-3"><button onClick={() => setEditingClaim(selectedClaim)} className="flex-1 py-3 rounded-xl bg-purple-500 text-white font-semibold">✏️ Edit / Add Notes</button><button onClick={() => setShowRequestChanges(true)} className="flex-1 py-3 rounded-xl bg-amber-500 text-white font-semibold">📝 Return</button></div><div className="flex gap-3"><button onClick={() => handleReject(selectedClaim.id)} disabled={loading} className="flex-1 py-3 rounded-xl bg-red-500 text-white font-semibold disabled:opacity-50">↩️ Reject</button><button onClick={() => handleApprove(selectedClaim)} disabled={loading} className="flex-[2] py-3 rounded-xl bg-green-600 text-white font-semibold disabled:opacity-50">{(() => { const workflow = SENIOR_STAFF_ROUTING[selectedClaim.user_id]; const isSingleLevel = workflow?.singleLevel; const level = selectedClaim.approval_level || 1; if (level === 1 && isSingleLevel) return workflow?.externalApproval ? '✓ Approve (→ Chairman)' : '✓ Final Approve'; if (level === 1) return '✓ Approve → L2'; return '✓ Final Approve'; })()}</button></div></div></div></div>)}
         {editingClaim && <EditClaimModal claim={editingClaim} onClose={() => setEditingClaim(null)} />}
         {showRequestChanges && selectedClaim && (
           <RequestChangesModal 
