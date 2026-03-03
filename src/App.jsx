@@ -397,7 +397,7 @@ const uploadImageToStorage = async (dataUrl, userId, type = 'receipt') => {
     const filename = `${userId}/${type}_${timestamp}_${random}.jpg`;
     
     // Upload to storage bucket named 'receipts'
-    const { data, error } = await supabase.storage.from('receipts').upload(filename, compressed);
+    const { data, error } = await supabase.storage.from('Receipts').upload(filename, compressed);
     
     if (error) {
       console.error('Storage upload failed:', error);
@@ -406,7 +406,7 @@ const uploadImageToStorage = async (dataUrl, userId, type = 'receipt') => {
     }
     
     // Get public URL
-    const { data: urlData } = supabase.storage.from('receipts').getPublicUrl(filename);
+    const { data: urlData } = supabase.storage.from('Receipts').getPublicUrl(filename);
     console.log(`☁️ Image uploaded to storage: ${filename}`);
     
     return urlData.publicUrl;
@@ -1003,17 +1003,57 @@ export default function BerkeleyExpenseSystem() {
     setSavingStatus('saving');
     
     try {
-      // Check data size to warn about potential issues
-      const expensesJson = JSON.stringify(expensesToSave || []);
-      const statementsJson = JSON.stringify(statementsToSave || []);
+      // MIGRATE: Convert any base64 images to storage URLs before saving
+      const migratedExpenses = await Promise.all((expensesToSave || []).map(async (exp) => {
+        let updated = { ...exp };
+        
+        // Migrate receiptPreview if it's base64 (not a URL)
+        if (exp.receiptPreview && !isStorageUrl(exp.receiptPreview)) {
+          console.log(`🔄 Migrating receipt ${exp.ref || exp.id} to storage...`);
+          const url = await uploadImageToStorage(exp.receiptPreview, currentUser.id, 'receipt');
+          updated.receiptPreview = url;
+        }
+        
+        // Migrate receiptPreview2 if it's base64
+        if (exp.receiptPreview2 && !isStorageUrl(exp.receiptPreview2)) {
+          const url = await uploadImageToStorage(exp.receiptPreview2, currentUser.id, 'receipt2');
+          updated.receiptPreview2 = url;
+        }
+        
+        return updated;
+      }));
+      
+      // Migrate statements
+      const migratedStatements = await Promise.all((statementsToSave || []).map(async (img) => {
+        if (img && !isStorageUrl(img)) {
+          console.log('🔄 Migrating statement to storage...');
+          return await uploadImageToStorage(img, currentUser.id, 'statement');
+        }
+        return img;
+      }));
+      
+      // Migrate originals
+      const migratedOriginals = await Promise.all((originalsToSave || []).map(async (img) => {
+        if (img && !isStorageUrl(img)) {
+          console.log('🔄 Migrating original to storage...');
+          return await uploadImageToStorage(img, currentUser.id, 'original');
+        }
+        return img;
+      }));
+      
+      // Update local state with migrated data
+      if (migratedExpenses.length > 0) setExpenses(migratedExpenses);
+      if (migratedStatements.length > 0) setAnnotatedStatements(migratedStatements);
+      if (migratedOriginals.length > 0) setOriginalStatementImages(migratedOriginals);
+      
+      // Check data size after migration
+      const expensesJson = JSON.stringify(migratedExpenses);
+      const statementsJson = JSON.stringify(migratedStatements);
       const annotationsJson = JSON.stringify(annotationsToSave || []);
-      const originalsJson = JSON.stringify(originalsToSave || []);
+      const originalsJson = JSON.stringify(migratedOriginals);
       const totalSize = expensesJson.length + statementsJson.length + annotationsJson.length + originalsJson.length;
       
-      // Log warning if data is getting large (over 500KB)
-      if (totalSize > 500000) {
-        console.warn('⚠️ Draft data is large:', Math.round(totalSize / 1024), 'KB. This may cause sync issues.');
-      }
+      console.log(`💾 Saving data: ${Math.round(totalSize / 1024)}KB`);
       
       const draftData = { 
         user_id: currentUser.id, 
@@ -1052,7 +1092,7 @@ export default function BerkeleyExpenseSystem() {
       setSavingStatus('error');
       // Show error to user if it's a data size issue
       if (err.message?.includes('too large') || err.code === '54000') {
-        alert('⚠️ Error: Too much data. Try reducing image quality or remove some receipts.');
+        alert('⚠️ Error: Too much data. Try removing some old receipts first.');
       }
       setTimeout(() => setSavingStatus(null), 3000);
       return false;
@@ -1106,46 +1146,15 @@ export default function BerkeleyExpenseSystem() {
       
       if (!error && data && data.length > 0) {
         const draft = data[0];
-        let needsMigration = false;
-        let migratedExpenses = [];
-        let migratedStatements = [];
-        let migratedOriginals = [];
         
         if (draft.expenses) {
           try {
             const parsed = JSON.parse(draft.expenses);
             if (Array.isArray(parsed)) {
-              // Check if any images need migration (base64 to storage)
-              migratedExpenses = await Promise.all(parsed.map(async (exp) => {
-                let updated = { ...exp };
-                
-                // Migrate receiptPreview if it's base64
-                if (exp.receiptPreview && !isStorageUrl(exp.receiptPreview)) {
-                  console.log(`🔄 Migrating receipt for expense ${exp.ref || exp.id}...`);
-                  const url = await uploadImageToStorage(exp.receiptPreview, currentUser.id, 'receipt');
-                  if (isStorageUrl(url)) {
-                    updated.receiptPreview = url;
-                    needsMigration = true;
-                  }
-                }
-                
-                // Migrate receiptPreview2 if it's base64
-                if (exp.receiptPreview2 && !isStorageUrl(exp.receiptPreview2)) {
-                  const url = await uploadImageToStorage(exp.receiptPreview2, currentUser.id, 'receipt2');
-                  if (isStorageUrl(url)) {
-                    updated.receiptPreview2 = url;
-                    needsMigration = true;
-                  }
-                }
-                
-                return updated;
-              }));
-              
-              // IMPORTANT: Reassign sequential refs AND re-check duplicates on load
-              let processed = sortAndReassignRefs(migratedExpenses);
+              // Reassign sequential refs AND re-check duplicates on load
+              let processed = sortAndReassignRefs(parsed);
               processed = markDuplicatePairs(processed);
               setExpenses(processed);
-              migratedExpenses = processed;
             }
           } catch (e) { console.error('Parse expenses error:', e); }
         }
@@ -1153,60 +1162,22 @@ export default function BerkeleyExpenseSystem() {
         if (draft.statements) {
           try {
             const parsed = JSON.parse(draft.statements);
-            if (Array.isArray(parsed)) {
-              // Migrate statements if base64
-              migratedStatements = await Promise.all(parsed.map(async (img) => {
-                if (img && !isStorageUrl(img)) {
-                  console.log('🔄 Migrating statement...');
-                  const url = await uploadImageToStorage(img, currentUser.id, 'statement');
-                  if (isStorageUrl(url)) {
-                    needsMigration = true;
-                    return url;
-                  }
-                }
-                return img;
-              }));
-              setAnnotatedStatements(migratedStatements);
-            }
+            if (Array.isArray(parsed)) setAnnotatedStatements(parsed);
           } catch (e) { console.error('Parse statements error:', e); }
         }
         
-        let parsedAnnotations = [];
         if (draft.annotations) {
           try {
             const parsed = JSON.parse(draft.annotations);
-            if (Array.isArray(parsed)) {
-              parsedAnnotations = parsed;
-              setStatementAnnotations(parsed);
-            }
+            if (Array.isArray(parsed)) setStatementAnnotations(parsed);
           } catch (e) { console.error('Parse annotations error:', e); }
         }
         
         if (draft.originals) {
           try {
             const parsed = JSON.parse(draft.originals);
-            if (Array.isArray(parsed)) {
-              // Migrate originals if base64
-              migratedOriginals = await Promise.all(parsed.map(async (img) => {
-                if (img && !isStorageUrl(img)) {
-                  console.log('🔄 Migrating original statement...');
-                  const url = await uploadImageToStorage(img, currentUser.id, 'original');
-                  if (isStorageUrl(url)) {
-                    needsMigration = true;
-                    return url;
-                  }
-                }
-                return img;
-              }));
-              setOriginalStatementImages(migratedOriginals);
-            }
+            if (Array.isArray(parsed)) setOriginalStatementImages(parsed);
           } catch (e) { console.error('Parse originals error:', e); }
-        }
-        
-        // If we migrated any images, save the updated data
-        if (needsMigration) {
-          console.log('💾 Saving migrated data to database...');
-          await saveToServer(migratedExpenses, migratedStatements, parsedAnnotations, migratedOriginals);
         }
       }
     } catch (err) { 
