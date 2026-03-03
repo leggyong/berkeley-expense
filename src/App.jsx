@@ -279,6 +279,42 @@ const getDaysUntil2Months = (dateStr) => {
   return diffDays;
 };
 
+// Image compression utility - reduces file size while maintaining readability
+const compressImage = (dataUrl, maxWidth = 1200, quality = 0.7) => {
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.onload = () => {
+      const canvas = document.createElement('canvas');
+      let width = img.width;
+      let height = img.height;
+      
+      // Scale down if larger than maxWidth
+      if (width > maxWidth) {
+        height = Math.round((height * maxWidth) / width);
+        width = maxWidth;
+      }
+      
+      canvas.width = width;
+      canvas.height = height;
+      
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(img, 0, 0, width, height);
+      
+      // Convert to JPEG with compression
+      const compressedDataUrl = canvas.toDataURL('image/jpeg', quality);
+      
+      // Log compression stats
+      const originalSize = Math.round(dataUrl.length / 1024);
+      const compressedSize = Math.round(compressedDataUrl.length / 1024);
+      console.log(`📦 Image compressed: ${originalSize}KB → ${compressedSize}KB (${Math.round((1 - compressedSize/originalSize) * 100)}% reduction)`);
+      
+      resolve(compressedDataUrl);
+    };
+    img.onerror = () => resolve(dataUrl); // Return original if compression fails
+    img.src = dataUrl;
+  });
+};
+
 const APPROVAL_WORKFLOWS = {
   'BEJ': { level1: 102, level2: 302, level1Name: 'Caroline Zhu Yunshu', level2Name: 'Eddy Tao Xiao Feng' },
   'SHE': { level1: 102, level2: 302, level1Name: 'Caroline Zhu Yunshu', level2Name: 'Eddy Tao Xiao Feng' },
@@ -764,15 +800,16 @@ const StatementUploadModal = ({ existingImages, onClose, onContinue }) => {
     const fileInputRef = useRef(null);
     const triggerFileSelect = () => { if (fileInputRef.current) fileInputRef.current.click(); };
 
-    const handleFileSelect = (e) => { 
+    const handleFileSelect = async (e) => { 
       const file = e.target.files[0]; 
       if (!file) return;
       setIsProcessing(true);
       // Convert to base64 for persistence across devices
       const reader = new FileReader();
-      reader.onload = (event) => {
-        const base64 = event.target.result;
-        setLocalStatements(prev => [...prev, base64]);
+      reader.onload = async (event) => {
+        // Compress the image before storing
+        const compressed = await compressImage(event.target.result);
+        setLocalStatements(prev => [...prev, compressed]);
         setIsProcessing(false);
       };
       reader.onerror = () => {
@@ -909,6 +946,43 @@ export default function BerkeleyExpenseSystem() {
     }
   };
 
+  // Sort expenses by date and assign sequential refs (1, 2, 3...)
+  const sortAndReassignRefs = (expenseList) => {
+    try {
+      if (!expenseList || !Array.isArray(expenseList) || expenseList.length === 0) return expenseList || [];
+      const sorted = [...expenseList].sort((a, b) => {
+        const dateA = a?.date ? new Date(a.date) : new Date();
+        const dateB = b?.date ? new Date(b.date) : new Date();
+        return dateA - dateB;
+      });
+      // Use sequential numbering (1, 2, 3...) sorted by date
+      return sorted.map((exp, idx) => {
+        if (!exp) return exp;
+        return { ...exp, ref: String(idx + 1) };
+      });
+    } catch (err) { return expenseList || []; }
+  };
+
+  // Function to scan all expenses and mark duplicates (pairs)
+  const markDuplicatePairs = (expenseList) => {
+    if (!expenseList || expenseList.length < 2) return expenseList;
+    
+    return expenseList.map((exp, idx) => {
+      // Check if any OTHER expense has same amount, date, currency
+      const hasDuplicate = expenseList.some((other, otherIdx) => 
+        otherIdx !== idx &&
+        parseFloat(other.amount) === parseFloat(exp.amount) &&
+        other.date === exp.date &&
+        other.currency === exp.currency
+      );
+      
+      if (hasDuplicate && !exp.isPotentialDuplicate) {
+        return { ...exp, isPotentialDuplicate: true };
+      }
+      return exp;
+    });
+  };
+
   const loadFromServer = async () => {
     if (!currentUser) return;
     
@@ -923,7 +997,12 @@ export default function BerkeleyExpenseSystem() {
         if (draft.expenses) {
           try {
             const parsed = JSON.parse(draft.expenses);
-            if (Array.isArray(parsed)) setExpenses(parsed);
+            if (Array.isArray(parsed)) {
+              // IMPORTANT: Reassign sequential refs AND re-check duplicates on load
+              let processed = sortAndReassignRefs(parsed);
+              processed = markDuplicatePairs(processed);
+              setExpenses(processed);
+            }
           } catch (e) { console.error('Parse expenses error:', e); }
         }
         
@@ -997,7 +1076,11 @@ export default function BerkeleyExpenseSystem() {
     if (currentUser) {
       const returned = claims.filter(c => c.user_id === currentUser.id && c.status === 'changes_requested');
       if (returned.length > 0 && returned[0].expenses) {
-        setExpenses(returned[0].expenses.map(e => ({ ...e, status: 'draft' })));
+        // Reassign sequential refs and check duplicates when loading returned claims
+        let processed = returned[0].expenses.map(e => ({ ...e, status: 'draft' }));
+        processed = sortAndReassignRefs(processed);
+        processed = markDuplicatePairs(processed);
+        setExpenses(processed);
         // Also restore the annotated statements
         if (returned[0].annotated_statements) {
           setAnnotatedStatements(returned[0].annotated_statements);
@@ -1019,21 +1102,6 @@ export default function BerkeleyExpenseSystem() {
   const foreignCurrencyExpenses = pendingExpenses.filter(e => e.isForeignCurrency);
   const hasForeignCurrency = foreignCurrencyExpenses.length > 0;
   
-  const sortAndReassignRefs = (expenseList) => {
-    try {
-      if (!expenseList || !Array.isArray(expenseList) || expenseList.length === 0) return expenseList || [];
-      const sorted = [...expenseList].sort((a, b) => {
-        const dateA = a?.date ? new Date(a.date) : new Date();
-        const dateB = b?.date ? new Date(b.date) : new Date();
-        return dateA - dateB;
-      });
-      // Use sequential numbering (1, 2, 3...) sorted by date
-      return sorted.map((exp, idx) => {
-        if (!exp) return exp;
-        return { ...exp, ref: String(idx + 1) };
-      });
-    } catch (err) { return expenseList || []; }
-  };
   const getReviewableClaims = () => { if (!currentUser) return []; return claims.filter(c => (c.status === 'pending_review' || c.status === 'pending_level2') && canUserReviewClaim(currentUser.id, c)); };
   
 
@@ -1610,13 +1678,15 @@ export default function BerkeleyExpenseSystem() {
         }
     }, [formData.amount, formData.date, formData.currency, existingClaims, expenses, editExpense]);
 
-    const handleFileChange = (e, isSecond = false) => { 
+    const handleFileChange = async (e, isSecond = false) => { 
       const file = e.target.files?.[0]; 
       if (!file) return;
       const reader = new FileReader();
-      reader.onload = (event) => { 
-        if (isSecond) setReceiptPreview2(event.target.result); 
-        else { setReceiptPreview(event.target.result); setStep(2); }
+      reader.onload = async (event) => {
+        // Compress the image before storing
+        const compressed = await compressImage(event.target.result);
+        if (isSecond) setReceiptPreview2(compressed); 
+        else { setReceiptPreview(compressed); setStep(2); }
       };
       reader.readAsDataURL(file);
     };
