@@ -1285,6 +1285,15 @@ export default function BerkeleyExpenseSystem() {
         processed = sortAndReassignRefs(processed);
         processed = markDuplicatePairs(processed);
         setExpenses(processed);
+        
+        // Restore statementAnnotations from expenses' embedded statementIndex
+        const restoredAnnotations = returned[0].expenses
+          .filter(e => e.statementIndex !== undefined && e.statementIndex >= 0)
+          .map(e => ({ ref: e.ref, statementIndex: e.statementIndex }));
+        if (restoredAnnotations.length > 0) {
+          setStatementAnnotations(restoredAnnotations);
+        }
+        
         // Also restore the annotated statements
         if (returned[0].annotated_statements) {
           setAnnotatedStatements(returned[0].annotated_statements);
@@ -1444,13 +1453,16 @@ export default function BerkeleyExpenseSystem() {
       const heightPenalty = Math.min(50, Math.floor(notesLen / 50) * 10 + Math.floor(attendeesLen / 100) * 10 + (exp.hasBackcharge ? 10 : 0));
       
       // Receipt sizing - proportionate for both receipts
-      const hasTwoReceipts = exp.receiptPreview && exp.receiptPreview2;
+      const hasReceipt1 = !!exp.receiptPreview;
+      const hasReceipt2 = !!exp.receiptPreview2;
+      const hasTwoReceipts = hasReceipt1 && hasReceipt2;
       const baseHeight = matchStmtImg ? 130 : 200;
       const availableHeight = baseHeight - heightPenalty;
+      // If only receipt 2, give it full height. If both, split proportionally.
       const firstH = hasTwoReceipts ? Math.floor(availableHeight * 0.55) : availableHeight;
-      const secondH = hasTwoReceipts ? Math.floor(availableHeight * 0.40) : 0;
+      const secondH = hasTwoReceipts ? Math.floor(availableHeight * 0.40) : (hasReceipt2 && !hasReceipt1 ? availableHeight : 0);
       
-      const receiptContent = (exp.receiptPreview ? '<img src="' + exp.receiptPreview + '" style="max-width:100%;max-height:' + firstH + 'mm;object-fit:contain;display:block;" />' : '<div style="background:#f5f5f5;padding:30px;text-align:center;color:#999;">No receipt</div>') + (exp.receiptPreview2 ? '<div style="margin-top:6px;border-top:2px dashed #ccc;padding-top:6px;"><img src="' + exp.receiptPreview2 + '" style="max-width:100%;max-height:' + secondH + 'mm;object-fit:contain;display:block;" /></div>' : '');
+      const receiptContent = (exp.receiptPreview ? '<img src="' + exp.receiptPreview + '" style="max-width:100%;max-height:' + firstH + 'mm;object-fit:contain;display:block;" />' : (hasReceipt2 ? '' : '<div style="background:#f5f5f5;padding:30px;text-align:center;color:#999;">No receipt</div>')) + (exp.receiptPreview2 ? '<div style="' + (hasReceipt1 ? 'margin-top:6px;border-top:2px dashed #ccc;padding-top:6px;' : '') + '"><img src="' + exp.receiptPreview2 + '" style="max-width:100%;max-height:' + secondH + 'mm;object-fit:contain;display:block;" /></div>' : '');
       const stmtContent = matchStmtImg ? '<div style="flex:1;max-width:48%;border-left:3px solid #ff9800;padding-left:8px;"><div style="background:#ff9800;color:white;padding:5px 10px;font-weight:bold;font-size:9px;margin-bottom:8px;border-radius:4px;">💳 Matched Statement ' + (matchStmtIdx + 1) + '</div><img src="' + matchStmtImg + '" style="max-width:100%;max-height:' + (160 - heightPenalty) + 'mm;object-fit:contain;border:1px solid #ddd;" /></div>' : '';
       const contentHTML = matchStmtImg ? '<div style="display:flex;gap:10px;align-items:flex-start;"><div style="flex:1;max-width:50%;">' + receiptContent + '</div>' + stmtContent + '</div>' : receiptContent;
       return '<div class="page receipt-page"><div class="receipt-header"><div class="receipt-ref">' + exp.seqRef + '</div><div class="receipt-info"><strong>' + exp.merchant + '</strong> | ' + formatDDMMYYYY(new Date(exp.date)) + '<br>' + cat.name + ' | ' + exp.currency + ' ' + fmtAmt(exp.amount) + (exp.isForeignCurrency ? ' → ' + reimburseCurrency + ' ' + fmtAmt(exp.reimbursementAmount) : '') + '<br>' + (exp.description || '') + oldBadge + dupBadge + paxInfo + (exp.attendees ? '<br>' + exp.attendees.replace(/\n/g, ', ') : '') + (exp.adminNotes ? '<br><div style="background:#fff8e1;padding:2px 4px;border-radius:3px;">📝 ' + formatAdminNotesHTML(exp.adminNotes) + '</div>' : '') + backchargeHTML + '</div></div>' + contentHTML + '</div>';
@@ -2378,6 +2390,291 @@ export default function BerkeleyExpenseSystem() {
     );
   };
 
+  // ============ EMMA'S FINANCE DASHBOARD ============
+  const FinanceDashboard = () => {
+    const [dateFrom, setDateFrom] = useState(() => {
+      const d = new Date();
+      d.setMonth(d.getMonth() - 1);
+      return d.toISOString().split('T')[0];
+    });
+    const [dateTo, setDateTo] = useState(() => new Date().toISOString().split('T')[0]);
+    const [reportType, setReportType] = useState('backcharge');
+    const [includePending, setIncludePending] = useState(false);
+    
+    // Get all approved claims (and optionally pending)
+    const relevantClaims = claims.filter(c => {
+      const isApproved = c.status === 'approved';
+      const isPending = c.status === 'pending_review' || c.status === 'pending_level2';
+      if (!includePending && !isApproved) return false;
+      if (includePending && !isApproved && !isPending) return false;
+      
+      // Date filter based on submission date
+      const subDate = c.submitted_at?.split('T')[0];
+      if (subDate && dateFrom && subDate < dateFrom) return false;
+      if (subDate && dateTo && subDate > dateTo) return false;
+      return true;
+    });
+    
+    // Backcharge Report: Group by development
+    const backchargeData = {};
+    relevantClaims.forEach(claim => {
+      (claim.expenses || []).forEach(exp => {
+        if (exp.hasBackcharge && exp.backcharges?.length > 0) {
+          exp.backcharges.forEach(bc => {
+            const dev = bc.development || 'Unassigned';
+            if (!backchargeData[dev]) backchargeData[dev] = { items: [], total: 0 };
+            const amt = (parseFloat(exp.reimbursementAmount || exp.amount) || 0) * ((parseFloat(bc.percentage) || 0) / 100);
+            backchargeData[dev].items.push({
+              claimNumber: claim.claim_number,
+              claimant: claim.user_name,
+              office: claim.office_code,
+              date: exp.date,
+              merchant: exp.merchant,
+              percentage: bc.percentage,
+              amount: amt,
+              currency: claim.currency,
+              status: claim.status
+            });
+            backchargeData[dev].total += amt;
+          });
+        }
+      });
+    });
+    
+    // GL Report: Group by GL code
+    const glData = {};
+    relevantClaims.forEach(claim => {
+      (claim.expenses || []).forEach(exp => {
+        const cat = EXPENSE_CATEGORIES[exp.category];
+        const gl = cat?.gl || 'Unknown';
+        const glName = cat?.name || exp.category;
+        if (!glData[gl]) glData[gl] = { name: glName, items: [], totalLocal: 0, totalGBP: 0 };
+        const amt = parseFloat(exp.reimbursementAmount || exp.amount) || 0;
+        const gbpAmt = toGBP(amt, claim.currency);
+        glData[gl].items.push({
+          claimNumber: claim.claim_number,
+          claimant: claim.user_name,
+          office: claim.office_code,
+          date: exp.date,
+          amount: amt,
+          currency: claim.currency,
+          gbpAmount: gbpAmt
+        });
+        glData[gl].totalGBP += gbpAmt;
+      });
+    });
+    
+    // Last Submission Report: Per employee
+    const employeeData = {};
+    claims.forEach(claim => {
+      const empId = claim.user_id;
+      if (!employeeData[empId]) {
+        employeeData[empId] = { 
+          name: claim.user_name, 
+          office: claim.office_code,
+          lastSubmission: null,
+          lastExpenseDate: null,
+          claimCount: 0,
+          lateCount: 0
+        };
+      }
+      employeeData[empId].claimCount++;
+      const subDate = claim.submitted_at;
+      if (!employeeData[empId].lastSubmission || subDate > employeeData[empId].lastSubmission) {
+        employeeData[empId].lastSubmission = subDate;
+      }
+      // Find latest expense date in this claim
+      (claim.expenses || []).forEach(exp => {
+        if (!employeeData[empId].lastExpenseDate || exp.date > employeeData[empId].lastExpenseDate) {
+          employeeData[empId].lastExpenseDate = exp.date;
+        }
+        // Check if expense was >2 months old at submission
+        if (claim.submitted_at && exp.date) {
+          const expDate = new Date(exp.date);
+          const subDateObj = new Date(claim.submitted_at);
+          const monthsDiff = (subDateObj - expDate) / (1000 * 60 * 60 * 24 * 30);
+          if (monthsDiff > 2) employeeData[empId].lateCount++;
+        }
+      });
+    });
+    
+    // Flag persistent late submitters (>3 late expenses)
+    const lateSubmitters = Object.entries(employeeData)
+      .filter(([_, data]) => data.lateCount >= 3)
+      .sort((a, b) => b[1].lateCount - a[1].lateCount);
+    
+    const formatDateShort = (d) => d ? new Date(d).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: '2-digit' }) : '-';
+    
+    return (
+      <div className="space-y-4">
+        <div className="bg-gradient-to-r from-purple-600 to-indigo-600 rounded-2xl p-6 text-white">
+          <h2 className="text-xl font-bold mb-2">📊 Finance Dashboard</h2>
+          <p className="text-purple-100 text-sm">Group finance reporting and analysis</p>
+        </div>
+        
+        {/* Date Range & Filters */}
+        <div className="bg-white rounded-xl p-4 shadow-sm border space-y-3">
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="text-xs font-semibold text-slate-500">From</label>
+              <input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} className="w-full p-2 border rounded-lg text-sm" />
+            </div>
+            <div>
+              <label className="text-xs font-semibold text-slate-500">To</label>
+              <input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} className="w-full p-2 border rounded-lg text-sm" />
+            </div>
+          </div>
+          <div className="flex items-center gap-3">
+            <label className="flex items-center gap-2 text-sm">
+              <input type="checkbox" checked={includePending} onChange={e => setIncludePending(e.target.checked)} className="rounded" />
+              <span>Include pending claims (forecasting)</span>
+            </label>
+          </div>
+          <div className="flex gap-2 flex-wrap">
+            {['backcharge', 'gl', 'submissions', 'late'].map(type => (
+              <button 
+                key={type}
+                onClick={() => setReportType(type)}
+                className={`px-3 py-2 rounded-lg text-sm font-semibold ${reportType === type ? 'bg-purple-600 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
+              >
+                {type === 'backcharge' ? '📊 Backcharges' : type === 'gl' ? '📋 GL Report' : type === 'submissions' ? '📅 Submissions' : '⚠️ Late Submitters'}
+              </button>
+            ))}
+          </div>
+        </div>
+        
+        {/* Backcharge Report */}
+        {reportType === 'backcharge' && (
+          <div className="bg-white rounded-xl shadow-sm border overflow-hidden">
+            <div className="bg-purple-50 p-4 border-b">
+              <h3 className="font-bold text-purple-800">📊 Backcharge Report</h3>
+              <p className="text-xs text-purple-600">{Object.keys(backchargeData).length} developments • {relevantClaims.length} claims</p>
+            </div>
+            {Object.keys(backchargeData).length === 0 ? (
+              <p className="p-4 text-center text-slate-400">No backcharges in selected period</p>
+            ) : (
+              <div className="divide-y">
+                {Object.entries(backchargeData).sort((a, b) => b[1].total - a[1].total).map(([dev, data]) => (
+                  <div key={dev} className="p-4">
+                    <div className="flex justify-between items-center mb-2">
+                      <span className="font-bold text-slate-800">{dev}</span>
+                      <span className="font-bold text-purple-600">£{data.total.toFixed(2)}</span>
+                    </div>
+                    <div className="text-xs text-slate-500 space-y-1">
+                      {data.items.slice(0, 5).map((item, i) => (
+                        <div key={i} className="flex justify-between">
+                          <span>{item.claimant} • {item.merchant} ({item.percentage}%)</span>
+                          <span className={item.status === 'approved' ? 'text-green-600' : 'text-amber-600'}>
+                            £{item.amount.toFixed(2)} {item.status !== 'approved' && '(pending)'}
+                          </span>
+                        </div>
+                      ))}
+                      {data.items.length > 5 && <div className="text-slate-400">+{data.items.length - 5} more items</div>}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+        
+        {/* GL Report */}
+        {reportType === 'gl' && (
+          <div className="bg-white rounded-xl shadow-sm border overflow-hidden">
+            <div className="bg-blue-50 p-4 border-b">
+              <h3 className="font-bold text-blue-800">📋 GL Account Report</h3>
+              <p className="text-xs text-blue-600">{Object.keys(glData).length} GL codes • Total: £{Object.values(glData).reduce((s, d) => s + d.totalGBP, 0).toFixed(2)}</p>
+            </div>
+            <div className="divide-y">
+              {Object.entries(glData).sort((a, b) => b[1].totalGBP - a[1].totalGBP).map(([gl, data]) => (
+                <div key={gl} className="p-3 flex justify-between items-center">
+                  <div>
+                    <span className="font-mono text-xs bg-slate-100 px-2 py-0.5 rounded mr-2">{gl}</span>
+                    <span className="text-sm">{data.name}</span>
+                    <span className="text-xs text-slate-400 ml-2">({data.items.length} items)</span>
+                  </div>
+                  <span className="font-bold text-blue-600">£{data.totalGBP.toFixed(2)}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+        
+        {/* Submissions Report */}
+        {reportType === 'submissions' && (
+          <div className="bg-white rounded-xl shadow-sm border overflow-hidden">
+            <div className="bg-green-50 p-4 border-b">
+              <h3 className="font-bold text-green-800">📅 Last Submission Report</h3>
+              <p className="text-xs text-green-600">{Object.keys(employeeData).length} employees</p>
+            </div>
+            <div className="divide-y">
+              {Object.entries(employeeData)
+                .sort((a, b) => (b[1].lastSubmission || '').localeCompare(a[1].lastSubmission || ''))
+                .map(([empId, data]) => (
+                  <div key={empId} className="p-3 flex justify-between items-center">
+                    <div>
+                      <span className="font-semibold">{data.name}</span>
+                      <span className="text-xs text-slate-400 ml-2">{data.office}</span>
+                    </div>
+                    <div className="text-right text-xs">
+                      <div className="text-slate-600">Last claim: <strong>{formatDateShort(data.lastSubmission)}</strong></div>
+                      <div className="text-slate-400">Last expense: {formatDateShort(data.lastExpenseDate)}</div>
+                    </div>
+                  </div>
+                ))}
+            </div>
+          </div>
+        )}
+        
+        {/* Late Submitters */}
+        {reportType === 'late' && (
+          <div className="bg-white rounded-xl shadow-sm border overflow-hidden">
+            <div className="bg-red-50 p-4 border-b">
+              <h3 className="font-bold text-red-800">⚠️ Persistent Late Submitters</h3>
+              <p className="text-xs text-red-600">Employees with 3+ expenses submitted &gt;2 months after date</p>
+            </div>
+            {lateSubmitters.length === 0 ? (
+              <p className="p-4 text-center text-slate-400">No persistent late submitters found</p>
+            ) : (
+              <div className="divide-y">
+                {lateSubmitters.map(([empId, data]) => (
+                  <div key={empId} className="p-3 flex justify-between items-center">
+                    <div>
+                      <span className="font-semibold">{data.name}</span>
+                      <span className="text-xs text-slate-400 ml-2">{data.office}</span>
+                    </div>
+                    <div className="text-right">
+                      <span className="bg-red-100 text-red-700 px-2 py-1 rounded text-xs font-bold">
+                        {data.lateCount} late expenses
+                      </span>
+                      <div className="text-xs text-slate-400 mt-1">{data.claimCount} total claims</div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+        
+        {/* Summary Stats */}
+        <div className="grid grid-cols-3 gap-3">
+          <div className="bg-white rounded-xl p-4 shadow-sm border text-center">
+            <div className="text-2xl font-bold text-slate-800">{relevantClaims.length}</div>
+            <div className="text-xs text-slate-500">Claims</div>
+          </div>
+          <div className="bg-white rounded-xl p-4 shadow-sm border text-center">
+            <div className="text-2xl font-bold text-green-600">£{relevantClaims.reduce((s, c) => s + toGBP(c.total_amount || 0, c.currency), 0).toFixed(0)}</div>
+            <div className="text-xs text-slate-500">Total (GBP)</div>
+          </div>
+          <div className="bg-white rounded-xl p-4 shadow-sm border text-center">
+            <div className="text-2xl font-bold text-purple-600">£{Object.values(backchargeData).reduce((s, d) => s + d.total, 0).toFixed(0)}</div>
+            <div className="text-xs text-slate-500">Backcharges</div>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
   const ReviewClaimsTab = () => {
     const reviewableClaims = getReviewableClaims();
     const claimsForSubmission = getClaimsForSubmission();
@@ -2484,8 +2781,8 @@ export default function BerkeleyExpenseSystem() {
           <div className="flex items-center gap-3"><div className="text-right hidden sm:block"><div className="text-sm font-medium">{currentUser.name.split(' ').slice(0, 2).join(' ')}</div><div className="text-xs text-slate-400 capitalize">{currentUser.role}</div></div><button onClick={() => { localStorage.removeItem('berkeley_current_user'); setCurrentUser(null); setExpenses([]); setAnnotatedStatements([]); setStatementAnnotations([]); setStatementImages([]); setOriginalStatementImages([]); setActiveTab('my_expenses'); }} className="bg-white/10 px-3 py-2 rounded-lg text-xs font-medium">Logout</button></div>
         </div>
       </header>
-      {canReview && (<div className="bg-white border-b sticky top-14 z-30"><div className="max-w-3xl mx-auto flex"><button onClick={() => setActiveTab('my_expenses')} className={`flex-1 py-3 text-sm font-semibold border-b-2 ${activeTab === 'my_expenses' ? 'border-blue-600 text-blue-600' : 'border-transparent text-slate-500'}`}>📋 My Expenses</button><button onClick={() => setActiveTab('review')} className={`flex-1 py-3 text-sm font-semibold border-b-2 ${activeTab === 'review' ? 'border-blue-600 text-blue-600' : 'border-transparent text-slate-500'}`}>👀 Review{getReviewableClaims().length > 0 && <span className="ml-2 bg-amber-500 text-white text-xs px-2 py-0.5 rounded-full">{getReviewableClaims().length}</span>}</button></div></div>)}
-      <main className="max-w-3xl mx-auto p-4 pb-20">{canReview && activeTab === 'review' ? <ReviewClaimsTab /> : <MyExpensesTab />}</main>
+      {canReview && (<div className="bg-white border-b sticky top-14 z-30"><div className="max-w-3xl mx-auto flex"><button onClick={() => setActiveTab('my_expenses')} className={`flex-1 py-3 text-sm font-semibold border-b-2 ${activeTab === 'my_expenses' ? 'border-blue-600 text-blue-600' : 'border-transparent text-slate-500'}`}>📋 My Expenses</button><button onClick={() => setActiveTab('review')} className={`flex-1 py-3 text-sm font-semibold border-b-2 ${activeTab === 'review' ? 'border-blue-600 text-blue-600' : 'border-transparent text-slate-500'}`}>👀 Review{getReviewableClaims().length > 0 && <span className="ml-2 bg-amber-500 text-white text-xs px-2 py-0.5 rounded-full">{getReviewableClaims().length}</span>}</button>{currentUser?.role === 'group_finance' && <button onClick={() => setActiveTab('finance')} className={`flex-1 py-3 text-sm font-semibold border-b-2 ${activeTab === 'finance' ? 'border-purple-600 text-purple-600' : 'border-transparent text-slate-500'}`}>📊 Finance</button>}</div></div>)}
+      <main className="max-w-3xl mx-auto p-4 pb-20">{activeTab === 'finance' && currentUser?.role === 'group_finance' ? <FinanceDashboard /> : canReview && activeTab === 'review' ? <ReviewClaimsTab /> : <MyExpensesTab />}</main>
       {(showAddExpense || editingExpense) && <AddExpenseModal editExpense={editingExpense} existingClaims={claims} expenses={expenses} onClose={() => { setShowAddExpense(false); setEditingExpense(null); }} />}
       {showPreview && <PreviewClaimModal />}
       {showStatementUpload && (
