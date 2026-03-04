@@ -1303,8 +1303,21 @@ export default function BerkeleyExpenseSystem() {
           setStatementAnnotations(restoredAnnotations);
         }
         
-        // Also restore the annotated statements
-        if (returned[0].annotated_statements) {
+        // Load ORIGINAL statements (clean, without annotations baked in) for re-annotation
+        // If original_statements exists, use it; otherwise fall back to annotated_statements
+        if (returned[0].original_statements && returned[0].original_statements.length > 0) {
+          setOriginalStatementImages(returned[0].original_statements);
+          setStatementImages(returned[0].original_statements);
+          // For display, use annotated versions if available
+          if (returned[0].annotated_statements) {
+            setAnnotatedStatements(returned[0].annotated_statements);
+          } else if (returned[0].annotated_statement) {
+            setAnnotatedStatements([returned[0].annotated_statement]);
+          } else {
+            setAnnotatedStatements(returned[0].original_statements);
+          }
+        } else if (returned[0].annotated_statements) {
+          // Fallback for old data that doesn't have original_statements
           setAnnotatedStatements(returned[0].annotated_statements);
           setOriginalStatementImages(returned[0].annotated_statements);
         } else if (returned[0].annotated_statement) {
@@ -1621,7 +1634,8 @@ export default function BerkeleyExpenseSystem() {
           status: isSelfSubmit ? 'approved' : 'pending_review', 
           approval_level: isSelfSubmit ? 2 : 1, 
           expenses: expensesWithAnnotations,
-          annotated_statement: annotatedStatements[0] || null
+          annotated_statement: annotatedStatements[0] || null,
+          original_statements: originalStatementImages // Save originals for re-annotation if returned
         };
         if (isSelfSubmit) {
           updateData.level2_approved_by = workflow?.externalApproval || 'Self-Approved';
@@ -1631,10 +1645,38 @@ export default function BerkeleyExpenseSystem() {
         const result = await supabase.from('claims').update(updateData).eq('id', returned.id);
         if (result.error) throw new Error('Failed to update claim');
       } else {
-        const year = new Date().getFullYear();
-        const lastName = currentUser.name.trim().split(' ').pop(); // Get last name
-        const month = String(new Date().getMonth() + 1).padStart(2, '0'); // Current month
-        const claimNumber = `${lastName} - ${year} - ${month}`;
+        // Use oldest expense date for claim number (consistent with draft preview)
+        const oldestExpenseDate = pendingExpenses.reduce((oldest, exp) => {
+          const d = new Date(exp.date);
+          return !oldest || d < oldest ? d : oldest;
+        }, null) || new Date();
+        
+        const year = oldestExpenseDate.getFullYear();
+        const month = String(oldestExpenseDate.getMonth() + 1).padStart(2, '0');
+        const lastName = currentUser.name.trim().split(' ').pop();
+        
+        // Check if user already has a claim for this month and add suffix if needed
+        const baseClaimNumber = `${lastName} - ${year} - ${month}`;
+        const existingClaims = allClaims.filter(c => 
+          c.user_id === currentUser.id && 
+          c.claim_number && 
+          c.claim_number.startsWith(baseClaimNumber)
+        );
+        
+        // Generate unique claim number
+        let claimNumber = baseClaimNumber;
+        if (existingClaims.length > 0) {
+          // Find highest suffix
+          let maxSuffix = 0;
+          existingClaims.forEach(c => {
+            const match = c.claim_number.match(new RegExp(`${baseClaimNumber}(-(\\d+))?$`));
+            if (match) {
+              const suffix = match[2] ? parseInt(match[2]) : 1;
+              maxSuffix = Math.max(maxSuffix, suffix);
+            }
+          });
+          claimNumber = `${baseClaimNumber}-${maxSuffix + 1}`;
+        }
 
         const insertData = {
           claim_number: claimNumber, 
@@ -1650,6 +1692,7 @@ export default function BerkeleyExpenseSystem() {
           level1_approver: workflow?.level1, 
           level2_approver: workflow?.level2,
           annotated_statement: annotatedStatements[0] || null,
+          original_statements: originalStatementImages, // Save originals for re-annotation if returned
           expenses: expensesWithAnnotations,
           submitted_at: new Date().toISOString()
         };
@@ -2204,14 +2247,14 @@ export default function BerkeleyExpenseSystem() {
   const EditClaimModal = ({ claim, onClose }) => {
     // Sort expenses by ref (A1, A2, B1, B2, etc.) for consistent ordering with expense claim form
     const sortedExpenses = [...(claim.expenses || [])].sort((a, b) => {
-      const refA = a.ref || 'Z99';
-      const refB = b.ref || 'Z99';
-      const catA = refA.charAt(0);
-      const catB = refB.charAt(0);
-      if (catA !== catB) return catA.localeCompare(catB);
-      const numA = parseInt(refA.slice(1)) || 0;
-      const numB = parseInt(refB.slice(1)) || 0;
-      return numA - numB;
+      const refA = a.ref || '999';
+      const refB = b.ref || '999';
+      // Try pure numeric sort first
+      const numA = parseInt(refA);
+      const numB = parseInt(refB);
+      if (!isNaN(numA) && !isNaN(numB)) return numA - numB;
+      // Fall back to alphanumeric sort
+      return refA.localeCompare(refB, undefined, { numeric: true });
     });
     const [editedExpenses, setEditedExpenses] = useState(sortedExpenses);
     const [newComments, setNewComments] = useState({}); // Track new comments per expense index
@@ -2418,9 +2461,13 @@ export default function BerkeleyExpenseSystem() {
     const relevantClaims = allClaims.filter(c => {
       if (!c) return false;
       const isApproved = c.status === 'approved';
-      const isPending = c.status === 'pending_review' || c.status === 'pending_level2';
+      // Include ALL non-rejected statuses when includePending is checked
+      const isPendingOrInProgress = c.status === 'pending_review' || 
+                                     c.status === 'pending_level2' || 
+                                     c.status === 'changes_requested';
+      
       if (!includePending && !isApproved) return false;
-      if (includePending && !isApproved && !isPending) return false;
+      if (includePending && !isApproved && !isPendingOrInProgress) return false;
       
       // Date filter based on submission date
       const subDate = c.submitted_at?.split('T')[0];
@@ -2861,7 +2908,7 @@ export default function BerkeleyExpenseSystem() {
           <h3 className="font-bold mb-4">📊 To Review ({reviewableClaims.length})</h3>
           {reviewableClaims.length === 0 ? <div className="text-center py-12 text-slate-400">✅ Nothing to review</div> : (<div className="space-y-2">{reviewableClaims.map(claim => (<div key={claim.id} onClick={() => setSelectedClaim(claim)} className="flex items-center justify-between p-4 rounded-xl bg-slate-50 border cursor-pointer hover:border-blue-300"><div><span className="font-semibold">{claim.user_name}</span><span className={`ml-2 text-xs px-2 py-0.5 rounded-full ${claim.approval_level === 2 ? 'bg-blue-100 text-blue-700' : 'bg-amber-100 text-amber-700'}`}>L{claim.approval_level || 1}</span><p className="text-sm text-slate-500">{claim.office}</p></div><span className="font-bold">{formatCurrency(claim.total_amount, claim.currency)}</span></div>))}</div>)}
         </div>
-        {selectedClaim && (<div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50" onClick={() => setSelectedClaim(null)}><div className="bg-white rounded-2xl max-w-2xl w-full max-h-[90vh] overflow-auto" onClick={e => e.stopPropagation()}><div className="p-6 border-b flex justify-between"><div><h2 className="text-xl font-bold">{selectedClaim.user_name}</h2><p className="text-sm text-slate-500">{selectedClaim.claim_number} • Level {selectedClaim.approval_level || 1}</p></div><button onClick={() => setSelectedClaim(null)} className="text-2xl text-slate-400">×</button></div><div className="p-6"><button onClick={() => handleDownloadPDF(selectedClaim)} className="w-full bg-green-600 text-white py-3 rounded-xl font-semibold mb-4">📥 Download PDF</button>{[...(selectedClaim.expenses || [])].sort((a, b) => { const refA = a.ref || 'Z99'; const refB = b.ref || 'Z99'; const catA = refA.charAt(0); const catB = refB.charAt(0); if (catA !== catB) return catA.localeCompare(catB); return (parseInt(refA.slice(1)) || 0) - (parseInt(refB.slice(1)) || 0); }).map((exp, i) => { const isOld = isOlderThan2Months(exp.date); const isApproaching = isApproaching2Months(exp.date); const daysLeft = getDaysUntil2Months(exp.date); const paxCount = parseInt(exp.numberOfPax) || 0; const isEntertaining = EXPENSE_CATEGORIES[exp.category]?.requiresAttendees; const perPaxAmount = isEntertaining && paxCount > 0 ? (parseFloat(exp.reimbursementAmount || exp.amount) / paxCount) : 0; return (<div key={i} className={`py-3 border-b ${isOld ? 'bg-red-50' : isApproaching ? 'bg-amber-50' : ''}`}><div className="flex justify-between items-start"><div className="flex-1"><div className="flex items-center gap-2 flex-wrap"><span className="bg-blue-100 text-blue-700 text-xs px-2 py-0.5 rounded font-bold">{exp.ref}</span><span className="font-semibold">{exp.merchant}</span>{exp.isPotentialDuplicate && <span className="bg-red-100 text-red-600 text-xs px-2 py-0.5 rounded">⚠️ Duplicate?</span>}{isOld && <span className="bg-red-100 text-red-600 text-xs px-2 py-0.5 rounded animate-pulse">🚨 &gt;2 Months</span>}{isApproaching && <span className="bg-amber-100 text-amber-700 text-xs px-2 py-0.5 rounded">⏰ {daysLeft}d left</span>}{paxCount > 0 && <span className="bg-purple-100 text-purple-600 text-xs px-2 py-0.5 rounded">👥 {paxCount} pax</span>}{isEntertaining && paxCount > 0 && <span className="bg-indigo-100 text-indigo-600 text-xs px-2 py-0.5 rounded">💰 {selectedClaim.currency} {perPaxAmount.toFixed(2)}/pax</span>}</div><p className="text-xs text-slate-500 mt-1">{exp.description}</p>{exp.isForeignCurrency && exp.forexRate && <p className="text-xs text-amber-600 mt-1">💱 Rate: 1 {exp.currency} = {exp.forexRate.toFixed(4)} {selectedClaim.currency}</p>}{exp.adminNotes && <div className="text-xs mt-1 bg-amber-50 px-2 py-1 rounded"><span className="font-semibold">📝 Notes:</span><div dangerouslySetInnerHTML={{ __html: formatAdminNotesReact(exp.adminNotes) }} /></div>}</div><span className="font-bold text-green-700 ml-2">{formatCurrency(exp.reimbursementAmount || exp.amount, selectedClaim.currency)}</span></div></div>); })}</div><div className="p-4 border-t bg-slate-50 space-y-3"><div className="flex gap-3"><button onClick={() => setEditingClaim(selectedClaim)} className="flex-1 py-3 rounded-xl bg-purple-500 text-white font-semibold">✏️ Edit / Add Notes</button><button onClick={() => setShowRequestChanges(true)} className="flex-1 py-3 rounded-xl bg-amber-500 text-white font-semibold">📝 Return</button></div><div className="flex gap-3"><button onClick={() => handleReject(selectedClaim.id)} disabled={loading} className="flex-1 py-3 rounded-xl bg-red-500 text-white font-semibold disabled:opacity-50">↩️ Reject</button><button onClick={() => handleApprove(selectedClaim)} disabled={loading} className="flex-[2] py-3 rounded-xl bg-green-600 text-white font-semibold disabled:opacity-50">{(() => { const workflow = SENIOR_STAFF_ROUTING[selectedClaim.user_id]; const isSingleLevel = workflow?.singleLevel; const level = selectedClaim.approval_level || 1; if (level === 1 && isSingleLevel) return workflow?.externalApproval ? '✓ Approve (→ Chairman)' : '✓ Final Approve'; if (level === 1) return '✓ Approve → L2'; return '✓ Final Approve'; })()}</button></div></div></div></div>)}
+        {selectedClaim && (<div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50" onClick={() => setSelectedClaim(null)}><div className="bg-white rounded-2xl max-w-2xl w-full max-h-[90vh] overflow-auto" onClick={e => e.stopPropagation()}><div className="p-6 border-b flex justify-between"><div><h2 className="text-xl font-bold">{selectedClaim.user_name}</h2><p className="text-sm text-slate-500">{selectedClaim.claim_number} • Level {selectedClaim.approval_level || 1}</p></div><button onClick={() => setSelectedClaim(null)} className="text-2xl text-slate-400">×</button></div><div className="p-6"><button onClick={() => handleDownloadPDF(selectedClaim)} className="w-full bg-green-600 text-white py-3 rounded-xl font-semibold mb-4">📥 Download PDF</button>{[...(selectedClaim.expenses || [])].sort((a, b) => { const numA = parseInt(a.ref); const numB = parseInt(b.ref); if (!isNaN(numA) && !isNaN(numB)) return numA - numB; return (a.ref || '999').localeCompare(b.ref || '999', undefined, { numeric: true }); }).map((exp, i) => { const isOld = isOlderThan2Months(exp.date); const isApproaching = isApproaching2Months(exp.date); const daysLeft = getDaysUntil2Months(exp.date); const paxCount = parseInt(exp.numberOfPax) || 0; const isEntertaining = EXPENSE_CATEGORIES[exp.category]?.requiresAttendees; const perPaxAmount = isEntertaining && paxCount > 0 ? (parseFloat(exp.reimbursementAmount || exp.amount) / paxCount) : 0; return (<div key={i} className={`py-3 border-b ${isOld ? 'bg-red-50' : isApproaching ? 'bg-amber-50' : ''}`}><div className="flex justify-between items-start"><div className="flex-1"><div className="flex items-center gap-2 flex-wrap"><span className="bg-blue-100 text-blue-700 text-xs px-2 py-0.5 rounded font-bold">{exp.ref}</span><span className="font-semibold">{exp.merchant}</span>{exp.isPotentialDuplicate && <span className="bg-red-100 text-red-600 text-xs px-2 py-0.5 rounded">⚠️ Duplicate?</span>}{isOld && <span className="bg-red-100 text-red-600 text-xs px-2 py-0.5 rounded animate-pulse">🚨 &gt;2 Months</span>}{isApproaching && <span className="bg-amber-100 text-amber-700 text-xs px-2 py-0.5 rounded">⏰ {daysLeft}d left</span>}{paxCount > 0 && <span className="bg-purple-100 text-purple-600 text-xs px-2 py-0.5 rounded">👥 {paxCount} pax</span>}{isEntertaining && paxCount > 0 && <span className="bg-indigo-100 text-indigo-600 text-xs px-2 py-0.5 rounded">💰 {selectedClaim.currency} {perPaxAmount.toFixed(2)}/pax</span>}</div><p className="text-xs text-slate-500 mt-1">{exp.description}</p>{exp.isForeignCurrency && exp.forexRate && <p className="text-xs text-amber-600 mt-1">💱 Rate: 1 {exp.currency} = {exp.forexRate.toFixed(4)} {selectedClaim.currency}</p>}{exp.adminNotes && <div className="text-xs mt-1 bg-amber-50 px-2 py-1 rounded"><span className="font-semibold">📝 Notes:</span><div dangerouslySetInnerHTML={{ __html: formatAdminNotesReact(exp.adminNotes) }} /></div>}</div><span className="font-bold text-green-700 ml-2">{formatCurrency(exp.reimbursementAmount || exp.amount, selectedClaim.currency)}</span></div></div>); })}</div><div className="p-4 border-t bg-slate-50 space-y-3"><div className="flex gap-3"><button onClick={() => setEditingClaim(selectedClaim)} className="flex-1 py-3 rounded-xl bg-purple-500 text-white font-semibold">✏️ Edit / Add Notes</button><button onClick={() => setShowRequestChanges(true)} className="flex-1 py-3 rounded-xl bg-amber-500 text-white font-semibold">📝 Return</button></div><div className="flex gap-3"><button onClick={() => handleReject(selectedClaim.id)} disabled={loading} className="flex-1 py-3 rounded-xl bg-red-500 text-white font-semibold disabled:opacity-50">↩️ Reject</button><button onClick={() => handleApprove(selectedClaim)} disabled={loading} className="flex-[2] py-3 rounded-xl bg-green-600 text-white font-semibold disabled:opacity-50">{(() => { const workflow = SENIOR_STAFF_ROUTING[selectedClaim.user_id]; const isSingleLevel = workflow?.singleLevel; const level = selectedClaim.approval_level || 1; if (level === 1 && isSingleLevel) return workflow?.externalApproval ? '✓ Approve (→ Chairman)' : '✓ Final Approve'; if (level === 1) return '✓ Approve → L2'; return '✓ Final Approve'; })()}</button></div></div></div></div>)}
         {editingClaim && <EditClaimModal claim={editingClaim} onClose={() => setEditingClaim(null)} />}
         {showRequestChanges && selectedClaim && (
           <RequestChangesModal 
