@@ -1628,22 +1628,59 @@ export default function BerkeleyExpenseSystem() {
       });
       
       if (returned) {
+        // Validate returned claim has an ID
+        if (!returned.id) {
+          throw new Error('Returned claim has no ID');
+        }
+        
         const updateData = { 
           total_amount: reimbursementTotal, 
           item_count: pendingExpenses.length, 
           status: isSelfSubmit ? 'approved' : 'pending_review', 
           approval_level: isSelfSubmit ? 2 : 1, 
           expenses: expensesWithAnnotations,
-          annotated_statement: annotatedStatements[0] || null,
-          original_statements: originalStatementImages // Save originals for re-annotation if returned
+          annotated_statement: annotatedStatements[0] || null
         };
         if (isSelfSubmit) {
           updateData.level2_approved_by = workflow?.externalApproval || 'Self-Approved';
           updateData.level2_approved_at = new Date().toISOString();
         }
-        if (annotatedStatements.length > 0) updateData.annotated_statements = annotatedStatements;
-        const result = await supabase.from('claims').update(updateData).eq('id', returned.id);
-        if (result.error) throw new Error('Failed to update claim');
+        if (annotatedStatements && annotatedStatements.length > 0) {
+          updateData.annotated_statements = annotatedStatements;
+        }
+        
+        // Try to save original_statements (may not exist in DB yet)
+        if (originalStatementImages && originalStatementImages.length > 0) {
+          updateData.original_statements = originalStatementImages;
+        }
+        
+        console.log('Attempting to update claim:', returned.id, 'with data keys:', Object.keys(updateData));
+        
+        let result = await supabase.from('claims').update(updateData).eq('id', returned.id);
+        
+        // If failed, progressively remove optional columns and retry
+        if (result.error) {
+          console.log('Update failed, trying without original_statements:', result.error);
+          delete updateData.original_statements;
+          result = await supabase.from('claims').update(updateData).eq('id', returned.id);
+        }
+        
+        if (result.error) {
+          console.log('Still failing, trying without annotated_statements:', result.error);
+          delete updateData.annotated_statements;
+          result = await supabase.from('claims').update(updateData).eq('id', returned.id);
+        }
+        
+        if (result.error) {
+          console.log('Still failing, trying without annotated_statement:', result.error);
+          delete updateData.annotated_statement;
+          result = await supabase.from('claims').update(updateData).eq('id', returned.id);
+        }
+        
+        if (result.error) {
+          console.error('All update attempts failed:', result.error);
+          throw new Error(`Failed to update claim: ${result.error.message || result.error.code || JSON.stringify(result.error)}`);
+        }
       } else {
         // Use oldest expense date for claim number (consistent with draft preview)
         const oldestExpenseDate = pendingExpenses.reduce((oldest, exp) => {
@@ -1692,7 +1729,6 @@ export default function BerkeleyExpenseSystem() {
           level1_approver: workflow?.level1, 
           level2_approver: workflow?.level2,
           annotated_statement: annotatedStatements[0] || null,
-          original_statements: originalStatementImages, // Save originals for re-annotation if returned
           expenses: expensesWithAnnotations,
           submitted_at: new Date().toISOString()
         };
@@ -1702,9 +1738,40 @@ export default function BerkeleyExpenseSystem() {
           insertData.level2_approved_by = workflow?.externalApproval || 'Self-Approved';
           insertData.level2_approved_at = new Date().toISOString();
         }
-        if (annotatedStatements.length > 0) insertData.annotated_statements = annotatedStatements;
-        const result = await supabase.from('claims').insert([insertData]);
-        if (result.error) throw new Error('Failed to create claim');
+        if (annotatedStatements && annotatedStatements.length > 0) insertData.annotated_statements = annotatedStatements;
+        
+        // Try with original_statements first (may not exist in DB yet)
+        if (originalStatementImages && originalStatementImages.length > 0) {
+          insertData.original_statements = originalStatementImages;
+        }
+        
+        console.log('Attempting to create claim with data keys:', Object.keys(insertData));
+        
+        let result = await supabase.from('claims').insert([insertData]);
+        
+        // If failed, progressively remove optional columns and retry
+        if (result.error) {
+          console.log('Insert failed, trying without original_statements:', result.error);
+          delete insertData.original_statements;
+          result = await supabase.from('claims').insert([insertData]);
+        }
+        
+        if (result.error) {
+          console.log('Still failing, trying without annotated_statements:', result.error);
+          delete insertData.annotated_statements;
+          result = await supabase.from('claims').insert([insertData]);
+        }
+        
+        if (result.error) {
+          console.log('Still failing, trying without annotated_statement:', result.error);
+          delete insertData.annotated_statement;
+          result = await supabase.from('claims').insert([insertData]);
+        }
+        
+        if (result.error) {
+          console.error('All insert attempts failed:', result.error);
+          throw new Error(`Failed to create claim: ${result.error.message || result.error.code || JSON.stringify(result.error)}`);
+        }
       }
       
       // Clear drafts on server
