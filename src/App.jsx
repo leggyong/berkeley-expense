@@ -1657,7 +1657,7 @@ export default function BerkeleyExpenseSystem() {
         
         // Check if user already has a claim for this month and add suffix if needed
         const baseClaimNumber = `${lastName} - ${year} - ${month}`;
-        const existingClaims = allClaims.filter(c => 
+        const existingClaims = claims.filter(c => 
           c.user_id === currentUser.id && 
           c.claim_number && 
           c.claim_number.startsWith(baseClaimNumber)
