@@ -357,6 +357,15 @@ const formatAdminNotesReact = (notes) => {
   }).join('');
 };
 
+// GBP conversion rates (approximate)
+const GBP_RATES = { 'GBP': 1, 'SGD': 0.58, 'USD': 0.79, 'EUR': 0.86, 'CNY': 0.11, 'HKD': 0.10, 'AED': 0.22, 'THB': 0.023, 'MYR': 0.18, 'AUD': 0.52, 'JPY': 0.0053 };
+const toGBP = (amt, cur) => {
+  if (!amt || isNaN(parseFloat(amt))) return 0;
+  if (cur === 'GBP') return parseFloat(amt);
+  const rate = GBP_RATES[cur] || 0.5;
+  return parseFloat(amt) * rate;
+};
+
 const formatCurrency = (amount, currency) => {
   const num = parseFloat(amount || 0);
   return `${currency} ${num.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -2401,8 +2410,12 @@ export default function BerkeleyExpenseSystem() {
     const [reportType, setReportType] = useState('backcharge');
     const [includePending, setIncludePending] = useState(false);
     
+    // Safety check - ensure claims is an array
+    const allClaims = Array.isArray(claims) ? claims : [];
+    
     // Get all approved claims (and optionally pending)
-    const relevantClaims = claims.filter(c => {
+    const relevantClaims = allClaims.filter(c => {
+      if (!c) return false;
       const isApproved = c.status === 'approved';
       const isPending = c.status === 'pending_review' || c.status === 'pending_level2';
       if (!includePending && !isApproved) return false;
@@ -2418,22 +2431,25 @@ export default function BerkeleyExpenseSystem() {
     // Backcharge Report: Group by development
     const backchargeData = {};
     relevantClaims.forEach(claim => {
+      if (!claim) return;
       (claim.expenses || []).forEach(exp => {
+        if (!exp) return;
         if (exp.hasBackcharge && exp.backcharges?.length > 0) {
           exp.backcharges.forEach(bc => {
+            if (!bc) return;
             const dev = bc.development || 'Unassigned';
             if (!backchargeData[dev]) backchargeData[dev] = { items: [], total: 0 };
             const amt = (parseFloat(exp.reimbursementAmount || exp.amount) || 0) * ((parseFloat(bc.percentage) || 0) / 100);
             backchargeData[dev].items.push({
-              claimNumber: claim.claim_number,
-              claimant: claim.user_name,
-              office: claim.office_code,
+              claimNumber: claim.claim_number || '-',
+              claimant: claim.user_name || 'Unknown',
+              office: claim.office_code || '-',
               date: exp.date,
-              merchant: exp.merchant,
-              percentage: bc.percentage,
+              merchant: exp.merchant || '-',
+              percentage: bc.percentage || 0,
               amount: amt,
-              currency: claim.currency,
-              status: claim.status
+              currency: claim.currency || 'GBP',
+              status: claim.status || 'unknown'
             });
             backchargeData[dev].total += amt;
           });
@@ -2444,20 +2460,22 @@ export default function BerkeleyExpenseSystem() {
     // GL Report: Group by GL code
     const glData = {};
     relevantClaims.forEach(claim => {
+      if (!claim) return;
       (claim.expenses || []).forEach(exp => {
+        if (!exp) return;
         const cat = EXPENSE_CATEGORIES[exp.category];
         const gl = cat?.gl || 'Unknown';
-        const glName = cat?.name || exp.category;
+        const glName = cat?.name || exp.category || 'Unknown';
         if (!glData[gl]) glData[gl] = { name: glName, items: [], totalLocal: 0, totalGBP: 0 };
         const amt = parseFloat(exp.reimbursementAmount || exp.amount) || 0;
-        const gbpAmt = toGBP(amt, claim.currency);
+        const gbpAmt = toGBP(amt, claim.currency || 'GBP');
         glData[gl].items.push({
-          claimNumber: claim.claim_number,
-          claimant: claim.user_name,
-          office: claim.office_code,
+          claimNumber: claim.claim_number || '-',
+          claimant: claim.user_name || 'Unknown',
+          office: claim.office_code || '-',
           date: exp.date,
           amount: amt,
-          currency: claim.currency,
+          currency: claim.currency || 'GBP',
           gbpAmount: gbpAmt
         });
         glData[gl].totalGBP += gbpAmt;
@@ -2466,12 +2484,14 @@ export default function BerkeleyExpenseSystem() {
     
     // Last Submission Report: Per employee
     const employeeData = {};
-    claims.forEach(claim => {
+    allClaims.forEach(claim => {
+      if (!claim) return;
       const empId = claim.user_id;
+      if (!empId) return;
       if (!employeeData[empId]) {
         employeeData[empId] = { 
-          name: claim.user_name, 
-          office: claim.office_code,
+          name: claim.user_name || 'Unknown', 
+          office: claim.office_code || '-',
           lastSubmission: null,
           lastExpenseDate: null,
           claimCount: 0,
@@ -2485,15 +2505,18 @@ export default function BerkeleyExpenseSystem() {
       }
       // Find latest expense date in this claim
       (claim.expenses || []).forEach(exp => {
+        if (!exp) return;
         if (!employeeData[empId].lastExpenseDate || exp.date > employeeData[empId].lastExpenseDate) {
           employeeData[empId].lastExpenseDate = exp.date;
         }
         // Check if expense was >2 months old at submission
         if (claim.submitted_at && exp.date) {
-          const expDate = new Date(exp.date);
-          const subDateObj = new Date(claim.submitted_at);
-          const monthsDiff = (subDateObj - expDate) / (1000 * 60 * 60 * 24 * 30);
-          if (monthsDiff > 2) employeeData[empId].lateCount++;
+          try {
+            const expDate = new Date(exp.date);
+            const subDateObj = new Date(claim.submitted_at);
+            const monthsDiff = (subDateObj - expDate) / (1000 * 60 * 60 * 24 * 30);
+            if (monthsDiff > 2) employeeData[empId].lateCount++;
+          } catch (e) { /* ignore date parse errors */ }
         }
       });
     });
@@ -2663,11 +2686,11 @@ export default function BerkeleyExpenseSystem() {
             <div className="text-xs text-slate-500">Claims</div>
           </div>
           <div className="bg-white rounded-xl p-4 shadow-sm border text-center">
-            <div className="text-2xl font-bold text-green-600">£{relevantClaims.reduce((s, c) => s + toGBP(c.total_amount || 0, c.currency), 0).toFixed(0)}</div>
+            <div className="text-2xl font-bold text-green-600">£{relevantClaims.reduce((s, c) => s + toGBP(c?.total_amount || 0, c?.currency || 'GBP'), 0).toFixed(0)}</div>
             <div className="text-xs text-slate-500">Total (GBP)</div>
           </div>
           <div className="bg-white rounded-xl p-4 shadow-sm border text-center">
-            <div className="text-2xl font-bold text-purple-600">£{Object.values(backchargeData).reduce((s, d) => s + d.total, 0).toFixed(0)}</div>
+            <div className="text-2xl font-bold text-purple-600">£{Object.values(backchargeData || {}).reduce((s, d) => s + (d?.total || 0), 0).toFixed(0)}</div>
             <div className="text-xs text-slate-500">Backcharges</div>
           </div>
         </div>
