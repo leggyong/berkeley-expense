@@ -330,11 +330,15 @@ const formatAdminNotesHTML = (notes) => {
   const reviewerColors = { 'Ann': '#2563eb', 'John': '#059669', 'Emma': '#7c3aed', 'Cathy': '#dc2626', 'default': '#d97706' };
   const parts = notes.split(/(?=\b(?:Ann|John|Emma|Cathy|[A-Z][a-z]+):)/g).filter(p => p.trim());
   if (parts.length <= 1) return '<span style="color:#d97706;">' + notes + '</span>';
-  return parts.map(part => {
+  // First part inline, subsequent parts on new lines
+  return parts.map((part, idx) => {
     const match = part.match(/^([A-Z][a-z]+):\s*/);
     const reviewer = match ? match[1] : 'default';
     const color = reviewerColors[reviewer] || reviewerColors['default'];
-    return '<div style="color:' + color + ';margin-top:2px;"><strong>' + (match ? reviewer + ':</strong> ' + part.replace(match[0], '') : '</strong>' + part) + '</div>';
+    const content = match ? reviewer + ':</strong> ' + part.replace(match[0], '') : '</strong>' + part;
+    // First item inline (span), rest on new lines (div)
+    if (idx === 0) return '<span style="color:' + color + ';"><strong>' + content + '</span>';
+    return '<div style="color:' + color + ';margin-top:2px;"><strong>' + content + '</div>';
   }).join('');
 };
 
@@ -1429,12 +1433,25 @@ export default function BerkeleyExpenseSystem() {
       // FIXED: backcharge with white background and dark text for visibility
       const backchargeHTML = exp.hasBackcharge && exp.backcharges?.length > 0 ? '<div style="background:#fff;border:2px solid #9c27b0;color:#6a1b9a;padding:4px 8px;margin-top:5px;font-size:10px;border-radius:4px;"><strong>📊 Backcharge:</strong> ' + exp.backcharges.map(bc => bc.development + ': ' + bc.percentage + '%').join(' | ') + '</div>' : '';
       const paxInfo = pax > 0 ? '<br>👥 ' + pax + ' pax: ' + reimburseCurrency + ' ' + fmtAmt(perPax) + ' (£' + fmtAmt(perPaxGBP) + ')/pax' : '';
-      // Find matching statement for foreign currency expenses
-      const matchingAnn = exp.isForeignCurrency && annotations ? annotations.find(a => a.ref === exp.ref || a.ref === String(exp.seqRef)) : null;
-      const matchStmtIdx = matchingAnn ? (matchingAnn.statementIndex || 0) : -1;
+      // Find matching statement - check both annotations array AND embedded statementIndex
+      const annotationMatch = annotations ? annotations.find(a => a.ref === exp.ref || a.ref === String(exp.seqRef)) : null;
+      const matchStmtIdx = annotationMatch ? (annotationMatch.statementIndex || 0) : (exp.statementIndex !== undefined ? exp.statementIndex : -1);
       const matchStmtImg = matchStmtIdx >= 0 && statementsArray[matchStmtIdx] ? statementsArray[matchStmtIdx] : null;
-      const receiptContent = (exp.receiptPreview ? '<img src="' + exp.receiptPreview + '" style="max-width:100%;max-height:' + (matchStmtImg ? '150mm' : '220mm') + ';object-fit:contain;" />' : '<div style="background:#f5f5f5;padding:30px;text-align:center;color:#999;">No receipt</div>') + (exp.receiptPreview2 ? '<div style="margin-top:8px;border-top:2px dashed #ccc;padding-top:8px;"><img src="' + exp.receiptPreview2 + '" style="max-width:100%;max-height:60mm;object-fit:contain;" /></div>' : '');
-      const stmtContent = matchStmtImg ? '<div style="flex:1;max-width:48%;border-left:3px solid #ff9800;padding-left:8px;"><div style="background:#ff9800;color:white;padding:5px 10px;font-weight:bold;font-size:9px;margin-bottom:8px;border-radius:4px;">💳 Matched Statement ' + (matchStmtIdx + 1) + '</div><img src="' + matchStmtImg + '" style="max-width:100%;max-height:170mm;object-fit:contain;border:1px solid #ddd;" /></div>' : '';
+      
+      // Auto-resize: reduce heights when there's long content
+      const notesLen = (exp.adminNotes || '').length;
+      const attendeesLen = (exp.attendees || '').length;
+      const heightPenalty = Math.min(50, Math.floor(notesLen / 50) * 10 + Math.floor(attendeesLen / 100) * 10 + (exp.hasBackcharge ? 10 : 0));
+      
+      // Receipt sizing - proportionate for both receipts
+      const hasTwoReceipts = exp.receiptPreview && exp.receiptPreview2;
+      const baseHeight = matchStmtImg ? 130 : 200;
+      const availableHeight = baseHeight - heightPenalty;
+      const firstH = hasTwoReceipts ? Math.floor(availableHeight * 0.55) : availableHeight;
+      const secondH = hasTwoReceipts ? Math.floor(availableHeight * 0.40) : 0;
+      
+      const receiptContent = (exp.receiptPreview ? '<img src="' + exp.receiptPreview + '" style="max-width:100%;max-height:' + firstH + 'mm;object-fit:contain;display:block;" />' : '<div style="background:#f5f5f5;padding:30px;text-align:center;color:#999;">No receipt</div>') + (exp.receiptPreview2 ? '<div style="margin-top:6px;border-top:2px dashed #ccc;padding-top:6px;"><img src="' + exp.receiptPreview2 + '" style="max-width:100%;max-height:' + secondH + 'mm;object-fit:contain;display:block;" /></div>' : '');
+      const stmtContent = matchStmtImg ? '<div style="flex:1;max-width:48%;border-left:3px solid #ff9800;padding-left:8px;"><div style="background:#ff9800;color:white;padding:5px 10px;font-weight:bold;font-size:9px;margin-bottom:8px;border-radius:4px;">💳 Matched Statement ' + (matchStmtIdx + 1) + '</div><img src="' + matchStmtImg + '" style="max-width:100%;max-height:' + (160 - heightPenalty) + 'mm;object-fit:contain;border:1px solid #ddd;" /></div>' : '';
       const contentHTML = matchStmtImg ? '<div style="display:flex;gap:10px;align-items:flex-start;"><div style="flex:1;max-width:50%;">' + receiptContent + '</div>' + stmtContent + '</div>' : receiptContent;
       return '<div class="page receipt-page"><div class="receipt-header"><div class="receipt-ref">' + exp.seqRef + '</div><div class="receipt-info"><strong>' + exp.merchant + '</strong> | ' + formatDDMMYYYY(new Date(exp.date)) + '<br>' + cat.name + ' | ' + exp.currency + ' ' + fmtAmt(exp.amount) + (exp.isForeignCurrency ? ' → ' + reimburseCurrency + ' ' + fmtAmt(exp.reimbursementAmount) : '') + '<br>' + (exp.description || '') + oldBadge + dupBadge + paxInfo + (exp.attendees ? '<br>' + exp.attendees.replace(/\n/g, ', ') : '') + (exp.adminNotes ? '<br><div style="background:#fff8e1;padding:2px 4px;border-radius:3px;">📝 ' + formatAdminNotesHTML(exp.adminNotes) + '</div>' : '') + backchargeHTML + '</div></div>' + contentHTML + '</div>';
     }).join('');
@@ -1567,13 +1584,22 @@ export default function BerkeleyExpenseSystem() {
       const workflow = getApprovalWorkflow(currentUser.id, currentUser.office);
       const isSelfSubmit = workflow?.selfSubmit === true;
       
+      // Embed statement annotation info into each expense
+      const expensesWithAnnotations = pendingExpenses.map(exp => {
+        const annotation = statementAnnotations.find(a => a.ref === exp.ref);
+        if (annotation) {
+          return { ...exp, statementIndex: annotation.statementIndex || 0 };
+        }
+        return exp;
+      });
+      
       if (returned) {
         const updateData = { 
           total_amount: reimbursementTotal, 
           item_count: pendingExpenses.length, 
           status: isSelfSubmit ? 'approved' : 'pending_review', 
           approval_level: isSelfSubmit ? 2 : 1, 
-          expenses: pendingExpenses,
+          expenses: expensesWithAnnotations,
           annotated_statement: annotatedStatements[0] || null
         };
         if (isSelfSubmit) {
@@ -1603,7 +1629,7 @@ export default function BerkeleyExpenseSystem() {
           level1_approver: workflow?.level1, 
           level2_approver: workflow?.level2,
           annotated_statement: annotatedStatements[0] || null,
-          expenses: pendingExpenses,
+          expenses: expensesWithAnnotations,
           submitted_at: new Date().toISOString()
         };
         if (isSelfSubmit) {
