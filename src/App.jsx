@@ -1824,18 +1824,34 @@ export default function BerkeleyExpenseSystem() {
   const handleRequestChanges = async (claimId, comment, flaggedExpenses = []) => {
     setLoading(true);
     try {
-      // Build comment with flagged refs
+      // Get existing claim to append to review history
+      const existingClaim = claims.find(c => c.id === claimId);
+      const existingHistory = existingClaim?.review_history || [];
+      
+      // Build new review entry
+      const newReviewEntry = {
+        comment: comment,
+        flagged: flaggedExpenses,
+        reviewer: currentUser.name,
+        date: new Date().toISOString()
+      };
+      
+      // Append to history
+      const updatedHistory = [...existingHistory, newReviewEntry];
+      
+      // Build comment with flagged refs (for backwards compatibility)
       const flaggedText = flaggedExpenses.length > 0 
         ? `[Flagged: ${flaggedExpenses.join(', ')}] ` 
         : '';
       const fullComment = flaggedText + comment;
       
-      // Try with flagged_expenses first, fall back without if column doesn't exist
-      const updateData = { 
+      // Try with review_history first, fall back without if column doesn't exist
+      let updateData = { 
         status: 'changes_requested', 
-        admin_comment: fullComment,
+        admin_comment: fullComment,  // Keep for backwards compatibility
         reviewed_by: currentUser.name,
-        approval_level: 1
+        approval_level: 1,
+        review_history: updatedHistory
       };
       
       // Only add flagged_expenses if there are any
@@ -1845,7 +1861,13 @@ export default function BerkeleyExpenseSystem() {
       
       let result = await supabase.from('claims').update(updateData).eq('id', claimId);
       
-      // If failed and we tried flagged_expenses, retry without it
+      // If failed, retry without review_history (column may not exist)
+      if (result.error) {
+        delete updateData.review_history;
+        result = await supabase.from('claims').update(updateData).eq('id', claimId);
+      }
+      
+      // If still failed and we tried flagged_expenses, retry without it
       if (result.error && flaggedExpenses.length > 0) {
         delete updateData.flagged_expenses;
         result = await supabase.from('claims').update(updateData).eq('id', claimId);
@@ -2442,24 +2464,45 @@ export default function BerkeleyExpenseSystem() {
         )}
         
         {/* Review Comments Popup */}
+        {/* Review History Popup for Employee */}
         {showReviewPopup && (
           <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50" onClick={() => setShowReviewPopup(null)}>
-            <div className="bg-white rounded-2xl max-w-md w-full p-6" onClick={e => e.stopPropagation()}>
+            <div className="bg-white rounded-2xl max-w-md w-full max-h-[80vh] overflow-auto p-6" onClick={e => e.stopPropagation()}>
               <div className="flex justify-between items-center mb-4">
-                <h3 className="font-bold text-lg">📋 Review Comments</h3>
+                <h3 className="font-bold text-lg">📋 Review History</h3>
                 <button onClick={() => setShowReviewPopup(null)} className="text-2xl text-slate-400">×</button>
               </div>
-              <div className="bg-amber-50 border border-amber-200 rounded-lg p-4">
-                <p className="font-semibold text-amber-800 mb-2">{showReviewPopup.claim_number}</p>
-                {(showReviewPopup.flagged_expenses || []).length > 0 && (
-                  <div className="flex flex-wrap gap-1 mb-3">
-                    {showReviewPopup.flagged_expenses.map(ref => (
-                      <span key={ref} className="bg-red-500 text-white text-xs font-bold px-2 py-1 rounded">🚩 {ref}</span>
-                    ))}
+              <p className="text-sm text-slate-500 mb-3">{showReviewPopup.claim_number}</p>
+              <div className="space-y-3">
+                {/* Show review_history if available */}
+                {(showReviewPopup.review_history && showReviewPopup.review_history.length > 0) ? (
+                  showReviewPopup.review_history.map((entry, idx) => (
+                    <div key={idx} className="bg-amber-50 border border-amber-200 rounded-lg p-3">
+                      <div className="flex justify-between items-start mb-2">
+                        <span className="text-xs font-semibold text-amber-800">Review #{idx + 1}</span>
+                        <span className="text-xs text-slate-400">{new Date(entry.date).toLocaleDateString()}</span>
+                      </div>
+                      {(entry.flagged || []).length > 0 && (
+                        <div className="flex flex-wrap gap-1 mb-2">
+                          {entry.flagged.map(ref => (<span key={ref} className="bg-red-500 text-white text-xs font-bold px-2 py-0.5 rounded">🚩 {ref}</span>))}
+                        </div>
+                      )}
+                      <p className="text-amber-700 text-sm whitespace-pre-wrap">{entry.comment}</p>
+                      <p className="text-xs text-slate-500 mt-2">— {entry.reviewer}</p>
+                    </div>
+                  ))
+                ) : (
+                  /* Fallback for old claims without review_history */
+                  <div className="bg-amber-50 border border-amber-200 rounded-lg p-3">
+                    {(showReviewPopup.flagged_expenses || []).length > 0 && (
+                      <div className="flex flex-wrap gap-1 mb-2">
+                        {showReviewPopup.flagged_expenses.map(ref => (<span key={ref} className="bg-red-500 text-white text-xs font-bold px-2 py-0.5 rounded">🚩 {ref}</span>))}
+                      </div>
+                    )}
+                    <p className="text-amber-700 text-sm whitespace-pre-wrap">{showReviewPopup.admin_comment}</p>
+                    <p className="text-xs text-slate-500 mt-2">— {showReviewPopup.reviewed_by}</p>
                   </div>
                 )}
-                <p className="text-amber-700">{showReviewPopup.admin_comment}</p>
-                <p className="text-xs text-slate-500 mt-3">Returned by: {showReviewPopup.reviewed_by}</p>
               </div>
               <button 
                 onClick={() => setShowReviewPopup(null)}
@@ -2472,7 +2515,7 @@ export default function BerkeleyExpenseSystem() {
         )}
         
         <div className="grid grid-cols-2 gap-4"><div className="bg-white rounded-2xl shadow-lg p-6 text-center"><div className="text-4xl font-bold text-slate-800">{displayExpenses.length}</div><div className="text-sm text-slate-500">{activeClaimTab === 'current' ? 'Pending' : 'In Claim'}</div></div><div className="bg-white rounded-2xl shadow-lg p-6 text-center"><div className="text-2xl font-bold text-green-600">{formatCurrency(displayTotal, userReimburseCurrency)}</div><div className="text-sm text-slate-500">To Reimburse</div></div></div>
-        <div className="bg-white rounded-2xl shadow-lg p-6"><div className="flex flex-wrap gap-3">{activeClaimTab === 'current' && <button onClick={() => setShowAddExpense(true)} className="bg-blue-600 text-white px-6 py-3 rounded-xl font-semibold shadow-lg">📸 Add Receipt</button>}{activeClaimTab === 'current' && pendingExpenses.length > 0 && (<button onClick={() => setShowPreview(true)} className="border-2 border-green-500 text-green-600 px-6 py-3 rounded-xl font-semibold">📋 Preview ({pendingExpenses.length})</button>)}{activeReturnedClaim && (<button onClick={() => setResubmitClaim(activeReturnedClaim)} className="bg-green-600 text-white px-6 py-3 rounded-xl font-semibold shadow-lg">🔄 Address & Resubmit</button>)}<button onClick={handleManualSync} disabled={loading} className="border-2 border-slate-300 text-slate-600 px-4 py-3 rounded-xl font-semibold">{loading ? '⏳' : '🔄'} Sync</button></div></div>
+        <div className="bg-white rounded-2xl shadow-lg p-6"><div className="flex flex-wrap gap-3">{activeClaimTab === 'current' && <button onClick={() => setShowAddExpense(true)} className="bg-blue-600 text-white px-6 py-3 rounded-xl font-semibold shadow-lg">📸 Add Receipt</button>}{activeClaimTab === 'current' && pendingExpenses.length > 0 && (<button onClick={() => setShowPreview(true)} className="border-2 border-green-500 text-green-600 px-6 py-3 rounded-xl font-semibold">📋 Preview ({pendingExpenses.length})</button>)}{activeReturnedClaim && (<><button onClick={() => handleDownloadPDF(activeReturnedClaim)} className="border-2 border-green-500 text-green-600 px-6 py-3 rounded-xl font-semibold">📋 Preview PDF</button><button onClick={() => setResubmitClaim(activeReturnedClaim)} className="bg-green-600 text-white px-6 py-3 rounded-xl font-semibold shadow-lg">🔄 Address & Resubmit</button></>)}<button onClick={handleManualSync} disabled={loading} className="border-2 border-slate-300 text-slate-600 px-4 py-3 rounded-xl font-semibold">{loading ? '⏳' : '🔄'} Sync</button></div></div>
         <div className="bg-white rounded-2xl shadow-lg p-6">
           <h3 className="font-bold text-slate-800 mb-4">{activeClaimTab === 'current' ? '📋 Pending Expenses (sorted by date)' : `📋 ${activeReturnedClaim?.claim_number} Expenses`}</h3>
           {/* Warning banner for approaching/expired receipts */}
@@ -2530,23 +2573,43 @@ export default function BerkeleyExpenseSystem() {
         {/* Resubmit Claim Modal */}
         {resubmitClaim && (
           <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50" onClick={() => setResubmitClaim(null)}>
-            <div className="bg-white rounded-2xl max-w-lg w-full p-6" onClick={e => e.stopPropagation()}>
+            <div className="bg-white rounded-2xl max-w-lg w-full max-h-[85vh] overflow-auto p-6" onClick={e => e.stopPropagation()}>
               <div className="flex justify-between items-center mb-4">
                 <h3 className="font-bold text-lg">🔄 Resubmit {resubmitClaim.claim_number}</h3>
                 <button onClick={() => setResubmitClaim(null)} className="text-2xl text-slate-400">×</button>
               </div>
               
-              <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 mb-4">
-                <p className="font-semibold text-amber-800 mb-2">Previous Review Comments:</p>
-                {(resubmitClaim.flagged_expenses || []).length > 0 && (
-                  <div className="flex flex-wrap gap-1 mb-2">
-                    {resubmitClaim.flagged_expenses.map(ref => (
-                      <span key={ref} className="bg-red-500 text-white text-xs font-bold px-2 py-1 rounded">🚩 {ref}</span>
-                    ))}
-                  </div>
-                )}
-                <p className="text-amber-700 text-sm">{resubmitClaim.admin_comment}</p>
-                <p className="text-xs text-slate-500 mt-2">From: {resubmitClaim.reviewed_by}</p>
+              <div className="mb-4">
+                <p className="font-semibold text-amber-800 mb-2">Review History:</p>
+                <div className="space-y-2 max-h-48 overflow-y-auto">
+                  {(resubmitClaim.review_history && resubmitClaim.review_history.length > 0) ? (
+                    resubmitClaim.review_history.map((entry, idx) => (
+                      <div key={idx} className="bg-amber-50 border border-amber-200 rounded-lg p-3">
+                        <div className="flex justify-between items-start mb-1">
+                          <span className="text-xs font-semibold text-amber-800">Review #{idx + 1}</span>
+                          <span className="text-xs text-slate-400">{new Date(entry.date).toLocaleDateString()}</span>
+                        </div>
+                        {(entry.flagged || []).length > 0 && (
+                          <div className="flex flex-wrap gap-1 mb-1">
+                            {entry.flagged.map(ref => (<span key={ref} className="bg-red-500 text-white text-xs font-bold px-2 py-0.5 rounded">🚩 {ref}</span>))}
+                          </div>
+                        )}
+                        <p className="text-amber-700 text-sm">{entry.comment}</p>
+                        <p className="text-xs text-slate-500 mt-1">— {entry.reviewer}</p>
+                      </div>
+                    ))
+                  ) : (
+                    <div className="bg-amber-50 border border-amber-200 rounded-lg p-3">
+                      {(resubmitClaim.flagged_expenses || []).length > 0 && (
+                        <div className="flex flex-wrap gap-1 mb-1">
+                          {resubmitClaim.flagged_expenses.map(ref => (<span key={ref} className="bg-red-500 text-white text-xs font-bold px-2 py-0.5 rounded">🚩 {ref}</span>))}
+                        </div>
+                      )}
+                      <p className="text-amber-700 text-sm">{resubmitClaim.admin_comment}</p>
+                      <p className="text-xs text-slate-500 mt-1">— {resubmitClaim.reviewed_by}</p>
+                    </div>
+                  )}
+                </div>
               </div>
               
               <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-4">
@@ -2572,7 +2635,7 @@ export default function BerkeleyExpenseSystem() {
                         .update({ 
                           status: 'pending_review', 
                           approval_level: 1,
-                          // Keep admin_comment so reviewer can see what was flagged
+                          // Keep admin_comment and review_history so reviewer can see what was flagged
                         })
                         .eq('id', resubmitClaim.id);
                       
@@ -3215,13 +3278,48 @@ export default function BerkeleyExpenseSystem() {
         <div className="bg-white rounded-2xl shadow-lg p-6">
           <h3 className="font-bold mb-4">📊 To Review ({reviewableClaims.length})</h3>
           {reviewableClaims.length === 0 ? <div className="text-center py-12 text-slate-400">✅ Nothing to review</div> : (<div className="space-y-2">{reviewableClaims.map(claim => {
-            const isResubmission = !!claim.admin_comment;
-            return (<div key={claim.id} onClick={() => setSelectedClaim(claim)} className={`flex items-center justify-between p-4 rounded-xl border cursor-pointer hover:border-blue-300 ${isResubmission ? 'bg-amber-50 border-amber-200' : 'bg-slate-50'}`}><div><div className="flex items-center gap-2 flex-wrap"><span className="font-semibold">{claim.user_name}</span><span className={`text-xs px-2 py-0.5 rounded-full ${claim.approval_level === 2 ? 'bg-blue-100 text-blue-700' : 'bg-amber-100 text-amber-700'}`}>L{claim.approval_level || 1}</span>{isResubmission && <span className="bg-orange-500 text-white text-xs px-2 py-0.5 rounded-full font-semibold">🔄 Resubmission</span>}</div><p className="text-sm text-slate-500">{claim.claim_number} • {claim.office}</p></div><span className="font-bold">{formatCurrency(claim.total_amount, claim.currency)}</span></div>);
+            // Only show "Resubmission" badge to the reviewer who originally returned it
+            const isResubmissionForMe = claim.reviewed_by === currentUser.name;
+            return (<div key={claim.id} onClick={() => setSelectedClaim(claim)} className={`flex items-center justify-between p-4 rounded-xl border cursor-pointer hover:border-blue-300 ${isResubmissionForMe ? 'bg-amber-50 border-amber-200' : 'bg-slate-50'}`}><div><div className="flex items-center gap-2 flex-wrap"><span className="font-semibold">{claim.user_name}</span><span className={`text-xs px-2 py-0.5 rounded-full ${claim.approval_level === 2 ? 'bg-blue-100 text-blue-700' : 'bg-amber-100 text-amber-700'}`}>L{claim.approval_level || 1}</span>{isResubmissionForMe && <span className="bg-orange-500 text-white text-xs px-2 py-0.5 rounded-full font-semibold">🔄 Resubmission</span>}</div><p className="text-sm text-slate-500">{claim.claim_number} • {claim.office}</p></div><span className="font-bold">{formatCurrency(claim.total_amount, claim.currency)}</span></div>);
           })}</div>)}
         </div>
-        {selectedClaim && (<div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50" onClick={() => setSelectedClaim(null)}><div className="bg-white rounded-2xl max-w-2xl w-full max-h-[90vh] overflow-auto" onClick={e => e.stopPropagation()}><div className="p-6 border-b flex justify-between"><div><div className="flex items-center gap-2"><h2 className="text-xl font-bold">{selectedClaim.user_name}</h2>{selectedClaim.admin_comment && <span className="bg-orange-500 text-white text-xs px-2 py-1 rounded-full font-semibold">🔄 Resubmission</span>}</div><p className="text-sm text-slate-500">{selectedClaim.claim_number} • Level {selectedClaim.approval_level || 1}</p></div><button onClick={() => setSelectedClaim(null)} className="text-2xl text-slate-400">×</button></div><div className="p-6"><button onClick={() => handleDownloadPDF(selectedClaim)} className="w-full bg-green-600 text-white py-3 rounded-xl font-semibold mb-4">📥 Download PDF</button>{[...(selectedClaim.expenses || [])].sort((a, b) => { const numA = parseInt(a.ref); const numB = parseInt(b.ref); if (!isNaN(numA) && !isNaN(numB)) return numA - numB; return (a.ref || '999').localeCompare(b.ref || '999', undefined, { numeric: true }); }).map((exp, i) => { const isOld = isOlderThan2Months(exp.date); const isApproaching = isApproaching2Months(exp.date); const daysLeft = getDaysUntil2Months(exp.date); const paxCount = parseInt(exp.numberOfPax) || 0; const isEntertaining = EXPENSE_CATEGORIES[exp.category]?.requiresAttendees; const perPaxAmount = isEntertaining && paxCount > 0 ? (parseFloat(exp.reimbursementAmount || exp.amount) / paxCount) : 0; return (<div key={i} className={`py-3 border-b ${isOld ? 'bg-red-50' : isApproaching ? 'bg-amber-50' : ''}`}><div className="flex justify-between items-start"><div className="flex-1"><div className="flex items-center gap-2 flex-wrap"><span className="bg-blue-100 text-blue-700 text-xs px-2 py-0.5 rounded font-bold">{exp.ref}</span><span className="font-semibold">{exp.merchant}</span>{exp.isPotentialDuplicate && <span className="bg-red-100 text-red-600 text-xs px-2 py-0.5 rounded">⚠️ Duplicate?</span>}{isOld && <span className="bg-red-100 text-red-600 text-xs px-2 py-0.5 rounded animate-pulse">🚨 &gt;2 Months</span>}{isApproaching && <span className="bg-amber-100 text-amber-700 text-xs px-2 py-0.5 rounded">⏰ {daysLeft}d left</span>}{paxCount > 0 && <span className="bg-purple-100 text-purple-600 text-xs px-2 py-0.5 rounded">👥 {paxCount} pax</span>}{isEntertaining && paxCount > 0 && <span className="bg-indigo-100 text-indigo-600 text-xs px-2 py-0.5 rounded">💰 {selectedClaim.currency} {perPaxAmount.toFixed(2)}/pax</span>}</div><p className="text-xs text-slate-500 mt-1">{exp.description}</p>{exp.isForeignCurrency && exp.forexRate && <p className="text-xs text-amber-600 mt-1">💱 Rate: 1 {exp.currency} = {exp.forexRate.toFixed(4)} {selectedClaim.currency}</p>}{exp.adminNotes && <div className="text-xs mt-1 bg-amber-50 px-2 py-1 rounded"><span className="font-semibold">📝 Notes:</span><div dangerouslySetInnerHTML={{ __html: formatAdminNotesReact(exp.adminNotes) }} /></div>}</div><span className="font-bold text-green-700 ml-2">{formatCurrency(exp.reimbursementAmount || exp.amount, selectedClaim.currency)}</span></div></div>); })}</div><div className="p-4 border-t bg-slate-50 space-y-3"><div className="flex gap-3"><button onClick={() => setEditingClaim(selectedClaim)} className="flex-1 py-3 rounded-xl bg-purple-500 text-white font-semibold">✏️ Edit / Add Notes</button><button onClick={() => setShowRequestChanges(true)} className="flex-1 py-3 rounded-xl bg-amber-500 text-white font-semibold">📝 Return</button></div><div className="flex gap-3">{selectedClaim.admin_comment && <button onClick={() => setShowPreviousReview(selectedClaim)} className="flex-1 py-3 rounded-xl bg-blue-100 text-blue-700 font-semibold border-2 border-blue-200">📋 Previous Review</button>}<button onClick={() => handleApprove(selectedClaim)} disabled={loading} className="flex-[2] py-3 rounded-xl bg-green-600 text-white font-semibold disabled:opacity-50">{(() => { const workflow = SENIOR_STAFF_ROUTING[selectedClaim.user_id]; const isSingleLevel = workflow?.singleLevel; const level = selectedClaim.approval_level || 1; if (level === 1 && isSingleLevel) return workflow?.externalApproval ? '✓ Approve (→ Chairman)' : '✓ Final Approve'; if (level === 1) return '✓ Approve → L2'; return '✓ Final Approve'; })()}</button></div></div></div></div>)}
+        {selectedClaim && (<div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50" onClick={() => setSelectedClaim(null)}><div className="bg-white rounded-2xl max-w-2xl w-full max-h-[90vh] overflow-auto" onClick={e => e.stopPropagation()}><div className="p-6 border-b flex justify-between"><div><div className="flex items-center gap-2"><h2 className="text-xl font-bold">{selectedClaim.user_name}</h2>{selectedClaim.reviewed_by === currentUser.name && <span className="bg-orange-500 text-white text-xs px-2 py-1 rounded-full font-semibold">🔄 Resubmission</span>}</div><p className="text-sm text-slate-500">{selectedClaim.claim_number} • Level {selectedClaim.approval_level || 1}</p></div><button onClick={() => setSelectedClaim(null)} className="text-2xl text-slate-400">×</button></div><div className="p-6"><button onClick={() => handleDownloadPDF(selectedClaim)} className="w-full bg-green-600 text-white py-3 rounded-xl font-semibold mb-4">📥 Download PDF</button>{[...(selectedClaim.expenses || [])].sort((a, b) => { const numA = parseInt(a.ref); const numB = parseInt(b.ref); if (!isNaN(numA) && !isNaN(numB)) return numA - numB; return (a.ref || '999').localeCompare(b.ref || '999', undefined, { numeric: true }); }).map((exp, i) => { const isOld = isOlderThan2Months(exp.date); const isApproaching = isApproaching2Months(exp.date); const daysLeft = getDaysUntil2Months(exp.date); const paxCount = parseInt(exp.numberOfPax) || 0; const isEntertaining = EXPENSE_CATEGORIES[exp.category]?.requiresAttendees; const perPaxAmount = isEntertaining && paxCount > 0 ? (parseFloat(exp.reimbursementAmount || exp.amount) / paxCount) : 0; return (<div key={i} className={`py-3 border-b ${isOld ? 'bg-red-50' : isApproaching ? 'bg-amber-50' : ''}`}><div className="flex justify-between items-start"><div className="flex-1"><div className="flex items-center gap-2 flex-wrap"><span className="bg-blue-100 text-blue-700 text-xs px-2 py-0.5 rounded font-bold">{exp.ref}</span><span className="font-semibold">{exp.merchant}</span>{exp.isPotentialDuplicate && <span className="bg-red-100 text-red-600 text-xs px-2 py-0.5 rounded">⚠️ Duplicate?</span>}{isOld && <span className="bg-red-100 text-red-600 text-xs px-2 py-0.5 rounded animate-pulse">🚨 &gt;2 Months</span>}{isApproaching && <span className="bg-amber-100 text-amber-700 text-xs px-2 py-0.5 rounded">⏰ {daysLeft}d left</span>}{paxCount > 0 && <span className="bg-purple-100 text-purple-600 text-xs px-2 py-0.5 rounded">👥 {paxCount} pax</span>}{isEntertaining && paxCount > 0 && <span className="bg-indigo-100 text-indigo-600 text-xs px-2 py-0.5 rounded">💰 {selectedClaim.currency} {perPaxAmount.toFixed(2)}/pax</span>}</div><p className="text-xs text-slate-500 mt-1">{exp.description}</p>{exp.isForeignCurrency && exp.forexRate && <p className="text-xs text-amber-600 mt-1">💱 Rate: 1 {exp.currency} = {exp.forexRate.toFixed(4)} {selectedClaim.currency}</p>}{exp.adminNotes && <div className="text-xs mt-1 bg-amber-50 px-2 py-1 rounded"><span className="font-semibold">📝 Notes:</span><div dangerouslySetInnerHTML={{ __html: formatAdminNotesReact(exp.adminNotes) }} /></div>}</div><span className="font-bold text-green-700 ml-2">{formatCurrency(exp.reimbursementAmount || exp.amount, selectedClaim.currency)}</span></div></div>); })}</div><div className="p-4 border-t bg-slate-50 space-y-3"><div className="flex gap-3"><button onClick={() => setEditingClaim(selectedClaim)} className="flex-1 py-3 rounded-xl bg-purple-500 text-white font-semibold">✏️ Edit / Add Notes</button><button onClick={() => setShowRequestChanges(true)} className="flex-1 py-3 rounded-xl bg-amber-500 text-white font-semibold">📝 Return</button></div><div className="flex gap-3">{(selectedClaim.admin_comment || (selectedClaim.review_history && selectedClaim.review_history.length > 0)) && <button onClick={() => setShowPreviousReview(selectedClaim)} className="flex-1 py-3 rounded-xl bg-blue-100 text-blue-700 font-semibold border-2 border-blue-200">📋 Review History</button>}<button onClick={() => handleApprove(selectedClaim)} disabled={loading} className="flex-[2] py-3 rounded-xl bg-green-600 text-white font-semibold disabled:opacity-50">{(() => { const workflow = SENIOR_STAFF_ROUTING[selectedClaim.user_id]; const isSingleLevel = workflow?.singleLevel; const level = selectedClaim.approval_level || 1; if (level === 1 && isSingleLevel) return workflow?.externalApproval ? '✓ Approve (→ Chairman)' : '✓ Final Approve'; if (level === 1) return '✓ Approve → L2'; return '✓ Final Approve'; })()}</button></div></div></div></div>)}
         {/* Previous Review Popup */}
-        {showPreviousReview && (<div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50" onClick={() => setShowPreviousReview(null)}><div className="bg-white rounded-2xl max-w-md w-full p-6" onClick={e => e.stopPropagation()}><div className="flex justify-between items-center mb-4"><h3 className="font-bold text-lg">📋 Previous Review Comments</h3><button onClick={() => setShowPreviousReview(null)} className="text-2xl text-slate-400">×</button></div><div className="bg-amber-50 border border-amber-200 rounded-lg p-4"><p className="font-semibold text-amber-800 mb-2">{showPreviousReview.claim_number}</p>{(showPreviousReview.flagged_expenses || []).length > 0 && (<div className="flex flex-wrap gap-1 mb-3">{showPreviousReview.flagged_expenses.map(ref => (<span key={ref} className="bg-red-500 text-white text-xs font-bold px-2 py-1 rounded">🚩 {ref}</span>))}</div>)}<p className="text-amber-700 whitespace-pre-wrap">{showPreviousReview.admin_comment}</p><p className="text-xs text-slate-500 mt-3">Returned by: {showPreviousReview.reviewed_by}</p></div><button onClick={() => setShowPreviousReview(null)} className="w-full mt-4 bg-slate-100 text-slate-700 py-2 rounded-lg font-semibold">Close</button></div></div>)}
+        {/* Previous Review History Popup */}
+        {showPreviousReview && (<div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50" onClick={() => setShowPreviousReview(null)}><div className="bg-white rounded-2xl max-w-md w-full max-h-[80vh] overflow-auto p-6" onClick={e => e.stopPropagation()}><div className="flex justify-between items-center mb-4"><h3 className="font-bold text-lg">📋 Review History</h3><button onClick={() => setShowPreviousReview(null)} className="text-2xl text-slate-400">×</button></div>
+        <p className="text-sm text-slate-500 mb-3">{showPreviousReview.claim_number}</p>
+        <div className="space-y-3">
+          {/* Show review_history if available */}
+          {(showPreviousReview.review_history && showPreviousReview.review_history.length > 0) ? (
+            showPreviousReview.review_history.map((entry, idx) => (
+              <div key={idx} className="bg-amber-50 border border-amber-200 rounded-lg p-3">
+                <div className="flex justify-between items-start mb-2">
+                  <span className="text-xs font-semibold text-amber-800">Review #{idx + 1}</span>
+                  <span className="text-xs text-slate-400">{new Date(entry.date).toLocaleDateString()}</span>
+                </div>
+                {(entry.flagged || []).length > 0 && (
+                  <div className="flex flex-wrap gap-1 mb-2">
+                    {entry.flagged.map(ref => (<span key={ref} className="bg-red-500 text-white text-xs font-bold px-2 py-0.5 rounded">🚩 {ref}</span>))}
+                  </div>
+                )}
+                <p className="text-amber-700 text-sm whitespace-pre-wrap">{entry.comment}</p>
+                <p className="text-xs text-slate-500 mt-2">— {entry.reviewer}</p>
+              </div>
+            ))
+          ) : (
+            /* Fallback for old claims without review_history */
+            <div className="bg-amber-50 border border-amber-200 rounded-lg p-3">
+              {(showPreviousReview.flagged_expenses || []).length > 0 && (
+                <div className="flex flex-wrap gap-1 mb-2">
+                  {showPreviousReview.flagged_expenses.map(ref => (<span key={ref} className="bg-red-500 text-white text-xs font-bold px-2 py-0.5 rounded">🚩 {ref}</span>))}
+                </div>
+              )}
+              <p className="text-amber-700 text-sm whitespace-pre-wrap">{showPreviousReview.admin_comment}</p>
+              <p className="text-xs text-slate-500 mt-2">— {showPreviousReview.reviewed_by}</p>
+            </div>
+          )}
+        </div>
+        <button onClick={() => setShowPreviousReview(null)} className="w-full mt-4 bg-slate-100 text-slate-700 py-2 rounded-lg font-semibold">Close</button></div></div>)}
         {editingClaim && <EditClaimModal claim={editingClaim} onClose={() => setEditingClaim(null)} />}
         {showRequestChanges && selectedClaim && (
           <RequestChangesModal 
