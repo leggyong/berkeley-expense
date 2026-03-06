@@ -695,17 +695,7 @@ const StatementAnnotator = ({ images, initialIndex = 0, expenses, existingAnnota
   };
 
   const handleEnd = () => { setDragging(null); setResizing(null); };
-  const removeAnnotation = (ref) => {
-    // Remove from both currentAnnotations AND annotationsByStatement
-    setCurrentAnnotations(prev => prev.filter(a => a.ref !== ref));
-    setAnnotationsByStatement(prev => {
-      const updated = { ...prev };
-      if (updated[currentIndex]) {
-        updated[currentIndex] = updated[currentIndex].filter(a => a.ref !== ref);
-      }
-      return updated;
-    });
-  };
+  const removeAnnotation = (ref) => setCurrentAnnotations(prev => prev.filter(a => a.ref !== ref));
   
   // Save current statement's annotations before switching
   const saveCurrentToState = () => {
@@ -1043,7 +1033,7 @@ export default function BerkeleyExpenseSystem() {
   const [showAddExpense, setShowAddExpense] = useState(false);
   const [showPreview, setShowPreview] = useState(false);
   const [editingReturnedClaimId, setEditingReturnedClaimId] = useState(null); // Track which returned claim we're editing
-  const [activeClaimTab, setActiveClaimTab] = useState('current'); // 'current' or claim.id — lifted to parent for tab switching
+  const [activeClaimTab, setActiveClaimTab] = useState('current'); // 'current' or claim.id — lifted to parent
   const [showStatementUpload, setShowStatementUpload] = useState(false);
   const [showStatementAnnotator, setShowStatementAnnotator] = useState(false);
   const [statementImages, setStatementImages] = useState([]); 
@@ -1119,50 +1109,37 @@ export default function BerkeleyExpenseSystem() {
       if (migratedStatements.length > 0) setAnnotatedStatements(migratedStatements);
       if (migratedOriginals.length > 0) setOriginalStatementImages(migratedOriginals);
       
-      // --- BRANCH: Save to claims table (returned claim) or user_drafts (current draft) ---
+      // Branch: save to claims table (returned claim) or user_drafts (current draft)
       if (editingReturnedClaimId) {
-        // Saving changes to a returned claim
+        // Save edits back to the returned claim in claims table
         const total = migratedExpenses.reduce((sum, e) => sum + parseFloat(e.reimbursementAmount || e.amount || 0), 0);
-        const updateData = {
+        const claimUpdate = {
           expenses: migratedExpenses,
           total_amount: total,
           item_count: migratedExpenses.length,
         };
         if (migratedStatements?.length > 0) {
-          updateData.annotated_statements = migratedStatements;
-          updateData.annotated_statement = migratedStatements[0];
+          claimUpdate.annotated_statements = migratedStatements;
+          claimUpdate.annotated_statement = migratedStatements[0];
         }
-        if (migratedOriginals?.length > 0) updateData.original_statements = migratedOriginals;
+        if (migratedOriginals?.length > 0) claimUpdate.original_statements = migratedOriginals;
         
-        let result = await supabase.from('claims').update(updateData).eq('id', editingReturnedClaimId);
-        if (result.error) {
-          console.log('Returned claim save: trying without original_statements');
-          delete updateData.original_statements;
-          result = await supabase.from('claims').update(updateData).eq('id', editingReturnedClaimId);
-        }
-        if (result.error) {
-          console.log('Returned claim save: trying without annotated_statements');
-          delete updateData.annotated_statements;
-          delete updateData.annotated_statement;
-          result = await supabase.from('claims').update(updateData).eq('id', editingReturnedClaimId);
-        }
-        if (result.error) {
-          console.error('Returned claim save failed:', result.error);
-          throw result.error;
-        }
+        let result = await supabase.from('claims').update(claimUpdate).eq('id', editingReturnedClaimId);
+        // Progressive fallback for missing columns
+        if (result.error) { delete claimUpdate.original_statements; result = await supabase.from('claims').update(claimUpdate).eq('id', editingReturnedClaimId); }
+        if (result.error) { delete claimUpdate.annotated_statements; delete claimUpdate.annotated_statement; result = await supabase.from('claims').update(claimUpdate).eq('id', editingReturnedClaimId); }
+        if (result.error) throw result.error;
         
-        // Update local claims state
-        setClaims(prev => prev.map(c => c.id === editingReturnedClaimId ? { ...c, ...updateData } : c));
-        
+        // Update local claims cache
+        setClaims(prev => prev.map(c => c.id === editingReturnedClaimId ? { ...c, ...claimUpdate } : c));
       } else {
-        // Saving current drafts to user_drafts
+        // Save current drafts to user_drafts
         const expensesJson = JSON.stringify(migratedExpenses);
         const statementsJson = JSON.stringify(migratedStatements);
         const annotationsJson = JSON.stringify(annotationsToSave || []);
         const originalsJson = JSON.stringify(migratedOriginals);
-        const totalSize = expensesJson.length + statementsJson.length + annotationsJson.length + originalsJson.length;
         
-        console.log(`💾 Saving drafts: ${Math.round(totalSize / 1024)}KB`);
+        console.log(`💾 Saving drafts: ${Math.round((expensesJson.length + statementsJson.length + annotationsJson.length + originalsJson.length) / 1024)}KB`);
         
         const draftData = { 
           user_id: currentUser.id, 
@@ -1182,7 +1159,6 @@ export default function BerkeleyExpenseSystem() {
         } else {
           result = await supabase.from('user_drafts').insert([draftData]);
         }
-        
         if (result.error) throw result.error;
       }
       
@@ -1298,19 +1274,8 @@ export default function BerkeleyExpenseSystem() {
 
   // Manual refresh button
   const handleManualSync = async () => { 
+    await loadFromServer();
     await loadClaims();
-    if (editingReturnedClaimId) {
-      // Re-load the returned claim's data from the updated claims
-      const freshClaim = claims.find(c => c.id === editingReturnedClaimId);
-      if (freshClaim) {
-        let processed = (freshClaim.expenses || []).map(e => ({ ...e, status: 'draft' }));
-        processed = sortAndReassignRefs(processed);
-        processed = markDuplicatePairs(processed);
-        setExpenses(processed);
-      }
-    } else {
-      await loadFromServer();
-    }
     alert('✅ Refreshed from server!');
   };
 
@@ -1338,122 +1303,11 @@ export default function BerkeleyExpenseSystem() {
 
   useEffect(() => { if (currentUser) loadClaims(); }, [currentUser]);
 
-  // --- TAB SWITCHING: Current Draft <-> Returned Claim ---
-  // When switching TO a returned claim tab, save drafts first, then load claim expenses
-  // When switching BACK to current draft, save returned claim changes, then reload drafts
-  const handleSwitchToReturnedClaim = async (claim) => {
-    if (!claim) return;
-    
-    // Save current drafts to server before switching (so they aren't lost)
-    if (!editingReturnedClaimId) {
-      await saveToServer(expenses, annotatedStatements, statementAnnotations, originalStatementImages);
-    } else {
-      // Already editing a different returned claim — save changes to THAT claim first
-      await saveReturnedClaimExpenses(editingReturnedClaimId);
-    }
-    
-    // Load this returned claim's expenses into state
-    let processed = (claim.expenses || []).map(e => ({ ...e, status: 'draft' }));
-    processed = sortAndReassignRefs(processed);
-    processed = markDuplicatePairs(processed);
-    setExpenses(processed);
-    setEditingReturnedClaimId(claim.id);
-    setActiveClaimTab(claim.id);
-    
-    // Restore statement annotations from expenses' embedded statementIndex
-    const restoredAnnotations = (claim.expenses || [])
-      .filter(e => e.statementIndex !== undefined && e.statementIndex >= 0)
-      .map(e => ({ ref: e.ref, statementIndex: e.statementIndex }));
-    if (restoredAnnotations.length > 0) {
-      setStatementAnnotations(restoredAnnotations);
-    } else {
-      setStatementAnnotations([]);
-    }
-    
-    // Load statement images — prefer originals for re-annotation
-    if (claim.original_statements && claim.original_statements.length > 0) {
-      setOriginalStatementImages(claim.original_statements);
-      setStatementImages(claim.original_statements);
-      if (claim.annotated_statements) {
-        setAnnotatedStatements(claim.annotated_statements);
-      } else if (claim.annotated_statement) {
-        setAnnotatedStatements([claim.annotated_statement]);
-      } else {
-        setAnnotatedStatements(claim.original_statements);
-      }
-    } else if (claim.annotated_statements) {
-      // WARNING: No clean originals available — annotated images have boxes baked in
-      // Clear annotations so we don't draw duplicates on top of baked-in boxes
-      console.log('⚠️ No original_statements found — using annotated as base. Clearing annotation positions to avoid duplicates.');
-      setAnnotatedStatements(claim.annotated_statements);
-      setStatementImages(claim.annotated_statements);
-      setOriginalStatementImages(claim.annotated_statements);
-      setStatementAnnotations([]); // Don't load old annotation positions — they're baked into the image
-    } else if (claim.annotated_statement) {
-      console.log('⚠️ No original_statements found — using single annotated_statement as base.');
-      setAnnotatedStatements([claim.annotated_statement]);
-      setStatementImages([claim.annotated_statement]);
-      setOriginalStatementImages([claim.annotated_statement]);
-      setStatementAnnotations([]); // Same — don't draw on top of baked-in boxes
-    } else {
-      setAnnotatedStatements([]);
-      setStatementImages([]);
-      setOriginalStatementImages([]);
-    }
-  };
-  
-  const handleSwitchToCurrentDraft = async () => {
-    // Save returned claim changes first (if we were editing one)
-    if (editingReturnedClaimId) {
-      await saveReturnedClaimExpenses(editingReturnedClaimId);
-    }
-    
-    // Clear returned claim tracking
-    setEditingReturnedClaimId(null);
-    setActiveClaimTab('current');
-    
-    // Reload user's actual drafts from server
-    await loadFromServer();
-  };
-  
-  // Save current expenses state back to a returned claim in the claims table
-  const saveReturnedClaimExpenses = async (claimId) => {
-    if (!claimId) return;
-    const currentExpenses = expenses.filter(e => e.status === 'draft');
-    const total = currentExpenses.reduce((sum, e) => sum + parseFloat(e.reimbursementAmount || e.amount || 0), 0);
-    
-    const updateData = {
-      expenses: currentExpenses,
-      total_amount: total,
-      item_count: currentExpenses.length,
-    };
-    
-    // Also save statement data if available
-    if (annotatedStatements?.length > 0) updateData.annotated_statements = annotatedStatements;
-    if (originalStatementImages?.length > 0) updateData.original_statements = originalStatementImages;
-    if (annotatedStatements?.[0]) updateData.annotated_statement = annotatedStatements[0];
-    
-    try {
-      let result = await supabase.from('claims').update(updateData).eq('id', claimId);
-      if (result.error) {
-        // Try without optional columns
-        delete updateData.original_statements;
-        result = await supabase.from('claims').update(updateData).eq('id', claimId);
-      }
-      if (result.error) {
-        delete updateData.annotated_statements;
-        result = await supabase.from('claims').update(updateData).eq('id', claimId);
-      }
-      if (result.error) {
-        console.error('Failed to save returned claim changes:', result.error);
-      } else {
-        // Update local claims state to reflect saved changes
-        setClaims(prev => prev.map(c => c.id === claimId ? { ...c, ...updateData } : c));
-      }
-    } catch (err) {
-      console.error('Error saving returned claim:', err);
-    }
-  };
+  useEffect(() => {
+    // NOTE: We intentionally do NOT load returned claim expenses into the expenses state.
+    // Returned claims keep their expenses in claim.expenses, and are displayed via the tab system.
+    // This keeps current drafts separate from returned claims.
+  }, [currentUser, claims]);
 
   const getUserOffice = (user) => OFFICES.find(o => o.code === user?.office);
   const userOffice = getUserOffice(currentUser);
@@ -1742,7 +1596,9 @@ export default function BerkeleyExpenseSystem() {
   };
   
   // Load returned claim data for editing/preview
-  const loadReturnedClaimForEdit = (claim) => {
+  // Load a returned claim's data into working state (expenses, statements, annotations)
+  // Called on tab switch AND on preview click
+  const loadReturnedClaimIntoState = (claim) => {
     if (!claim) return;
     
     // Load expenses into state
@@ -1785,15 +1641,46 @@ export default function BerkeleyExpenseSystem() {
       setStatementImages([claim.annotated_statement]);
       setOriginalStatementImages([claim.annotated_statement]);
     }
-    
-    // Open preview modal
+  };
+  
+  // Load returned claim into state AND open preview
+  const loadReturnedClaimForEdit = (claim) => {
+    loadReturnedClaimIntoState(claim);
     setShowPreview(true);
   };
   
-  // Handle closing preview - stay on the current tab
+  // Switch to a returned claim tab — load its data into state
+  const switchToReturnedTab = async (claim) => {
+    // Save current state first
+    // saveToServer will branch to claims table or user_drafts based on editingReturnedClaimId
+    await saveToServer(expenses, annotatedStatements, statementAnnotations, originalStatementImages);
+    
+    setActiveClaimTab(claim.id);
+    loadReturnedClaimIntoState(claim);
+  };
+  
+  // Switch back to current draft tab — save returned claim changes, then reload drafts
+  const switchToCurrentDraftTab = async () => {
+    // Save returned claim changes first
+    if (editingReturnedClaimId) {
+      await saveToServer(expenses, annotatedStatements, statementAnnotations, originalStatementImages);
+    }
+    setActiveClaimTab('current');
+    setEditingReturnedClaimId(null);
+    await loadFromServer();
+  };
+  
+  // Handle closing preview - if on returned claim tab, keep state; otherwise if was editing returned via old flow, reload drafts
   const handleClosePreview = async () => {
     setShowPreview(false);
-    // No longer reset editingReturnedClaimId here — tab switching handles that
+    
+    // If we were editing a returned claim via old "Preview" button flow (not tab),
+    // and we're on current draft tab, reload drafts
+    if (editingReturnedClaimId && activeClaimTab === 'current') {
+      setEditingReturnedClaimId(null);
+      await loadFromServer();
+    }
+    // If on returned claim tab, keep the state as-is
   };
   
   const handleSubmitClaim = async () => {
@@ -2497,14 +2384,7 @@ export default function BerkeleyExpenseSystem() {
                 setCurrentStatementIndex(0); 
                 setShowPreview(false); 
                 setShowStatementAnnotator(true); 
-              }} className="text-purple-600 text-sm font-semibold" disabled={originalStatementImages.length === 0}>✏️ Edit Tags</button><button onClick={() => { setShowPreview(false); setShowStatementUpload(true); }} className="text-blue-600 text-sm">➕ {editingReturnedClaimId ? '🔄 Re-upload Statement' : 'Add Statement'}</button></div></div>
-              {/* Warning: no clean originals available for re-annotation */}
-              {editingReturnedClaimId && statementAnnotations.length === 0 && annotatedStatements.length > 0 && (
-                <div className="mt-2 bg-amber-100 border border-amber-300 rounded-lg p-2">
-                  <p className="text-amber-800 text-sm">⚠️ Clean statement originals not available — old annotation boxes are baked into the image. <strong>Re-upload your statement</strong> for a clean re-annotation.</p>
-                </div>
-              )}
-              <div className="flex gap-2 mt-2 overflow-x-auto">{annotatedStatements.map((img, idx) => (<img key={idx} src={img} alt={`Statement ${idx+1}`} className="h-20 rounded cursor-pointer border-2 border-green-300" onClick={() => setViewImg(img)} />))}</div>{untaggedExpenses.length > 0 && (<div className="mt-2 bg-amber-100 border border-amber-300 rounded-lg p-2"><p className="text-amber-800 text-sm">⚠️ Untagged: {untaggedExpenses.map(e => e.ref).join(', ')}</p></div>)}</div>)}
+              }} className="text-purple-600 text-sm font-semibold" disabled={originalStatementImages.length === 0}>✏️ Edit Tags</button><button onClick={() => { setShowPreview(false); setShowStatementUpload(true); }} className="text-blue-600 text-sm">➕ Add Statement</button></div></div><div className="flex gap-2 mt-2 overflow-x-auto">{annotatedStatements.map((img, idx) => (<img key={idx} src={img} alt={`Statement ${idx+1}`} className="h-20 rounded cursor-pointer border-2 border-green-300" onClick={() => setViewImg(img)} />))}</div>{untaggedExpenses.length > 0 && (<div className="mt-2 bg-amber-100 border border-amber-300 rounded-lg p-2"><p className="text-amber-800 text-sm">⚠️ Untagged: {untaggedExpenses.map(e => e.ref).join(', ')}</p></div>)}</div>)}
             </div>
           </div>
           <div className="p-4 border-t bg-slate-50 flex gap-3 shrink-0"><button onClick={handleClosePreview} className="flex-1 py-3 rounded-xl border-2 font-semibold">← Back</button><button onClick={handleSubmitClaim} disabled={!canSubmit || loading} className={`flex-[2] py-3 rounded-xl font-semibold ${canSubmit && !loading ? 'bg-green-600 text-white' : 'bg-slate-300 text-slate-500'}`}>{submitButtonText}</button></div>
@@ -2629,17 +2509,14 @@ export default function BerkeleyExpenseSystem() {
     const myClaims = claims.filter(c => c.user_id === currentUser.id);
     const returnedClaims = myClaims.filter(c => c.status === 'changes_requested');
     const userReimburseCurrency = getUserReimburseCurrency(currentUser);
-    const [showReviewPopup, setShowReviewPopup] = useState(null); // claim to show review comments for
-    const [resubmitClaim, setResubmitClaim] = useState(null); // claim being resubmitted
+    // activeClaimTab is from parent state
+    const [showReviewPopup, setShowReviewPopup] = useState(null);
+    const [resubmitClaim, setResubmitClaim] = useState(null);
     
-    // activeClaimTab and setActiveClaimTab come from parent state
-    // When on a returned claim tab, those expenses are loaded into `expenses` state
-    // So pendingExpenses always has the right data for display
-    
-    // Sort by date for sequential display (same order as PDF)
+    // Sort by date for sequential display
     const sortedExpenses = [...pendingExpenses].sort((a, b) => new Date(a.date) - new Date(b.date));
     
-    // Look up the returned claim object for banner/flagged info
+    // Look up returned claim for banner/flagged info
     const activeReturnedClaim = returnedClaims.find(c => c.id === activeClaimTab);
     
     return (
@@ -2649,7 +2526,7 @@ export default function BerkeleyExpenseSystem() {
           <div className="bg-white rounded-xl shadow-sm border overflow-hidden">
             <div className="flex overflow-x-auto">
               <button
-                onClick={() => handleSwitchToCurrentDraft()}
+                onClick={() => switchToCurrentDraftTab()}
                 className={`flex-shrink-0 px-4 py-3 text-sm font-semibold border-b-2 ${activeClaimTab === 'current' ? 'border-blue-600 text-blue-600 bg-blue-50' : 'border-transparent text-slate-500 hover:bg-slate-50'}`}
               >
                 📝 Current Draft
@@ -2657,7 +2534,7 @@ export default function BerkeleyExpenseSystem() {
               {returnedClaims.map(claim => (
                 <button
                   key={claim.id}
-                  onClick={() => handleSwitchToReturnedClaim(claim)}
+                  onClick={() => switchToReturnedTab(claim)}
                   className={`flex-shrink-0 px-4 py-3 text-sm font-semibold border-b-2 flex items-center gap-2 ${activeClaimTab === claim.id ? 'border-amber-500 text-amber-600 bg-amber-50' : 'border-transparent text-slate-500 hover:bg-slate-50'}`}
                 >
                   <span>🔄 {claim.claim_number}</span>
@@ -2745,10 +2622,9 @@ export default function BerkeleyExpenseSystem() {
         )}
         
         <div className="grid grid-cols-2 gap-4"><div className="bg-white rounded-2xl shadow-lg p-6 text-center"><div className="text-4xl font-bold text-slate-800">{sortedExpenses.length}</div><div className="text-sm text-slate-500">{activeClaimTab === 'current' ? 'Pending' : 'In Claim'}</div></div><div className="bg-white rounded-2xl shadow-lg p-6 text-center"><div className="text-2xl font-bold text-green-600">{formatCurrency(reimbursementTotal, userReimburseCurrency)}</div><div className="text-sm text-slate-500">To Reimburse</div></div></div>
-        <div className="bg-white rounded-2xl shadow-lg p-6"><div className="flex flex-wrap gap-3">{activeClaimTab === 'current' && <button onClick={() => setShowAddExpense(true)} className="bg-blue-600 text-white px-6 py-3 rounded-xl font-semibold shadow-lg">📸 Add Receipt</button>}{pendingExpenses.length > 0 && (<button onClick={() => { if (editingReturnedClaimId) { setShowPreview(true); } else { setShowPreview(true); }}} className="border-2 border-green-500 text-green-600 px-6 py-3 rounded-xl font-semibold">📋 Preview ({pendingExpenses.length})</button>)}{activeReturnedClaim && (<><button onClick={() => setShowAddExpense(true)} className="bg-blue-600 text-white px-6 py-3 rounded-xl font-semibold shadow-lg">📸 Add Receipt</button><button onClick={() => setResubmitClaim(activeReturnedClaim)} className="bg-green-600 text-white px-6 py-3 rounded-xl font-semibold shadow-lg">🔄 Address & Resubmit</button></>)}<button onClick={handleManualSync} disabled={loading} className="border-2 border-slate-300 text-slate-600 px-4 py-3 rounded-xl font-semibold">{loading ? '⏳' : '🔄'} Sync</button></div></div>
+        <div className="bg-white rounded-2xl shadow-lg p-6"><div className="flex flex-wrap gap-3"><button onClick={() => setShowAddExpense(true)} className="bg-blue-600 text-white px-6 py-3 rounded-xl font-semibold shadow-lg">📸 Add Receipt</button>{pendingExpenses.length > 0 && (<button onClick={() => setShowPreview(true)} className="border-2 border-green-500 text-green-600 px-6 py-3 rounded-xl font-semibold">📋 Preview ({pendingExpenses.length})</button>)}{activeReturnedClaim && (<button onClick={() => setResubmitClaim(activeReturnedClaim)} className="bg-green-600 text-white px-6 py-3 rounded-xl font-semibold shadow-lg">🔄 Address & Resubmit</button>)}<button onClick={handleManualSync} disabled={loading} className="border-2 border-slate-300 text-slate-600 px-4 py-3 rounded-xl font-semibold">{loading ? '⏳' : '🔄'} Sync</button></div></div>
         <div className="bg-white rounded-2xl shadow-lg p-6">
           <h3 className="font-bold text-slate-800 mb-4">{activeClaimTab === 'current' ? '📋 Pending Expenses (sorted by date)' : `📋 ${activeReturnedClaim?.claim_number} Expenses`}</h3>
-          {/* Warning banner for approaching/expired receipts */}
           {sortedExpenses.some(exp => isOlderThan2Months(exp.date)) && (
             <div className="bg-red-100 border-2 border-red-400 rounded-xl p-3 mb-4">
               <p className="text-red-700 font-semibold text-sm">🚨 Some receipts are over 2 months old and may not be reimbursable!</p>
@@ -2768,7 +2644,7 @@ export default function BerkeleyExpenseSystem() {
               const isFlagged = flaggedRefs.includes(exp.ref);
               const cat = EXPENSE_CATEGORIES[exp.category];
               return (<div key={exp.id || idx} className={`flex items-center justify-between p-3 rounded-xl border-2 ${isFlagged ? 'bg-red-50 border-red-500 ring-2 ring-red-300' : exp.isPotentialDuplicate ? 'bg-orange-50 border-orange-400' : isOld ? 'bg-red-50 border-red-300' : isApproaching ? 'bg-amber-50 border-amber-300' : 'bg-slate-50 border-slate-200'}`}>
-                <div className="flex-1 min-w-0">
+                <div className="flex-1">
                   <div className="flex items-center gap-2 flex-wrap">
                     <span className={`text-xs font-bold px-2 py-1 rounded ${isFlagged ? 'bg-red-500 text-white' : 'bg-blue-100 text-blue-700'}`}>{isFlagged && '🚩 '}{exp.ref}</span>
                     <span className="font-semibold text-sm">{exp.merchant}</span>
@@ -2784,7 +2660,7 @@ export default function BerkeleyExpenseSystem() {
                   {exp.adminNotes && <div className="text-xs mt-1 bg-amber-50 border border-amber-200 px-2 py-1 rounded"><span className="font-semibold">📝 Notes:</span><div dangerouslySetInnerHTML={{ __html: formatAdminNotesReact(exp.adminNotes) }} /></div>}
                   {exp.isForeignCurrency && exp.forexRate && <p className="text-xs text-amber-600 mt-0.5">💱 {exp.currency} → {userReimburseCurrency} @ {exp.forexRate.toFixed(4)}</p>}
                 </div>
-                <div className="flex items-center gap-2 flex-shrink-0">
+                <div className="flex items-center gap-2">
                   <span className="font-bold text-green-700">{formatCurrency(exp.reimbursementAmount || exp.amount, userReimburseCurrency)}</span>
                   <button onClick={() => setEditingExpense(exp)} className="text-blue-500 p-2">✏️</button>
                   <button onClick={() => handleDeleteExpense(exp.id)} className="text-red-500 p-2">🗑️</button>
@@ -2858,34 +2734,33 @@ export default function BerkeleyExpenseSystem() {
                   onClick={async () => {
                     setLoading(true);
                     try {
-                      // Save final expense state to claim first
-                      await saveReturnedClaimExpenses(resubmitClaim.id);
+                      // Save current expense state to claim first (in case user made edits)
+                      await saveToServer(expenses, annotatedStatements, statementAnnotations, originalStatementImages);
                       
-                      // Then update status back to pending_review
+                      // Update status back to pending_review
                       const workflow = getApprovalWorkflow(currentUser.id, currentUser.office);
                       const isSelfSubmit = workflow?.selfSubmit === true;
-                      
-                      const updateData = { 
+                      const statusUpdate = { 
                         status: isSelfSubmit ? 'approved' : 'pending_review', 
                         approval_level: isSelfSubmit ? 2 : 1,
                       };
                       if (isSelfSubmit) {
-                        updateData.level2_approved_by = workflow?.externalApproval || 'Self-Approved';
-                        updateData.level2_approved_at = new Date().toISOString();
+                        statusUpdate.level2_approved_by = workflow?.externalApproval || 'Self-Approved';
+                        statusUpdate.level2_approved_at = new Date().toISOString();
                       }
                       
                       const { error } = await supabase.from('claims')
-                        .update(updateData)
+                        .update(statusUpdate)
                         .eq('id', resubmitClaim.id);
                       
                       if (error) throw error;
                       
-                      // Clear returned claim editing state and reload
+                      // Clean up and switch back
                       setEditingReturnedClaimId(null);
                       setActiveClaimTab('current');
-                      await loadClaims();
-                      await loadFromServer(); // Reload user's actual drafts
                       setResubmitClaim(null);
+                      await loadClaims();
+                      await loadFromServer();
                       alert('✅ Claim resubmitted successfully!');
                     } catch (err) {
                       console.error('Resubmit error:', err);
