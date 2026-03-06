@@ -695,7 +695,17 @@ const StatementAnnotator = ({ images, initialIndex = 0, expenses, existingAnnota
   };
 
   const handleEnd = () => { setDragging(null); setResizing(null); };
-  const removeAnnotation = (ref) => setCurrentAnnotations(prev => prev.filter(a => a.ref !== ref));
+  const removeAnnotation = (ref) => {
+    // Remove from both currentAnnotations AND annotationsByStatement
+    setCurrentAnnotations(prev => prev.filter(a => a.ref !== ref));
+    setAnnotationsByStatement(prev => {
+      const updated = { ...prev };
+      if (updated[currentIndex]) {
+        updated[currentIndex] = updated[currentIndex].filter(a => a.ref !== ref);
+      }
+      return updated;
+    });
+  };
   
   // Save current statement's annotations before switching
   const saveCurrentToState = () => {
@@ -1372,13 +1382,19 @@ export default function BerkeleyExpenseSystem() {
         setAnnotatedStatements(claim.original_statements);
       }
     } else if (claim.annotated_statements) {
+      // WARNING: No clean originals available — annotated images have boxes baked in
+      // Clear annotations so we don't draw duplicates on top of baked-in boxes
+      console.log('⚠️ No original_statements found — using annotated as base. Clearing annotation positions to avoid duplicates.');
       setAnnotatedStatements(claim.annotated_statements);
       setStatementImages(claim.annotated_statements);
       setOriginalStatementImages(claim.annotated_statements);
+      setStatementAnnotations([]); // Don't load old annotation positions — they're baked into the image
     } else if (claim.annotated_statement) {
+      console.log('⚠️ No original_statements found — using single annotated_statement as base.');
       setAnnotatedStatements([claim.annotated_statement]);
       setStatementImages([claim.annotated_statement]);
       setOriginalStatementImages([claim.annotated_statement]);
+      setStatementAnnotations([]); // Same — don't draw on top of baked-in boxes
     } else {
       setAnnotatedStatements([]);
       setStatementImages([]);
@@ -2481,7 +2497,14 @@ export default function BerkeleyExpenseSystem() {
                 setCurrentStatementIndex(0); 
                 setShowPreview(false); 
                 setShowStatementAnnotator(true); 
-              }} className="text-purple-600 text-sm font-semibold" disabled={originalStatementImages.length === 0}>✏️ Edit Tags</button><button onClick={() => { setShowPreview(false); setShowStatementUpload(true); }} className="text-blue-600 text-sm">➕ Add Statement</button></div></div><div className="flex gap-2 mt-2 overflow-x-auto">{annotatedStatements.map((img, idx) => (<img key={idx} src={img} alt={`Statement ${idx+1}`} className="h-20 rounded cursor-pointer border-2 border-green-300" onClick={() => setViewImg(img)} />))}</div>{untaggedExpenses.length > 0 && (<div className="mt-2 bg-amber-100 border border-amber-300 rounded-lg p-2"><p className="text-amber-800 text-sm">⚠️ Untagged: {untaggedExpenses.map(e => e.ref).join(', ')}</p></div>)}</div>)}
+              }} className="text-purple-600 text-sm font-semibold" disabled={originalStatementImages.length === 0}>✏️ Edit Tags</button><button onClick={() => { setShowPreview(false); setShowStatementUpload(true); }} className="text-blue-600 text-sm">➕ {editingReturnedClaimId ? '🔄 Re-upload Statement' : 'Add Statement'}</button></div></div>
+              {/* Warning: no clean originals available for re-annotation */}
+              {editingReturnedClaimId && statementAnnotations.length === 0 && annotatedStatements.length > 0 && (
+                <div className="mt-2 bg-amber-100 border border-amber-300 rounded-lg p-2">
+                  <p className="text-amber-800 text-sm">⚠️ Clean statement originals not available — old annotation boxes are baked into the image. <strong>Re-upload your statement</strong> for a clean re-annotation.</p>
+                </div>
+              )}
+              <div className="flex gap-2 mt-2 overflow-x-auto">{annotatedStatements.map((img, idx) => (<img key={idx} src={img} alt={`Statement ${idx+1}`} className="h-20 rounded cursor-pointer border-2 border-green-300" onClick={() => setViewImg(img)} />))}</div>{untaggedExpenses.length > 0 && (<div className="mt-2 bg-amber-100 border border-amber-300 rounded-lg p-2"><p className="text-amber-800 text-sm">⚠️ Untagged: {untaggedExpenses.map(e => e.ref).join(', ')}</p></div>)}</div>)}
             </div>
           </div>
           <div className="p-4 border-t bg-slate-50 flex gap-3 shrink-0"><button onClick={handleClosePreview} className="flex-1 py-3 rounded-xl border-2 font-semibold">← Back</button><button onClick={handleSubmitClaim} disabled={!canSubmit || loading} className={`flex-[2] py-3 rounded-xl font-semibold ${canSubmit && !loading ? 'bg-green-600 text-white' : 'bg-slate-300 text-slate-500'}`}>{submitButtonText}</button></div>
