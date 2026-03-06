@@ -1047,6 +1047,7 @@ export default function BerkeleyExpenseSystem() {
   const [backchargeToDate, setBackchargeToDate] = useState('');
   const [showBackchargeReport, setShowBackchargeReport] = useState(false);
   const [showRequestChanges, setShowRequestChanges] = useState(false);
+  const [showPreviousReview, setShowPreviousReview] = useState(null);
   const [changeRequestComment, setChangeRequestComment] = useState('');
   const [viewingImage, setViewingImage] = useState(null);
   const [loginStep, setLoginStep] = useState('select');
@@ -2412,36 +2413,104 @@ export default function BerkeleyExpenseSystem() {
     const myClaims = claims.filter(c => c.user_id === currentUser.id);
     const returnedClaims = myClaims.filter(c => c.status === 'changes_requested');
     const userReimburseCurrency = getUserReimburseCurrency(currentUser);
+    const [activeClaimTab, setActiveClaimTab] = useState('current'); // 'current' or claim.id
+    const [showReviewPopup, setShowReviewPopup] = useState(null); // claim to show review comments for
+    
     // Sort by date for sequential display (same order as PDF)
     const sortedExpenses = [...pendingExpenses].sort((a, b) => new Date(a.date) - new Date(b.date));
+    
+    // Get expenses to display based on active tab
+    const activeReturnedClaim = returnedClaims.find(c => c.id === activeClaimTab);
+    const displayExpenses = activeClaimTab === 'current' ? sortedExpenses : 
+      [...(activeReturnedClaim?.expenses || [])].sort((a, b) => new Date(a.date) - new Date(b.date));
+    const displayTotal = activeClaimTab === 'current' ? reimbursementTotal :
+      displayExpenses.reduce((sum, e) => sum + parseFloat(e.reimbursementAmount || e.amount || 0), 0);
+    
     return (
       <div className="space-y-4">
-        {returnedClaims.length > 0 && (<div className="bg-amber-50 border-2 border-amber-400 rounded-xl p-4">
-          <h3 className="font-bold text-amber-800 mb-2">⚠️ Changes Requested</h3>
-          {returnedClaims.map(claim => {
-            const flaggedRefs = claim.flagged_expenses || [];
-            return (
-              <div key={claim.id} className="bg-white rounded-lg p-3 mb-2">
-                <p className="font-semibold">{claim.claim_number}</p>
-                {flaggedRefs.length > 0 && (
-                  <div className="flex flex-wrap gap-1 my-2">
-                    {flaggedRefs.map(ref => (
-                      <span key={ref} className="bg-red-500 text-white text-xs font-bold px-2 py-1 rounded">
-                        🚩 {ref}
-                      </span>
+        {/* Tab system for current vs returned claims */}
+        {returnedClaims.length > 0 && (
+          <div className="bg-white rounded-xl shadow-sm border overflow-hidden">
+            <div className="flex overflow-x-auto">
+              <button
+                onClick={() => setActiveClaimTab('current')}
+                className={`flex-shrink-0 px-4 py-3 text-sm font-semibold border-b-2 ${activeClaimTab === 'current' ? 'border-blue-600 text-blue-600 bg-blue-50' : 'border-transparent text-slate-500 hover:bg-slate-50'}`}
+              >
+                📝 Current Draft
+              </button>
+              {returnedClaims.map(claim => (
+                <button
+                  key={claim.id}
+                  onClick={() => setActiveClaimTab(claim.id)}
+                  className={`flex-shrink-0 px-4 py-3 text-sm font-semibold border-b-2 flex items-center gap-2 ${activeClaimTab === claim.id ? 'border-amber-500 text-amber-600 bg-amber-50' : 'border-transparent text-slate-500 hover:bg-slate-50'}`}
+                >
+                  <span>🔄 {claim.claim_number}</span>
+                  <span className="bg-amber-500 text-white text-xs px-1.5 py-0.5 rounded">Returned</span>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+        
+        {/* Show returned claim info banner if viewing a returned claim */}
+        {activeReturnedClaim && (
+          <div className="bg-amber-50 border-2 border-amber-400 rounded-xl p-4">
+            <div className="flex justify-between items-start">
+              <div>
+                <h3 className="font-bold text-amber-800">🔄 {activeReturnedClaim.claim_number} - Returned for Changes</h3>
+                <p className="text-xs text-amber-600 mt-1">From: {activeReturnedClaim.reviewed_by}</p>
+              </div>
+              <button 
+                onClick={() => setShowReviewPopup(activeReturnedClaim)}
+                className="bg-amber-600 text-white px-3 py-2 rounded-lg text-sm font-semibold"
+              >
+                📋 View Comments
+              </button>
+            </div>
+            {(activeReturnedClaim.flagged_expenses || []).length > 0 && (
+              <div className="flex flex-wrap gap-1 mt-2">
+                {activeReturnedClaim.flagged_expenses.map(ref => (
+                  <span key={ref} className="bg-red-500 text-white text-xs font-bold px-2 py-1 rounded">🚩 {ref}</span>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+        
+        {/* Review Comments Popup */}
+        {showReviewPopup && (
+          <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50" onClick={() => setShowReviewPopup(null)}>
+            <div className="bg-white rounded-2xl max-w-md w-full p-6" onClick={e => e.stopPropagation()}>
+              <div className="flex justify-between items-center mb-4">
+                <h3 className="font-bold text-lg">📋 Review Comments</h3>
+                <button onClick={() => setShowReviewPopup(null)} className="text-2xl text-slate-400">×</button>
+              </div>
+              <div className="bg-amber-50 border border-amber-200 rounded-lg p-4">
+                <p className="font-semibold text-amber-800 mb-2">{showReviewPopup.claim_number}</p>
+                {(showReviewPopup.flagged_expenses || []).length > 0 && (
+                  <div className="flex flex-wrap gap-1 mb-3">
+                    {showReviewPopup.flagged_expenses.map(ref => (
+                      <span key={ref} className="bg-red-500 text-white text-xs font-bold px-2 py-1 rounded">🚩 {ref}</span>
                     ))}
                   </div>
                 )}
-                <p className="text-sm text-amber-700">"{claim.admin_comment}"</p>
-                <p className="text-xs text-slate-500 mt-1">From: {claim.reviewed_by}</p>
+                <p className="text-amber-700">{showReviewPopup.admin_comment}</p>
+                <p className="text-xs text-slate-500 mt-3">Returned by: {showReviewPopup.reviewed_by}</p>
               </div>
-            );
-          })}
-        </div>)}
-        <div className="grid grid-cols-2 gap-4"><div className="bg-white rounded-2xl shadow-lg p-6 text-center"><div className="text-4xl font-bold text-slate-800">{pendingExpenses.length}</div><div className="text-sm text-slate-500">Pending</div></div><div className="bg-white rounded-2xl shadow-lg p-6 text-center"><div className="text-2xl font-bold text-green-600">{formatCurrency(reimbursementTotal, userReimburseCurrency)}</div><div className="text-sm text-slate-500">To Reimburse</div></div></div>
-        <div className="bg-white rounded-2xl shadow-lg p-6"><div className="flex flex-wrap gap-3"><button onClick={() => setShowAddExpense(true)} className="bg-blue-600 text-white px-6 py-3 rounded-xl font-semibold shadow-lg">📸 Add Receipt</button>{pendingExpenses.length > 0 && (<button onClick={() => setShowPreview(true)} className="border-2 border-green-500 text-green-600 px-6 py-3 rounded-xl font-semibold">📋 Preview ({pendingExpenses.length})</button>)}<button onClick={handleManualSync} disabled={loading} className="border-2 border-slate-300 text-slate-600 px-4 py-3 rounded-xl font-semibold">{loading ? '⏳' : '🔄'} Sync</button></div></div>
+              <button 
+                onClick={() => setShowReviewPopup(null)}
+                className="w-full mt-4 bg-slate-100 text-slate-700 py-2 rounded-lg font-semibold"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        )}
+        
+        <div className="grid grid-cols-2 gap-4"><div className="bg-white rounded-2xl shadow-lg p-6 text-center"><div className="text-4xl font-bold text-slate-800">{displayExpenses.length}</div><div className="text-sm text-slate-500">{activeClaimTab === 'current' ? 'Pending' : 'In Claim'}</div></div><div className="bg-white rounded-2xl shadow-lg p-6 text-center"><div className="text-2xl font-bold text-green-600">{formatCurrency(displayTotal, userReimburseCurrency)}</div><div className="text-sm text-slate-500">To Reimburse</div></div></div>
+        <div className="bg-white rounded-2xl shadow-lg p-6"><div className="flex flex-wrap gap-3">{activeClaimTab === 'current' && <button onClick={() => setShowAddExpense(true)} className="bg-blue-600 text-white px-6 py-3 rounded-xl font-semibold shadow-lg">📸 Add Receipt</button>}{displayExpenses.length > 0 && (<button onClick={() => setShowPreview(true)} className="border-2 border-green-500 text-green-600 px-6 py-3 rounded-xl font-semibold">📋 Preview ({displayExpenses.length})</button>)}<button onClick={handleManualSync} disabled={loading} className="border-2 border-slate-300 text-slate-600 px-4 py-3 rounded-xl font-semibold">{loading ? '⏳' : '🔄'} Sync</button></div></div>
         <div className="bg-white rounded-2xl shadow-lg p-6">
-          <h3 className="font-bold text-slate-800 mb-4">📋 Pending Expenses (sorted by date)</h3>
+          <h3 className="font-bold text-slate-800 mb-4">{activeClaimTab === 'current' ? '📋 Pending Expenses (sorted by date)' : `📋 ${activeReturnedClaim?.claim_number} Expenses`}</h3>
           {/* Warning banner for approaching/expired receipts */}
           {pendingExpenses.some(exp => isOlderThan2Months(exp.date)) && (
             <div className="bg-red-100 border-2 border-red-400 rounded-xl p-3 mb-4">
@@ -3108,9 +3177,14 @@ export default function BerkeleyExpenseSystem() {
         {claimsForSubmission.length > 0 && (<div className="bg-white rounded-2xl shadow-lg p-6 border-2 border-green-300"><h3 className="font-bold mb-4 text-green-700">📤 For Submission ({claimsForSubmission.length})</h3><div className="space-y-2">{claimsForSubmission.map(claim => (<div key={claim.id} className="flex items-center justify-between p-4 rounded-xl bg-green-50 border border-green-200"><div className="flex-1"><div className="flex items-center gap-2"><span className="font-semibold">{claim.user_name}</span><span className="bg-green-100 text-green-700 text-xs px-2 py-0.5 rounded-full">Approved</span></div><p className="text-sm text-slate-500">{claim.claim_number} • {claim.office}</p></div><div className="flex items-center gap-2"><span className="font-bold text-green-700">{formatCurrency(claim.total_amount, claim.currency)}</span><button onClick={() => handleDownloadPDF(claim)} className="bg-blue-100 text-blue-700 px-3 py-2 rounded-lg text-sm">📥</button><button onClick={() => handleMarkSubmitted(claim.id)} disabled={loading} className="bg-green-600 text-white px-3 py-2 rounded-lg text-sm font-semibold disabled:opacity-50">✓ Submitted</button></div></div>))}</div></div>)}
         <div className="bg-white rounded-2xl shadow-lg p-6">
           <h3 className="font-bold mb-4">📊 To Review ({reviewableClaims.length})</h3>
-          {reviewableClaims.length === 0 ? <div className="text-center py-12 text-slate-400">✅ Nothing to review</div> : (<div className="space-y-2">{reviewableClaims.map(claim => (<div key={claim.id} onClick={() => setSelectedClaim(claim)} className="flex items-center justify-between p-4 rounded-xl bg-slate-50 border cursor-pointer hover:border-blue-300"><div><span className="font-semibold">{claim.user_name}</span><span className={`ml-2 text-xs px-2 py-0.5 rounded-full ${claim.approval_level === 2 ? 'bg-blue-100 text-blue-700' : 'bg-amber-100 text-amber-700'}`}>L{claim.approval_level || 1}</span><p className="text-sm text-slate-500">{claim.office}</p></div><span className="font-bold">{formatCurrency(claim.total_amount, claim.currency)}</span></div>))}</div>)}
+          {reviewableClaims.length === 0 ? <div className="text-center py-12 text-slate-400">✅ Nothing to review</div> : (<div className="space-y-2">{reviewableClaims.map(claim => {
+            const isResubmission = !!claim.admin_comment;
+            return (<div key={claim.id} onClick={() => setSelectedClaim(claim)} className={`flex items-center justify-between p-4 rounded-xl border cursor-pointer hover:border-blue-300 ${isResubmission ? 'bg-amber-50 border-amber-200' : 'bg-slate-50'}`}><div><div className="flex items-center gap-2 flex-wrap"><span className="font-semibold">{claim.user_name}</span><span className={`text-xs px-2 py-0.5 rounded-full ${claim.approval_level === 2 ? 'bg-blue-100 text-blue-700' : 'bg-amber-100 text-amber-700'}`}>L{claim.approval_level || 1}</span>{isResubmission && <span className="bg-orange-500 text-white text-xs px-2 py-0.5 rounded-full font-semibold">🔄 Resubmission</span>}</div><p className="text-sm text-slate-500">{claim.claim_number} • {claim.office}</p></div><span className="font-bold">{formatCurrency(claim.total_amount, claim.currency)}</span></div>);
+          })}</div>)}
         </div>
-        {selectedClaim && (<div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50" onClick={() => setSelectedClaim(null)}><div className="bg-white rounded-2xl max-w-2xl w-full max-h-[90vh] overflow-auto" onClick={e => e.stopPropagation()}><div className="p-6 border-b flex justify-between"><div><h2 className="text-xl font-bold">{selectedClaim.user_name}</h2><p className="text-sm text-slate-500">{selectedClaim.claim_number} • Level {selectedClaim.approval_level || 1}</p></div><button onClick={() => setSelectedClaim(null)} className="text-2xl text-slate-400">×</button></div><div className="p-6">{selectedClaim.admin_comment && <div className="bg-amber-100 border-2 border-amber-400 rounded-xl p-3 mb-4"><p className="font-bold text-amber-800 text-sm">🔄 Resubmission - Previously Returned</p><p className="text-amber-700 text-sm mt-1">{selectedClaim.admin_comment}</p><p className="text-amber-600 text-xs mt-1">Returned by: {selectedClaim.reviewed_by}</p></div>}<button onClick={() => handleDownloadPDF(selectedClaim)} className="w-full bg-green-600 text-white py-3 rounded-xl font-semibold mb-4">📥 Download PDF</button>{[...(selectedClaim.expenses || [])].sort((a, b) => { const numA = parseInt(a.ref); const numB = parseInt(b.ref); if (!isNaN(numA) && !isNaN(numB)) return numA - numB; return (a.ref || '999').localeCompare(b.ref || '999', undefined, { numeric: true }); }).map((exp, i) => { const isOld = isOlderThan2Months(exp.date); const isApproaching = isApproaching2Months(exp.date); const daysLeft = getDaysUntil2Months(exp.date); const paxCount = parseInt(exp.numberOfPax) || 0; const isEntertaining = EXPENSE_CATEGORIES[exp.category]?.requiresAttendees; const perPaxAmount = isEntertaining && paxCount > 0 ? (parseFloat(exp.reimbursementAmount || exp.amount) / paxCount) : 0; return (<div key={i} className={`py-3 border-b ${isOld ? 'bg-red-50' : isApproaching ? 'bg-amber-50' : ''}`}><div className="flex justify-between items-start"><div className="flex-1"><div className="flex items-center gap-2 flex-wrap"><span className="bg-blue-100 text-blue-700 text-xs px-2 py-0.5 rounded font-bold">{exp.ref}</span><span className="font-semibold">{exp.merchant}</span>{exp.isPotentialDuplicate && <span className="bg-red-100 text-red-600 text-xs px-2 py-0.5 rounded">⚠️ Duplicate?</span>}{isOld && <span className="bg-red-100 text-red-600 text-xs px-2 py-0.5 rounded animate-pulse">🚨 &gt;2 Months</span>}{isApproaching && <span className="bg-amber-100 text-amber-700 text-xs px-2 py-0.5 rounded">⏰ {daysLeft}d left</span>}{paxCount > 0 && <span className="bg-purple-100 text-purple-600 text-xs px-2 py-0.5 rounded">👥 {paxCount} pax</span>}{isEntertaining && paxCount > 0 && <span className="bg-indigo-100 text-indigo-600 text-xs px-2 py-0.5 rounded">💰 {selectedClaim.currency} {perPaxAmount.toFixed(2)}/pax</span>}</div><p className="text-xs text-slate-500 mt-1">{exp.description}</p>{exp.isForeignCurrency && exp.forexRate && <p className="text-xs text-amber-600 mt-1">💱 Rate: 1 {exp.currency} = {exp.forexRate.toFixed(4)} {selectedClaim.currency}</p>}{exp.adminNotes && <div className="text-xs mt-1 bg-amber-50 px-2 py-1 rounded"><span className="font-semibold">📝 Notes:</span><div dangerouslySetInnerHTML={{ __html: formatAdminNotesReact(exp.adminNotes) }} /></div>}</div><span className="font-bold text-green-700 ml-2">{formatCurrency(exp.reimbursementAmount || exp.amount, selectedClaim.currency)}</span></div></div>); })}</div><div className="p-4 border-t bg-slate-50 space-y-3"><div className="flex gap-3"><button onClick={() => setEditingClaim(selectedClaim)} className="flex-1 py-3 rounded-xl bg-purple-500 text-white font-semibold">✏️ Edit / Add Notes</button><button onClick={() => setShowRequestChanges(true)} className="flex-1 py-3 rounded-xl bg-amber-500 text-white font-semibold">📝 Return</button></div><div className="flex gap-3">{selectedClaim.admin_comment && <div className="flex-1 py-2 px-3 rounded-xl bg-blue-50 border border-blue-200 text-sm"><p className="font-semibold text-blue-800 text-xs">📋 Previous Review:</p><p className="text-blue-700 text-xs mt-1">{selectedClaim.admin_comment}</p><p className="text-blue-500 text-xs mt-1">— {selectedClaim.reviewed_by}</p></div>}<button onClick={() => handleApprove(selectedClaim)} disabled={loading} className="flex-[2] py-3 rounded-xl bg-green-600 text-white font-semibold disabled:opacity-50">{(() => { const workflow = SENIOR_STAFF_ROUTING[selectedClaim.user_id]; const isSingleLevel = workflow?.singleLevel; const level = selectedClaim.approval_level || 1; if (level === 1 && isSingleLevel) return workflow?.externalApproval ? '✓ Approve (→ Chairman)' : '✓ Final Approve'; if (level === 1) return '✓ Approve → L2'; return '✓ Final Approve'; })()}</button></div></div></div></div>)}
+        {selectedClaim && (<div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50" onClick={() => setSelectedClaim(null)}><div className="bg-white rounded-2xl max-w-2xl w-full max-h-[90vh] overflow-auto" onClick={e => e.stopPropagation()}><div className="p-6 border-b flex justify-between"><div><div className="flex items-center gap-2"><h2 className="text-xl font-bold">{selectedClaim.user_name}</h2>{selectedClaim.admin_comment && <span className="bg-orange-500 text-white text-xs px-2 py-1 rounded-full font-semibold">🔄 Resubmission</span>}</div><p className="text-sm text-slate-500">{selectedClaim.claim_number} • Level {selectedClaim.approval_level || 1}</p></div><button onClick={() => setSelectedClaim(null)} className="text-2xl text-slate-400">×</button></div><div className="p-6"><button onClick={() => handleDownloadPDF(selectedClaim)} className="w-full bg-green-600 text-white py-3 rounded-xl font-semibold mb-4">📥 Download PDF</button>{[...(selectedClaim.expenses || [])].sort((a, b) => { const numA = parseInt(a.ref); const numB = parseInt(b.ref); if (!isNaN(numA) && !isNaN(numB)) return numA - numB; return (a.ref || '999').localeCompare(b.ref || '999', undefined, { numeric: true }); }).map((exp, i) => { const isOld = isOlderThan2Months(exp.date); const isApproaching = isApproaching2Months(exp.date); const daysLeft = getDaysUntil2Months(exp.date); const paxCount = parseInt(exp.numberOfPax) || 0; const isEntertaining = EXPENSE_CATEGORIES[exp.category]?.requiresAttendees; const perPaxAmount = isEntertaining && paxCount > 0 ? (parseFloat(exp.reimbursementAmount || exp.amount) / paxCount) : 0; return (<div key={i} className={`py-3 border-b ${isOld ? 'bg-red-50' : isApproaching ? 'bg-amber-50' : ''}`}><div className="flex justify-between items-start"><div className="flex-1"><div className="flex items-center gap-2 flex-wrap"><span className="bg-blue-100 text-blue-700 text-xs px-2 py-0.5 rounded font-bold">{exp.ref}</span><span className="font-semibold">{exp.merchant}</span>{exp.isPotentialDuplicate && <span className="bg-red-100 text-red-600 text-xs px-2 py-0.5 rounded">⚠️ Duplicate?</span>}{isOld && <span className="bg-red-100 text-red-600 text-xs px-2 py-0.5 rounded animate-pulse">🚨 &gt;2 Months</span>}{isApproaching && <span className="bg-amber-100 text-amber-700 text-xs px-2 py-0.5 rounded">⏰ {daysLeft}d left</span>}{paxCount > 0 && <span className="bg-purple-100 text-purple-600 text-xs px-2 py-0.5 rounded">👥 {paxCount} pax</span>}{isEntertaining && paxCount > 0 && <span className="bg-indigo-100 text-indigo-600 text-xs px-2 py-0.5 rounded">💰 {selectedClaim.currency} {perPaxAmount.toFixed(2)}/pax</span>}</div><p className="text-xs text-slate-500 mt-1">{exp.description}</p>{exp.isForeignCurrency && exp.forexRate && <p className="text-xs text-amber-600 mt-1">💱 Rate: 1 {exp.currency} = {exp.forexRate.toFixed(4)} {selectedClaim.currency}</p>}{exp.adminNotes && <div className="text-xs mt-1 bg-amber-50 px-2 py-1 rounded"><span className="font-semibold">📝 Notes:</span><div dangerouslySetInnerHTML={{ __html: formatAdminNotesReact(exp.adminNotes) }} /></div>}</div><span className="font-bold text-green-700 ml-2">{formatCurrency(exp.reimbursementAmount || exp.amount, selectedClaim.currency)}</span></div></div>); })}</div><div className="p-4 border-t bg-slate-50 space-y-3"><div className="flex gap-3"><button onClick={() => setEditingClaim(selectedClaim)} className="flex-1 py-3 rounded-xl bg-purple-500 text-white font-semibold">✏️ Edit / Add Notes</button><button onClick={() => setShowRequestChanges(true)} className="flex-1 py-3 rounded-xl bg-amber-500 text-white font-semibold">📝 Return</button></div><div className="flex gap-3">{selectedClaim.admin_comment && <button onClick={() => setShowPreviousReview(selectedClaim)} className="flex-1 py-3 rounded-xl bg-blue-100 text-blue-700 font-semibold border-2 border-blue-200">📋 Previous Review</button>}<button onClick={() => handleApprove(selectedClaim)} disabled={loading} className="flex-[2] py-3 rounded-xl bg-green-600 text-white font-semibold disabled:opacity-50">{(() => { const workflow = SENIOR_STAFF_ROUTING[selectedClaim.user_id]; const isSingleLevel = workflow?.singleLevel; const level = selectedClaim.approval_level || 1; if (level === 1 && isSingleLevel) return workflow?.externalApproval ? '✓ Approve (→ Chairman)' : '✓ Final Approve'; if (level === 1) return '✓ Approve → L2'; return '✓ Final Approve'; })()}</button></div></div></div></div>)}
+        {/* Previous Review Popup */}
+        {showPreviousReview && (<div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50" onClick={() => setShowPreviousReview(null)}><div className="bg-white rounded-2xl max-w-md w-full p-6" onClick={e => e.stopPropagation()}><div className="flex justify-between items-center mb-4"><h3 className="font-bold text-lg">📋 Previous Review Comments</h3><button onClick={() => setShowPreviousReview(null)} className="text-2xl text-slate-400">×</button></div><div className="bg-amber-50 border border-amber-200 rounded-lg p-4"><p className="font-semibold text-amber-800 mb-2">{showPreviousReview.claim_number}</p>{(showPreviousReview.flagged_expenses || []).length > 0 && (<div className="flex flex-wrap gap-1 mb-3">{showPreviousReview.flagged_expenses.map(ref => (<span key={ref} className="bg-red-500 text-white text-xs font-bold px-2 py-1 rounded">🚩 {ref}</span>))}</div>)}<p className="text-amber-700 whitespace-pre-wrap">{showPreviousReview.admin_comment}</p><p className="text-xs text-slate-500 mt-3">Returned by: {showPreviousReview.reviewed_by}</p></div><button onClick={() => setShowPreviousReview(null)} className="w-full mt-4 bg-slate-100 text-slate-700 py-2 rounded-lg font-semibold">Close</button></div></div>)}
         {editingClaim && <EditClaimModal claim={editingClaim} onClose={() => setEditingClaim(null)} />}
         {showRequestChanges && selectedClaim && (
           <RequestChangesModal 
