@@ -1123,9 +1123,11 @@ export default function BerkeleyExpenseSystem() {
           claimUpdate.annotated_statement = migratedStatements[0];
         }
         if (migratedOriginals?.length > 0) claimUpdate.original_statements = migratedOriginals;
+        if (annotationsToSave?.length > 0) claimUpdate.statement_annotations = annotationsToSave;
         
         let result = await supabase.from('claims').update(claimUpdate).eq('id', editingReturnedClaimId);
         // Progressive fallback for missing columns
+        if (result.error) { delete claimUpdate.statement_annotations; result = await supabase.from('claims').update(claimUpdate).eq('id', editingReturnedClaimId); }
         if (result.error) { delete claimUpdate.original_statements; result = await supabase.from('claims').update(claimUpdate).eq('id', editingReturnedClaimId); }
         if (result.error) { delete claimUpdate.annotated_statements; delete claimUpdate.annotated_statement; result = await supabase.from('claims').update(claimUpdate).eq('id', editingReturnedClaimId); }
         if (result.error) throw result.error;
@@ -1610,12 +1612,20 @@ export default function BerkeleyExpenseSystem() {
     // Track which returned claim we're editing
     setEditingReturnedClaimId(claim.id);
     
-    // Restore statementAnnotations from expenses' embedded statementIndex
-    const restoredAnnotations = (claim.expenses || [])
-      .filter(e => e.statementIndex !== undefined && e.statementIndex >= 0)
-      .map(e => ({ ref: e.ref, statementIndex: e.statementIndex }));
-    if (restoredAnnotations.length > 0) {
-      setStatementAnnotations(restoredAnnotations);
+    // Restore statement annotations with full position data
+    // Prefer statement_annotations (has xPct/yPct/widthPct/heightPct for box positions)
+    // Fall back to expenses' embedded statementIndex (only has ref + page number, no positions)
+    if (claim.statement_annotations && claim.statement_annotations.length > 0) {
+      setStatementAnnotations(claim.statement_annotations);
+    } else {
+      const restoredAnnotations = (claim.expenses || [])
+        .filter(e => e.statementIndex !== undefined && e.statementIndex >= 0)
+        .map(e => ({ ref: e.ref, statementIndex: e.statementIndex }));
+      if (restoredAnnotations.length > 0) {
+        setStatementAnnotations(restoredAnnotations);
+      } else {
+        setStatementAnnotations([]);
+      }
     }
     
     // Load ORIGINAL statements (clean, without annotations baked in) for re-annotation
@@ -1731,13 +1741,24 @@ export default function BerkeleyExpenseSystem() {
           updateData.original_statements = originalStatementImages;
         }
         
+        // Save annotation positions for re-annotation on return
+        if (statementAnnotations && statementAnnotations.length > 0) {
+          updateData.statement_annotations = statementAnnotations;
+        }
+        
         console.log('Attempting to update claim:', returned.id, 'with data keys:', Object.keys(updateData));
         
         let result = await supabase.from('claims').update(updateData).eq('id', returned.id);
         
         // If failed, progressively remove optional columns and retry
         if (result.error) {
-          console.log('Update failed, trying without original_statements:', result.error);
+          console.log('Update failed, trying without statement_annotations:', result.error);
+          delete updateData.statement_annotations;
+          result = await supabase.from('claims').update(updateData).eq('id', returned.id);
+        }
+        
+        if (result.error) {
+          console.log('Still failing, trying without original_statements:', result.error);
           delete updateData.original_statements;
           result = await supabase.from('claims').update(updateData).eq('id', returned.id);
         }
@@ -1804,13 +1825,24 @@ export default function BerkeleyExpenseSystem() {
           insertData.original_statements = originalStatementImages;
         }
         
+        // Save annotation positions for re-annotation on return
+        if (statementAnnotations && statementAnnotations.length > 0) {
+          insertData.statement_annotations = statementAnnotations;
+        }
+        
         console.log('Attempting to create claim with data keys:', Object.keys(insertData));
         
         let result = await supabase.from('claims').insert([insertData]);
         
         // If failed, progressively remove optional columns and retry
         if (result.error) {
-          console.log('Insert failed, trying without original_statements:', result.error);
+          console.log('Insert failed, trying without statement_annotations:', result.error);
+          delete insertData.statement_annotations;
+          result = await supabase.from('claims').insert([insertData]);
+        }
+        
+        if (result.error) {
+          console.log('Still failing, trying without original_statements:', result.error);
           delete insertData.original_statements;
           result = await supabase.from('claims').insert([insertData]);
         }
