@@ -1032,6 +1032,7 @@ export default function BerkeleyExpenseSystem() {
   const [downloading, setDownloading] = useState(false);
   const [showAddExpense, setShowAddExpense] = useState(false);
   const [showPreview, setShowPreview] = useState(false);
+  const [editingReturnedClaimId, setEditingReturnedClaimId] = useState(null); // Track which returned claim we're editing
   const [showStatementUpload, setShowStatementUpload] = useState(false);
   const [showStatementAnnotator, setShowStatementAnnotator] = useState(false);
   const [statementImages, setStatementImages] = useState([]); 
@@ -1577,12 +1578,77 @@ export default function BerkeleyExpenseSystem() {
     } catch (err) { alert('❌ Failed'); }
     setDownloading(false);
   };
+  
+  // Load returned claim data for editing/preview
+  const loadReturnedClaimForEdit = (claim) => {
+    if (!claim) return;
+    
+    // Load expenses into state
+    let processed = (claim.expenses || []).map(e => ({ ...e, status: 'draft' }));
+    processed = sortAndReassignRefs(processed);
+    processed = markDuplicatePairs(processed);
+    setExpenses(processed);
+    
+    // Track which returned claim we're editing
+    setEditingReturnedClaimId(claim.id);
+    
+    // Restore statementAnnotations from expenses' embedded statementIndex
+    const restoredAnnotations = (claim.expenses || [])
+      .filter(e => e.statementIndex !== undefined && e.statementIndex >= 0)
+      .map(e => ({ ref: e.ref, statementIndex: e.statementIndex }));
+    if (restoredAnnotations.length > 0) {
+      setStatementAnnotations(restoredAnnotations);
+    }
+    
+    // Load ORIGINAL statements (clean, without annotations baked in) for re-annotation
+    // If original_statements exists, use it; otherwise fall back to annotated_statements
+    if (claim.original_statements && claim.original_statements.length > 0) {
+      setOriginalStatementImages(claim.original_statements);
+      setStatementImages(claim.original_statements);
+      // For display, use annotated versions if available
+      if (claim.annotated_statements) {
+        setAnnotatedStatements(claim.annotated_statements);
+      } else if (claim.annotated_statement) {
+        setAnnotatedStatements([claim.annotated_statement]);
+      } else {
+        setAnnotatedStatements(claim.original_statements);
+      }
+    } else if (claim.annotated_statements) {
+      // Fallback for old data that doesn't have original_statements
+      setAnnotatedStatements(claim.annotated_statements);
+      setStatementImages(claim.annotated_statements);
+      setOriginalStatementImages(claim.annotated_statements);
+    } else if (claim.annotated_statement) {
+      setAnnotatedStatements([claim.annotated_statement]);
+      setStatementImages([claim.annotated_statement]);
+      setOriginalStatementImages([claim.annotated_statement]);
+    }
+    
+    // Open preview modal
+    setShowPreview(true);
+  };
+  
+  // Handle closing preview - if editing returned claim, reload drafts
+  const handleClosePreview = async () => {
+    setShowPreview(false);
+    
+    // If we were editing a returned claim, reload user's actual drafts
+    if (editingReturnedClaimId) {
+      setEditingReturnedClaimId(null);
+      // Reload drafts from server
+      await loadFromServer();
+    }
+  };
+  
   const handleSubmitClaim = async () => {
     setLoading(true);
     setSavingStatus('saving');
     
     try {
-      const returned = claims.find(c => c.user_id === currentUser.id && c.status === 'changes_requested');
+      // Use tracked editingReturnedClaimId if available, otherwise find any returned claim
+      const returned = editingReturnedClaimId 
+        ? claims.find(c => c.id === editingReturnedClaimId)
+        : claims.find(c => c.user_id === currentUser.id && c.status === 'changes_requested');
       const workflow = getApprovalWorkflow(currentUser.id, currentUser.office);
       const isSelfSubmit = workflow?.selfSubmit === true;
       
@@ -1739,6 +1805,7 @@ export default function BerkeleyExpenseSystem() {
       setStatementAnnotations([]); 
       setStatementImages([]);
       setOriginalStatementImages([]);
+      setEditingReturnedClaimId(null); // Clear tracked returned claim
       setShowPreview(false); // Close preview modal
       
       await loadClaims(); 
@@ -2256,7 +2323,7 @@ export default function BerkeleyExpenseSystem() {
     return (
       <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-50">
         <div className="bg-white rounded-2xl max-w-4xl w-full max-h-[95vh] overflow-hidden shadow-2xl flex flex-col">
-          <div className="bg-gradient-to-r from-blue-900 to-indigo-900 text-white p-4 flex justify-between items-center shrink-0"><div><h2 className="text-lg font-bold">📋 Preview</h2><p className="text-blue-200 text-sm">{userReimburseCurrency}</p></div><div className="flex items-center gap-2"><button onClick={handleDownloadPreviewPDF} disabled={downloading} className="bg-green-500 text-white px-4 py-2 rounded-lg font-semibold text-sm">📥 PDF</button><button onClick={() => setShowPreview(false)} className="w-8 h-8 rounded-full bg-white/20">✕</button></div></div>
+          <div className="bg-gradient-to-r from-blue-900 to-indigo-900 text-white p-4 flex justify-between items-center shrink-0"><div><h2 className="text-lg font-bold">📋 Preview</h2><p className="text-blue-200 text-sm">{userReimburseCurrency}</p></div><div className="flex items-center gap-2"><button onClick={handleDownloadPreviewPDF} disabled={downloading} className="bg-green-500 text-white px-4 py-2 rounded-lg font-semibold text-sm">📥 PDF</button><button onClick={handleClosePreview} className="w-8 h-8 rounded-full bg-white/20">✕</button></div></div>
           <div className="flex-1 overflow-y-auto p-6">
             <div className="max-w-3xl mx-auto border-2 border-slate-300 rounded-xl p-6">
               <div className="text-center mb-6"><h1 className="text-xl font-bold">Berkeley International Expense Claim Form</h1><p className="text-sm text-slate-500">{getCompanyName(currentUser.office)}</p></div>
@@ -2276,7 +2343,7 @@ export default function BerkeleyExpenseSystem() {
               }} className="text-purple-600 text-sm font-semibold" disabled={originalStatementImages.length === 0}>✏️ Edit Tags</button><button onClick={() => { setShowPreview(false); setShowStatementUpload(true); }} className="text-blue-600 text-sm">➕ Add Statement</button></div></div><div className="flex gap-2 mt-2 overflow-x-auto">{annotatedStatements.map((img, idx) => (<img key={idx} src={img} alt={`Statement ${idx+1}`} className="h-20 rounded cursor-pointer border-2 border-green-300" onClick={() => setViewImg(img)} />))}</div>{untaggedExpenses.length > 0 && (<div className="mt-2 bg-amber-100 border border-amber-300 rounded-lg p-2"><p className="text-amber-800 text-sm">⚠️ Untagged: {untaggedExpenses.map(e => e.ref).join(', ')}</p></div>)}</div>)}
             </div>
           </div>
-          <div className="p-4 border-t bg-slate-50 flex gap-3 shrink-0"><button onClick={() => setShowPreview(false)} className="flex-1 py-3 rounded-xl border-2 font-semibold">← Back</button><button onClick={handleSubmitClaim} disabled={!canSubmit || loading} className={`flex-[2] py-3 rounded-xl font-semibold ${canSubmit && !loading ? 'bg-green-600 text-white' : 'bg-slate-300 text-slate-500'}`}>{submitButtonText}</button></div>
+          <div className="p-4 border-t bg-slate-50 flex gap-3 shrink-0"><button onClick={handleClosePreview} className="flex-1 py-3 rounded-xl border-2 font-semibold">← Back</button><button onClick={handleSubmitClaim} disabled={!canSubmit || loading} className={`flex-[2] py-3 rounded-xl font-semibold ${canSubmit && !loading ? 'bg-green-600 text-white' : 'bg-slate-300 text-slate-500'}`}>{submitButtonText}</button></div>
         </div>
         {viewImg && <ImageViewer src={viewImg} onClose={() => setViewImg(null)} />}
       </div>
@@ -2515,7 +2582,7 @@ export default function BerkeleyExpenseSystem() {
         )}
         
         <div className="grid grid-cols-2 gap-4"><div className="bg-white rounded-2xl shadow-lg p-6 text-center"><div className="text-4xl font-bold text-slate-800">{displayExpenses.length}</div><div className="text-sm text-slate-500">{activeClaimTab === 'current' ? 'Pending' : 'In Claim'}</div></div><div className="bg-white rounded-2xl shadow-lg p-6 text-center"><div className="text-2xl font-bold text-green-600">{formatCurrency(displayTotal, userReimburseCurrency)}</div><div className="text-sm text-slate-500">To Reimburse</div></div></div>
-        <div className="bg-white rounded-2xl shadow-lg p-6"><div className="flex flex-wrap gap-3">{activeClaimTab === 'current' && <button onClick={() => setShowAddExpense(true)} className="bg-blue-600 text-white px-6 py-3 rounded-xl font-semibold shadow-lg">📸 Add Receipt</button>}{activeClaimTab === 'current' && pendingExpenses.length > 0 && (<button onClick={() => setShowPreview(true)} className="border-2 border-green-500 text-green-600 px-6 py-3 rounded-xl font-semibold">📋 Preview ({pendingExpenses.length})</button>)}{activeReturnedClaim && (<><button onClick={() => handleDownloadPDF(activeReturnedClaim)} className="border-2 border-green-500 text-green-600 px-6 py-3 rounded-xl font-semibold">📋 Preview PDF</button><button onClick={() => setResubmitClaim(activeReturnedClaim)} className="bg-green-600 text-white px-6 py-3 rounded-xl font-semibold shadow-lg">🔄 Address & Resubmit</button></>)}<button onClick={handleManualSync} disabled={loading} className="border-2 border-slate-300 text-slate-600 px-4 py-3 rounded-xl font-semibold">{loading ? '⏳' : '🔄'} Sync</button></div></div>
+        <div className="bg-white rounded-2xl shadow-lg p-6"><div className="flex flex-wrap gap-3">{activeClaimTab === 'current' && <button onClick={() => setShowAddExpense(true)} className="bg-blue-600 text-white px-6 py-3 rounded-xl font-semibold shadow-lg">📸 Add Receipt</button>}{activeClaimTab === 'current' && pendingExpenses.length > 0 && (<button onClick={() => setShowPreview(true)} className="border-2 border-green-500 text-green-600 px-6 py-3 rounded-xl font-semibold">📋 Preview ({pendingExpenses.length})</button>)}{activeReturnedClaim && (<><button onClick={() => loadReturnedClaimForEdit(activeReturnedClaim)} className="border-2 border-green-500 text-green-600 px-6 py-3 rounded-xl font-semibold">📋 Preview ({activeReturnedClaim.expenses?.length || 0})</button><button onClick={() => setResubmitClaim(activeReturnedClaim)} className="bg-green-600 text-white px-6 py-3 rounded-xl font-semibold shadow-lg">🔄 Address & Resubmit</button></>)}<button onClick={handleManualSync} disabled={loading} className="border-2 border-slate-300 text-slate-600 px-4 py-3 rounded-xl font-semibold">{loading ? '⏳' : '🔄'} Sync</button></div></div>
         <div className="bg-white rounded-2xl shadow-lg p-6">
           <h3 className="font-bold text-slate-800 mb-4">{activeClaimTab === 'current' ? '📋 Pending Expenses (sorted by date)' : `📋 ${activeReturnedClaim?.claim_number} Expenses`}</h3>
           {/* Warning banner for approaching/expired receipts */}
