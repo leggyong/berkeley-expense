@@ -2520,6 +2520,85 @@ export default function BerkeleyExpenseSystem() {
     const [reportType, setReportType] = useState('gl');
     const [includePending, setIncludePending] = useState(true); // Default ON for forecasting
     const [expandedGL, setExpandedGL] = useState(null);
+    const [migrating, setMigrating] = useState(false);
+    const [migrationLog, setMigrationLog] = useState([]);
+    
+    // Find claims with large base64 data (likely need migration)
+    const claimsNeedingMigration = claims.filter(c => {
+      if (!c || !c.expenses) return false;
+      const expStr = JSON.stringify(c.expenses);
+      // If expenses data > 100KB, it likely has base64 images
+      return expStr.length > 100000;
+    });
+    
+    // Calculate total base64 data size
+    const totalBase64Size = claimsNeedingMigration.reduce((sum, c) => {
+      return sum + JSON.stringify(c.expenses || []).length;
+    }, 0);
+    
+    // Migration function
+    const migrateClaimToStorage = async (claim) => {
+      try {
+        const expenses = claim.expenses || [];
+        let migratedCount = 0;
+        
+        const migratedExpenses = await Promise.all(expenses.map(async (exp) => {
+          let updated = { ...exp };
+          
+          // Migrate receiptPreview if base64
+          if (exp.receiptPreview && !isStorageUrl(exp.receiptPreview)) {
+            const url = await uploadImageToStorage(exp.receiptPreview, claim.user_id, 'receipt');
+            if (isStorageUrl(url)) {
+              updated.receiptPreview = url;
+              migratedCount++;
+            }
+          }
+          
+          // Migrate receiptPreview2 if base64
+          if (exp.receiptPreview2 && !isStorageUrl(exp.receiptPreview2)) {
+            const url = await uploadImageToStorage(exp.receiptPreview2, claim.user_id, 'receipt2');
+            if (isStorageUrl(url)) {
+              updated.receiptPreview2 = url;
+              migratedCount++;
+            }
+          }
+          
+          return updated;
+        }));
+        
+        // Update claim in database
+        const { error } = await supabase.from('claims')
+          .update({ expenses: migratedExpenses })
+          .eq('id', claim.id);
+        
+        if (error) throw error;
+        
+        return { success: true, migratedCount };
+      } catch (err) {
+        return { success: false, error: err.message };
+      }
+    };
+    
+    const runMigration = async () => {
+      setMigrating(true);
+      setMigrationLog([]);
+      
+      for (const claim of claimsNeedingMigration) {
+        setMigrationLog(prev => [...prev, `⏳ Migrating ${claim.claim_number}...`]);
+        
+        const result = await migrateClaimToStorage(claim);
+        
+        if (result.success) {
+          setMigrationLog(prev => [...prev, `✅ ${claim.claim_number}: ${result.migratedCount} images migrated`]);
+        } else {
+          setMigrationLog(prev => [...prev, `❌ ${claim.claim_number}: ${result.error}`]);
+        }
+      }
+      
+      setMigrationLog(prev => [...prev, `🎉 Migration complete! Refreshing data...`]);
+      await loadClaims();
+      setMigrating(false);
+    };
     
     // Safety check - ensure claims is an array
     const allClaims = Array.isArray(claims) ? claims : [];
@@ -2747,13 +2826,13 @@ export default function BerkeleyExpenseSystem() {
             </label>
           </div>
           <div className="flex gap-2 flex-wrap">
-            {['gl', 'backcharge', 'submissions', 'late'].map(type => (
+            {['gl', 'backcharge', 'submissions', 'late', 'migrate'].map(type => (
               <button 
                 key={type}
                 onClick={() => setReportType(type)}
-                className={`px-3 py-2 rounded-lg text-sm font-semibold ${reportType === type ? 'bg-purple-600 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
+                className={`px-3 py-2 rounded-lg text-sm font-semibold ${reportType === type ? 'bg-purple-600 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'} ${type === 'migrate' && claimsNeedingMigration.length > 0 ? 'ring-2 ring-red-400' : ''}`}
               >
-                {type === 'backcharge' ? '📊 Backcharges' : type === 'gl' ? '📋 GL Report' : type === 'submissions' ? '📅 Submissions' : '⚠️ Late Submitters'}
+                {type === 'backcharge' ? '📊 Backcharges' : type === 'gl' ? '📋 GL Report' : type === 'submissions' ? '📅 Submissions' : type === 'late' ? '⚠️ Late Submitters' : `🔧 Migrate${claimsNeedingMigration.length > 0 ? ` (${claimsNeedingMigration.length})` : ''}`}
               </button>
             ))}
           </div>
@@ -2896,6 +2975,76 @@ export default function BerkeleyExpenseSystem() {
                 ))}
               </div>
             )}
+          </div>
+        )}
+        
+        {/* Migration Panel */}
+        {reportType === 'migrate' && (
+          <div className="bg-white rounded-xl shadow-sm border overflow-hidden">
+            <div className="bg-orange-50 p-4 border-b">
+              <h3 className="font-bold text-orange-800">🔧 Data Migration Tool</h3>
+              <p className="text-xs text-orange-600">Migrate base64 images to Storage to reduce database egress</p>
+            </div>
+            <div className="p-4 space-y-4">
+              {claimsNeedingMigration.length === 0 ? (
+                <div className="text-center py-8">
+                  <div className="text-4xl mb-2">✅</div>
+                  <p className="text-green-700 font-semibold">All claims are optimized!</p>
+                  <p className="text-sm text-slate-500">No base64 images found in database</p>
+                </div>
+              ) : (
+                <>
+                  <div className="bg-red-50 border border-red-200 rounded-lg p-4">
+                    <div className="flex justify-between items-center">
+                      <div>
+                        <p className="font-bold text-red-800">{claimsNeedingMigration.length} claims need migration</p>
+                        <p className="text-sm text-red-600">~{(totalBase64Size / 1024 / 1024).toFixed(1)} MB of base64 data in database</p>
+                      </div>
+                      <button
+                        onClick={runMigration}
+                        disabled={migrating}
+                        className="bg-orange-600 text-white px-4 py-2 rounded-lg font-semibold disabled:opacity-50"
+                      >
+                        {migrating ? '⏳ Migrating...' : '🚀 Start Migration'}
+                      </button>
+                    </div>
+                  </div>
+                  
+                  <div className="space-y-2">
+                    <p className="text-sm font-semibold text-slate-600">Claims to migrate:</p>
+                    {claimsNeedingMigration.map(claim => (
+                      <div key={claim.id} className="flex justify-between items-center bg-slate-50 p-3 rounded-lg">
+                        <div>
+                          <span className="font-medium">{claim.claim_number}</span>
+                          <span className="text-xs text-slate-400 ml-2">{claim.user_name}</span>
+                        </div>
+                        <span className="text-xs text-red-600 font-mono">
+                          {(JSON.stringify(claim.expenses).length / 1024 / 1024).toFixed(1)} MB
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </>
+              )}
+              
+              {migrationLog.length > 0 && (
+                <div className="bg-slate-900 text-green-400 rounded-lg p-4 font-mono text-xs max-h-48 overflow-y-auto">
+                  {migrationLog.map((log, i) => (
+                    <div key={i}>{log}</div>
+                  ))}
+                </div>
+              )}
+              
+              <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 text-sm">
+                <p className="font-semibold text-blue-800">What this does:</p>
+                <ul className="text-blue-700 text-xs mt-1 space-y-1">
+                  <li>• Extracts base64 images from old claims</li>
+                  <li>• Compresses and uploads them to Storage bucket</li>
+                  <li>• Replaces base64 with URLs in database</li>
+                  <li>• Reduces database size and egress bandwidth</li>
+                </ul>
+              </div>
+            </div>
           </div>
         )}
         
