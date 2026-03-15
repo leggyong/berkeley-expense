@@ -1,4 +1,4 @@
-﻿import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 
 /*
  * BERKELEY INTERNATIONAL EXPENSE MANAGEMENT SYSTEM
@@ -169,7 +169,10 @@ const DEVELOPMENTS = [
   'Chelsea Creek', 'Cranleigh', 'Eden Grove', 'Foal Hurst Green', 'Glasswater Locks',
   'Grand Union', 'Green Park Village', 'Guildford', 'Hareshill, Fleet', 'Hartland Village',
   'Heron Wharf', 'Hertford Locks', 'Highwood Village', 'Hildenborough', 'Horlicks Quarter',
-  'Kidbrooke Village', "King's Road Park", 'London Dock', 'Milton Keynes', 'Oval Village',
+  'Kidbrooke Village', "King's Road Park", 'London Dock', 'Milton Keynes',
+  'Office - Bangkok', 'Office - Beijing', 'Office - Chengdu', 'Office - Hong Kong',
+  'Office - MENA', 'Office - Shanghai', 'Office - Shenzhen', 'Office - Singapore',
+  'Oval Village',
   'Parkside Collection', 'Plumstead', 'Prince of Wales Drive', 'Reading Riverworks', "Regent's View",
   'Royal Arsenal Riverside', 'Silkstream', 'South Quay Plaza', 'Spring Hill', 'Sunningdale Park',
   'Sutton', 'The Exchange', 'The Green Quarter', 'Trent Park', 'Trillium',
@@ -186,70 +189,81 @@ const calculateForexRate = (foreignAmount, reimbursementAmount) => {
 };
 
 const EMPLOYEES = [
-  { id: 101, name: 'Fang Yi', office: 'BEJ', role: 'employee', reimburseCurrency: 'CNY', password: 'berkeley123' },
-  { id: 102, name: 'Caroline Zhu Yunshu', office: 'BEJ', role: 'admin', reimburseCurrency: 'CNY', password: 'berkeley123' },
-  { id: 103, name: 'Even Huang Yiyun', office: 'BEJ', role: 'employee', reimburseCurrency: 'CNY', password: 'berkeley123' },
-  { id: 104, name: 'Charrisa Xia Bei Jia', office: 'BEJ', role: 'employee', reimburseCurrency: 'CNY', password: 'berkeley123' },
-  { id: 105, name: 'Alice Kong Jing', office: 'BEJ', role: 'employee', reimburseCurrency: 'CNY', password: 'berkeley123' },
-  { id: 201, name: 'Suki Li Siqi', office: 'CHE', role: 'employee', reimburseCurrency: 'CNY', password: 'berkeley123' },
-  { id: 202, name: 'Icey Zuo Ziying', office: 'CHE', role: 'employee', reimburseCurrency: 'CNY', password: 'berkeley123' },
-  { id: 203, name: 'Dora Ji Jue Shi Yu', office: 'CHE', role: 'employee', reimburseCurrency: 'CNY', password: 'berkeley123' },
-  { id: 301, name: 'Ariel Tang Xin', office: 'SHA', role: 'employee', reimburseCurrency: 'CNY', password: 'berkeley123' },
-  { id: 302, name: 'Eddy Tao Xiao Feng', office: 'SHA', role: 'manager', reimburseCurrency: 'CNY', password: 'berkeley123' },
-  { id: 303, name: 'Elsa Huang Wei-Chen', office: 'SHA', role: 'employee', reimburseCurrency: 'CNY', password: 'berkeley123' },
-  { id: 304, name: 'Terence Li Liang', office: 'SHA', role: 'employee', reimburseCurrency: 'CNY', password: 'berkeley123' },
-  { id: 305, name: 'Johnnie Huang Wenjiao', office: 'SHA', role: 'employee', reimburseCurrency: 'CNY', password: 'berkeley123' },
-  { id: 306, name: 'Cathy Liu Shikun', office: 'SHA', role: 'admin', reimburseCurrency: 'CNY', password: 'berkeley123' },
-  { id: 307, name: 'Amy Wang Shiyun', office: 'SHA', role: 'employee', reimburseCurrency: 'CNY', password: 'berkeley123' },
-  { id: 308, name: 'Echo Yu Miao', office: 'SHA', role: 'employee', reimburseCurrency: 'CNY', password: 'berkeley123' },
-  { id: 401, name: 'Ryan Lee Yu-Yen', office: 'SHE', role: 'employee', reimburseCurrency: 'CNY', password: 'berkeley123' },
-  { id: 402, name: 'Simon Wong Chuen Lun', office: 'SHE', role: 'employee', reimburseCurrency: 'CNY', password: 'berkeley123' },
-  { id: 403, name: 'Zayn Huang Yanxiao', office: 'SHE', role: 'employee', reimburseCurrency: 'CNY', password: 'berkeley123' },
-  { id: 404, name: 'Jade Shen Jie', office: 'SHE', role: 'employee', reimburseCurrency: 'CNY', password: 'berkeley123' },
-  { id: 501, name: 'Kate Tai Tsz Lok', office: 'HKG', role: 'employee', reimburseCurrency: 'HKD', password: 'berkeley123' },
-  { id: 502, name: 'Anthony Andrew Jurenko', office: 'HKG', role: 'manager', reimburseCurrency: 'HKD', password: 'berkeley123' },
-  { id: 503, name: 'Suki Fong Tsz Ching', office: 'HKG', role: 'employee', reimburseCurrency: 'HKD', password: 'berkeley123' },
-  { id: 504, name: 'Ron Chung Chun Long', office: 'HKG', role: 'employee', reimburseCurrency: 'HKD', password: 'berkeley123' },
-  { id: 505, name: 'Cherry Lai', office: 'HKG', role: 'admin', reimburseCurrency: 'HKD', password: 'berkeley123' },
-  { id: 506, name: 'Jacky Khor Yhuen Zhuen', office: 'HKG', role: 'employee', reimburseCurrency: 'HKD', password: 'berkeley123' },
-  { id: 507, name: 'Michelle Shum', office: 'HKG', role: 'employee', reimburseCurrency: 'HKD', password: 'berkeley123' },
-  { id: 508, name: 'Jennifer Wong Ching Sin', office: 'HKG', role: 'employee', reimburseCurrency: 'HKD', password: 'berkeley123' },
-  { id: 509, name: 'Annabelle Yiu Wai-Ying', office: 'HKG', role: 'employee', reimburseCurrency: 'HKD', password: 'berkeley123' },
-  { id: 601, name: 'Mouna Ben Cheikh', office: 'LON', role: 'employee', reimburseCurrency: 'GBP', password: 'berkeley123' },
-  { id: 602, name: 'Farah Al-Yawer', office: 'LON', role: 'employee', reimburseCurrency: 'GBP', password: 'berkeley123' },
-  { id: 701, name: 'Joanne Chee Pek Har', office: 'MYS', role: 'employee', reimburseCurrency: 'MYR', password: 'berkeley123' },
-  { id: 801, name: 'John Yan Chung Keung', office: 'SIN', role: 'manager', reimburseCurrency: 'SGD', password: 'berkeley123' },
-  { id: 802, name: 'Janice Zhu Huijun', office: 'SIN', role: 'employee', reimburseCurrency: 'SGD', password: 'berkeley123' },
-  { id: 803, name: 'Karen Chia Pei Ru', office: 'SIN', role: 'manager', reimburseCurrency: 'SGD', password: 'berkeley123' },
-  { id: 804, name: 'Cathy He Zeqian', office: 'SIN', role: 'admin', reimburseCurrency: 'SGD', password: 'berkeley123' },
-  { id: 805, name: 'Ann Low Mei Yen', office: 'SIN', role: 'admin', reimburseCurrency: 'SGD', password: 'berkeley123' },
-  { id: 806, name: 'Prabakaran Rajinderan', office: 'SIN', role: 'employee', reimburseCurrency: 'SGD', password: 'berkeley123' },
-  { id: 807, name: 'Zhang Weiyu', office: 'SIN', role: 'employee', reimburseCurrency: 'SGD', password: 'berkeley123' },
-  { id: 808, name: 'Ong Yongle', office: 'SIN', role: 'finance', reimburseCurrency: 'SGD', password: 'berkeley123' },
-  { id: 809, name: 'William Robert Swinburn', office: 'SIN', role: 'employee', reimburseCurrency: 'SGD', password: 'berkeley123' },
-  { id: 810, name: 'Fiolita', office: 'SIN', role: 'employee', reimburseCurrency: 'SGD', password: 'berkeley123' },
-  { id: 811, name: 'Ng Ziyao', office: 'SIN', role: 'employee', reimburseCurrency: 'SGD', password: 'berkeley123' },
-  { id: 812, name: 'Kareen Ng Qiu Lin', office: 'SIN', role: 'employee', reimburseCurrency: 'SGD', password: 'berkeley123' },
-  { id: 813, name: 'Danny Tan Yew Chong', office: 'SIN', role: 'employee', reimburseCurrency: 'SGD', password: 'berkeley123' },
-  { id: 814, name: 'Foo Chin Yee', office: 'SIN', role: 'employee', reimburseCurrency: 'SGD', password: 'berkeley123' },
-  { id: 815, name: 'Jeslyn Yap Soo Pheng', office: 'SIN', role: 'employee', reimburseCurrency: 'SGD', password: 'berkeley123' },
-  { id: 816, name: 'Humphrey George Robert Perrins', office: 'SIN', role: 'employee', reimburseCurrency: 'SGD', password: 'berkeley123' },
-  { id: 817, name: 'Tay Ruo Fan', office: 'SIN', role: 'employee', reimburseCurrency: 'SGD', password: 'berkeley123' },
-  { id: 818, name: 'Wah Wah May Zaw', office: 'SIN', role: 'employee', reimburseCurrency: 'SGD', password: 'berkeley123' },
-  { id: 901, name: 'Sutanya Jaruphiboon', office: 'BKK', role: 'employee', reimburseCurrency: 'THB', password: 'berkeley123' },
-  { id: 902, name: 'Chayasid Jongpipattanachoke', office: 'BKK', role: 'employee', reimburseCurrency: 'THB', password: 'berkeley123' },
-  { id: 903, name: 'Juthamas Leewanun', office: 'BKK', role: 'employee', reimburseCurrency: 'THB', password: 'berkeley123' },
-  { id: 904, name: 'Norakamol Seninvinin', office: 'BKK', role: 'employee', reimburseCurrency: 'THB', password: 'berkeley123' },
-  { id: 1001, name: 'Christopher James Mclean Frame', office: 'DXB', role: 'manager', reimburseCurrency: 'AED', password: 'berkeley123' },
-  { id: 1002, name: 'Christine Mendoza Dimaranan', office: 'DXB', role: 'admin', reimburseCurrency: 'AED', password: 'berkeley123' },
-  { id: 1003, name: 'Nathan Jon Abrahams', office: 'DXB', role: 'employee', reimburseCurrency: 'AED', password: 'berkeley123' },
-  { id: 1004, name: 'Leila Kadiri', office: 'DXB', role: 'employee', reimburseCurrency: 'AED', password: 'berkeley123' },
-  { id: 1005, name: 'Yasseen Jebara', office: 'DXB', role: 'employee', reimburseCurrency: 'AED', password: 'berkeley123' },
-  { id: 1006, name: 'Adham Abu-Salim', office: 'DXB', role: 'employee', reimburseCurrency: 'AED', password: 'berkeley123' },
-  { id: 1007, name: 'Olivia Rebecca Wyatt', office: 'DXB', role: 'employee', reimburseCurrency: 'AED', password: 'berkeley123' },
-  { id: 1008, name: 'Keisha Latoya Whitehorne', office: 'DXB', role: 'employee', reimburseCurrency: 'AED', password: 'berkeley123' },
-  // Group Finance - UK-based reviewer
-  { id: 9001, name: 'Emma Fowler', office: 'LON', role: 'group_finance', reimburseCurrency: 'GBP', password: 'berkeley123' }
+  // Beijing
+  { id: 101, name: 'Fang Yi', office: 'BEJ', role: 'employee', reimburseCurrency: 'CNY', claimName: 'Fang Yi', password: 'berkeley123' },
+  { id: 102, name: 'Caroline Zhu', office: 'BEJ', role: 'admin', reimburseCurrency: 'CNY', claimName: 'Caroline', password: 'berkeley123' },
+  { id: 103, name: 'Even Huang', office: 'BEJ', role: 'employee', reimburseCurrency: 'CNY', claimName: 'Even', password: 'berkeley123' },
+  { id: 104, name: 'Charrisa Xia', office: 'BEJ', role: 'employee', reimburseCurrency: 'CNY', claimName: 'Charrisa', password: 'berkeley123' },
+  { id: 105, name: 'Alice Kong', office: 'BEJ', role: 'employee', reimburseCurrency: 'CNY', claimName: 'Alice', password: 'berkeley123' },
+  // Chengdu
+  { id: 201, name: 'Suki Li', office: 'CHE', role: 'employee', reimburseCurrency: 'CNY', claimName: 'Suki Li', password: 'berkeley123' },
+  { id: 202, name: 'Icey Zuo', office: 'CHE', role: 'employee', reimburseCurrency: 'CNY', claimName: 'Icey', password: 'berkeley123' },
+  { id: 203, name: 'Dora Ji', office: 'CHE', role: 'employee', reimburseCurrency: 'CNY', claimName: 'Dora', password: 'berkeley123' },
+  // Shanghai
+  { id: 301, name: 'Ariel Tang', office: 'SHA', role: 'employee', reimburseCurrency: 'CNY', claimName: 'Ariel', password: 'berkeley123' },
+  { id: 302, name: 'Eddy Tao', office: 'SHA', role: 'manager', reimburseCurrency: 'CNY', claimName: 'Eddy', password: 'berkeley123' },
+  { id: 303, name: 'Elsa Huang', office: 'SHA', role: 'employee', reimburseCurrency: 'CNY', claimName: 'Elsa', password: 'berkeley123' },
+  { id: 304, name: 'Terence Li', office: 'SHA', role: 'employee', reimburseCurrency: 'CNY', claimName: 'Terence', password: 'berkeley123' },
+  { id: 305, name: 'Johnnie Huang', office: 'SHA', role: 'employee', reimburseCurrency: 'CNY', claimName: 'Johnnie', password: 'berkeley123' },
+  { id: 306, name: 'Cathy Liu', office: 'SHA', role: 'admin', reimburseCurrency: 'CNY', claimName: 'Cathy Liu', password: 'berkeley123' },
+  { id: 307, name: 'Amy Wang', office: 'SHA', role: 'employee', reimburseCurrency: 'CNY', claimName: 'Amy', password: 'berkeley123' },
+  { id: 308, name: 'Echo Yu', office: 'SHA', role: 'employee', reimburseCurrency: 'CNY', claimName: 'Echo', password: 'berkeley123' },
+  // Shenzhen
+  { id: 401, name: 'Ryan Lee', office: 'SHE', role: 'employee', reimburseCurrency: 'CNY', claimName: 'Ryan', password: 'berkeley123' },
+  { id: 402, name: 'Simon Wong', office: 'SHE', role: 'employee', reimburseCurrency: 'CNY', claimName: 'Simon', password: 'berkeley123' },
+  { id: 403, name: 'Zayn Huang', office: 'SHE', role: 'employee', reimburseCurrency: 'CNY', claimName: 'Zayn', password: 'berkeley123' },
+  { id: 404, name: 'Jade Shen', office: 'SHE', role: 'employee', reimburseCurrency: 'CNY', claimName: 'Jade', password: 'berkeley123' },
+  // Hong Kong
+  { id: 501, name: 'Kate Tai', office: 'HKG', role: 'employee', reimburseCurrency: 'HKD', claimName: 'Kate', password: 'berkeley123' },
+  { id: 502, name: 'Anthony Jurenko', office: 'HKG', role: 'manager', reimburseCurrency: 'HKD', claimName: 'Anthony', password: 'berkeley123' },
+  { id: 503, name: 'Suki Fong', office: 'HKG', role: 'employee', reimburseCurrency: 'HKD', claimName: 'Suki Fong', password: 'berkeley123' },
+  { id: 504, name: 'Ron Chung', office: 'HKG', role: 'employee', reimburseCurrency: 'HKD', claimName: 'Ron', password: 'berkeley123' },
+  { id: 505, name: 'Cherry Lai', office: 'HKG', role: 'admin', reimburseCurrency: 'HKD', claimName: 'Cherry', password: 'berkeley123' },
+  { id: 506, name: 'Jacky Khor', office: 'HKG', role: 'employee', reimburseCurrency: 'HKD', claimName: 'Jacky', password: 'berkeley123' },
+  { id: 507, name: 'Michelle Shum', office: 'HKG', role: 'employee', reimburseCurrency: 'HKD', claimName: 'Michelle', password: 'berkeley123' },
+  { id: 508, name: 'Jennifer Wong', office: 'HKG', role: 'employee', reimburseCurrency: 'HKD', claimName: 'Jennifer', password: 'berkeley123' },
+  { id: 509, name: 'Annabelle Yiu', office: 'HKG', role: 'employee', reimburseCurrency: 'HKD', claimName: 'Annabelle', password: 'berkeley123' },
+  // London
+  { id: 601, name: 'Mouna', office: 'LON', role: 'employee', reimburseCurrency: 'GBP', claimName: 'Mouna', password: 'berkeley123', mileageRate: 0.45, mileageUnit: 'mile' },
+  { id: 602, name: 'Farah', office: 'LON', role: 'employee', reimburseCurrency: 'GBP', claimName: 'Farah', password: 'berkeley123' },
+  // Malaysia
+  { id: 701, name: 'Joanne Chee', office: 'MYS', role: 'employee', reimburseCurrency: 'MYR', claimName: 'Joanne', password: 'berkeley123', mileageRate: 0.80, mileageUnit: 'km' },
+  // Singapore
+  { id: 801, name: 'John Yan', office: 'SIN', role: 'manager', reimburseCurrency: 'SGD', claimName: 'John', password: 'berkeley123' },
+  { id: 802, name: 'Janice Zhu', office: 'SIN', role: 'employee', reimburseCurrency: 'SGD', claimName: 'Janice', password: 'berkeley123' },
+  { id: 803, name: 'Karen Chia', office: 'SIN', role: 'manager', reimburseCurrency: 'SGD', claimName: 'Karen', password: 'berkeley123' },
+  { id: 804, name: 'Cathy He', office: 'SIN', role: 'manager', reimburseCurrency: 'SGD', claimName: 'Cathy He', password: 'berkeley123' },
+  { id: 805, name: 'Ann Low', office: 'SIN', role: 'admin', reimburseCurrency: 'SGD', claimName: 'Ann', password: 'berkeley123' },
+  { id: 806, name: 'Praba', office: 'SIN', role: 'employee', reimburseCurrency: 'SGD', claimName: 'Praba', password: 'berkeley123' },
+  { id: 807, name: 'Weiyu', office: 'SIN', role: 'employee', reimburseCurrency: 'SGD', claimName: 'Weiyu', password: 'berkeley123' },
+  { id: 808, name: 'Ong Yongle', office: 'SIN', role: 'finance', reimburseCurrency: 'SGD', claimName: 'Yongle', password: 'berkeley123' },
+  { id: 809, name: 'William Swinburn', office: 'SIN', role: 'employee', reimburseCurrency: 'SGD', claimName: 'William', password: 'berkeley123' },
+  { id: 810, name: 'Fiolita', office: 'SIN', role: 'employee', reimburseCurrency: 'SGD', claimName: 'Fiolita', password: 'berkeley123' },
+  { id: 811, name: 'Ng Ziyao', office: 'SIN', role: 'employee', reimburseCurrency: 'SGD', claimName: 'Zi Yao', password: 'berkeley123' },
+  { id: 812, name: 'Kareen Ng', office: 'SIN', role: 'employee', reimburseCurrency: 'SGD', claimName: 'Kareen', password: 'berkeley123' },
+  { id: 813, name: 'Danny Tan', office: 'SIN', role: 'employee', reimburseCurrency: 'SGD', claimName: 'Danny', password: 'berkeley123' },
+  { id: 814, name: 'Foo Chin Yee', office: 'SIN', role: 'employee', reimburseCurrency: 'SGD', claimName: 'Chin Yee', password: 'berkeley123' },
+  { id: 815, name: 'Jeslyn Yap', office: 'SIN', role: 'employee', reimburseCurrency: 'SGD', claimName: 'Jeslyn', password: 'berkeley123' },
+  { id: 816, name: 'Humphrey Perrins', office: 'SIN', role: 'employee', reimburseCurrency: 'SGD', claimName: 'Humphrey', password: 'berkeley123' },
+  { id: 817, name: 'Tay Ruo Fan', office: 'SIN', role: 'employee', reimburseCurrency: 'SGD', claimName: 'Ruo Fan', password: 'berkeley123' },
+  { id: 818, name: 'May', office: 'SIN', role: 'employee', reimburseCurrency: 'SGD', claimName: 'May', password: 'berkeley123' },
+  // Bangkok
+  { id: 901, name: 'Sutanya Jaruphiboon', office: 'BKK', role: 'employee', reimburseCurrency: 'THB', claimName: 'Praew', password: 'berkeley123' },
+  { id: 902, name: 'Chayasid Jongpipattanachoke', office: 'BKK', role: 'employee', reimburseCurrency: 'THB', claimName: 'Pjay', password: 'berkeley123' },
+  { id: 903, name: 'Juthamas Leewanun', office: 'BKK', role: 'employee', reimburseCurrency: 'THB', claimName: 'Art', password: 'berkeley123' },
+  { id: 904, name: 'Norakamol Seninvinin', office: 'BKK', role: 'employee', reimburseCurrency: 'THB', claimName: 'Nora', password: 'berkeley123' },
+  { id: 905, name: 'Warahnooch Achariyapradit', office: 'BKK', role: 'admin', reimburseCurrency: 'THB', claimName: 'Bow', password: 'berkeley123' },
+  // Dubai / MENA
+  { id: 1001, name: 'Christopher Frame', office: 'DXB', role: 'manager', reimburseCurrency: 'AED', claimName: 'Christopher', password: 'berkeley123' },
+  { id: 1002, name: 'Christine Dimaranan', office: 'DXB', role: 'admin', reimburseCurrency: 'AED', claimName: 'Christine', password: 'berkeley123' },
+  { id: 1003, name: 'Nathan Abrahams', office: 'DXB', role: 'employee', reimburseCurrency: 'AED', claimName: 'Nathan', password: 'berkeley123' },
+  { id: 1004, name: 'Leila Kadiri', office: 'DXB', role: 'employee', reimburseCurrency: 'AED', claimName: 'Leila', password: 'berkeley123' },
+  { id: 1005, name: 'Yasseen Jebara', office: 'DXB', role: 'employee', reimburseCurrency: 'AED', claimName: 'Yasseen', password: 'berkeley123' },
+  { id: 1006, name: 'Adham Abu-Salim', office: 'DXB', role: 'employee', reimburseCurrency: 'AED', claimName: 'Adham', password: 'berkeley123' },
+  { id: 1007, name: 'Olivia Wyatt', office: 'DXB', role: 'employee', reimburseCurrency: 'AED', claimName: 'Olivia', password: 'berkeley123' },
+  { id: 1008, name: 'Keisha Whitehorne', office: 'DXB', role: 'employee', reimburseCurrency: 'AED', claimName: 'Keisha', password: 'berkeley123' },
+  // Group Finance
+  { id: 9001, name: 'Finance', office: 'LON', role: 'group_finance', reimburseCurrency: 'GBP', claimName: 'Finance', password: 'berkeley123' }
 ];
 
 // Emma Fowler's restructured categories aligned with IFS accounting (Feb 2026)
@@ -467,40 +481,55 @@ const isStorageUrl = (str) => {
 };
 
 const APPROVAL_WORKFLOWS = {
-  'BEJ': { level1: 102, level2: 302, level1Name: 'Caroline Zhu Yunshu', level2Name: 'Eddy Tao Xiao Feng' },
-  'SHE': { level1: 102, level2: 302, level1Name: 'Caroline Zhu Yunshu', level2Name: 'Eddy Tao Xiao Feng' },
-  'SHA': { level1: 306, level2: 302, level1Name: 'Cathy Liu Shikun', level2Name: 'Eddy Tao Xiao Feng' },
-  'CHE': { level1: 306, level2: 302, level1Name: 'Cathy Liu Shikun', level2Name: 'Eddy Tao Xiao Feng' },
-  'SIN': { level1: 805, level2: 803, level1Name: 'Ann Low Mei Yen', level2Name: 'Karen Chia Pei Ru' },
-  'BKK': { level1: 805, level2: 803, level1Name: 'Ann Low Mei Yen', level2Name: 'Karen Chia Pei Ru' },
-  'MYS': { level1: 805, level2: 803, level1Name: 'Ann Low Mei Yen', level2Name: 'Karen Chia Pei Ru' },
-  'DXB': { level1: 1002, level2: 1001, level1Name: 'Christine Mendoza Dimaranan', level2Name: 'Christopher James Mclean Frame' },
-  'LON': { level1: 1002, level2: 1001, level1Name: 'Christine Mendoza Dimaranan', level2Name: 'Christopher James Mclean Frame' },
-  'HKG': { level1: 505, level2: 502, level1Name: 'Cherry Lai', level2Name: 'Anthony Andrew Jurenko' }
+  'BEJ': { level1: 102, level2: 302, level1Name: 'Caroline Zhu', level2Name: 'Eddy Tao' },
+  'SHE': { level1: 102, level2: 302, level1Name: 'Caroline Zhu', level2Name: 'Eddy Tao' },
+  'SHA': { level1: 306, level2: 302, level1Name: 'Cathy Liu', level2Name: 'Eddy Tao' },
+  'CHE': { level1: 306, level2: 302, level1Name: 'Cathy Liu', level2Name: 'Eddy Tao' },
+  'SIN': { level1: 805, level2: 803, level1Name: 'Ann Low', level2Name: 'Karen Chia' },
+  'BKK': { level1: 905, level2: 803, level1Name: 'Bow', level2Name: 'Karen Chia' },
+  'MYS': { level1: 805, level2: 803, level1Name: 'Ann Low', level2Name: 'Karen Chia' },
+  'DXB': { level1: 1002, level2: 1001, level1Name: 'Christine Dimaranan', level2Name: 'Christopher Frame' },
+  'LON': { level1: 1002, level2: 1001, level1Name: 'Christine Dimaranan', level2Name: 'Christopher Frame' },
+  'HKG': { level1: 505, level2: 502, level1Name: 'Cherry Lai', level2Name: 'Anthony Jurenko' }
 };
 
 const SPECIAL_REVIEWERS = {
-  811: { finalReviewer: 808, finalReviewerName: 'Ong Yongle' },
-  817: { finalReviewer: 808, finalReviewerName: 'Ong Yongle' },
-  813: { finalReviewer: 808, finalReviewerName: 'Ong Yongle' },
-  504: { finalReviewer: 808, finalReviewerName: 'Ong Yongle' },
-  806: { finalReviewer: 801, finalReviewerName: 'John Yan Chung Keung' },
-  818: { finalReviewer: 801, finalReviewerName: 'Prabakaran Rajinderan' },
-  810: { finalReviewer: 801, finalReviewerName: 'Prabakaran Rajinderan' },
-  503: { finalReviewer: 801, finalReviewerName: 'Prabakaran Rajinderan' },
-  1004: { finalReviewer: 801, finalReviewerName: 'Christopher James Mclean Frame' },
-  1007: { finalReviewer: 801, finalReviewerName: 'Christopher James Mclean Frame' },
+  // HKG exceptions
+  503: { finalReviewer: 806, finalReviewerName: 'Praba' },         // Suki Fong -> Praba
+  504: { finalReviewer: 811, finalReviewerName: 'Ng Ziyao' },      // Ron -> Zi Yao
+  // SIN exceptions
+  806: { finalReviewer: 801, finalReviewerName: 'John Yan' },      // Praba -> John
+  810: { finalReviewer: 806, finalReviewerName: 'Praba' },         // Fiolita -> Praba
+  811: { finalReviewer: 808, finalReviewerName: 'Ong Yongle' },    // Zi Yao -> Yongle
+  813: { finalReviewer: 811, finalReviewerName: 'Ng Ziyao' },      // Danny -> Zi Yao
+  815: { finalReviewer: 804, finalReviewerName: 'Cathy He' },      // Jeslyn -> Cathy
+  817: { finalReviewer: 811, finalReviewerName: 'Ng Ziyao' },      // Ruo Fan -> Zi Yao
+  818: { finalReviewer: 806, finalReviewerName: 'Praba' },         // May -> Praba
+  // BKK exceptions
+  904: { finalReviewer: 806, finalReviewerName: 'Praba' },         // Nora -> Praba
+  // DXB exceptions
+  1004: { finalReviewer: 801, finalReviewerName: 'John Yan' },     // Leila -> John
+  1007: { finalReviewer: 801, finalReviewerName: 'John Yan' },     // Olivia -> John
 };
 
 const SENIOR_STAFF_ROUTING = {
-  808: { level1: 805, level2: 804, level1Name: 'Ann Low Mei Yen', level2Name: 'Cathy He Zeqian' },
-  801: { level1: 805, level2: 804, level1Name: 'Ann Low Mei Yen', level2Name: 'Cathy He Zeqian' },
-  803: { level1: 805, level2: 804, level1Name: 'Ann Low Mei Yen', level2Name: 'Cathy He Zeqian' },
-  302: { level1: 306, level2: 804, level1Name: 'Cathy Liu Shikun', level2Name: 'Cathy He Zeqian' },
-  502: { level1: 505, level2: 804, level1Name: 'Cherry Lai', level2Name: 'Cathy He Zeqian' },
-  1001: { level1: 1002, level2: 804, level1Name: 'Christine Mendoza Dimaranan', level2Name: 'Cathy He Zeqian' },
-  812: { level1: 804, level2: null, level1Name: 'Cathy He Zeqian', level2Name: null, singleLevel: true },
-  804: { level1: null, level2: null, level1Name: null, level2Name: null, selfSubmit: true, externalApproval: 'Chairman (via Kareen)' },
+  // Managers -> Admin -> Cathy He
+  302: { level1: 306, level2: 804, level1Name: 'Cathy Liu', level2Name: 'Cathy He' },          // Eddy
+  502: { level1: 505, level2: 804, level1Name: 'Cherry Lai', level2Name: 'Cathy He' },         // Anthony
+  801: { level1: 805, level2: 804, level1Name: 'Ann Low', level2Name: 'Cathy He' },            // John
+  803: { level1: 805, level2: 804, level1Name: 'Ann Low', level2Name: 'Cathy He' },            // Karen
+  808: { level1: 805, level2: 804, level1Name: 'Ann Low', level2Name: 'Cathy He' },            // Yongle
+  1001: { level1: 1002, level2: 804, level1Name: 'Christine Dimaranan', level2Name: 'Cathy He' }, // Christopher
+  // Admins -> their manager (single level)
+  102: { level1: 302, level2: null, level1Name: 'Eddy Tao', level2Name: null, singleLevel: true },        // Caroline
+  306: { level1: 302, level2: null, level1Name: 'Eddy Tao', level2Name: null, singleLevel: true },        // Cathy Liu
+  505: { level1: 502, level2: null, level1Name: 'Anthony Jurenko', level2Name: null, singleLevel: true }, // Cherry
+  805: { level1: 803, level2: null, level1Name: 'Karen Chia', level2Name: null, singleLevel: true },      // Ann
+  905: { level1: 803, level2: null, level1Name: 'Karen Chia', level2Name: null, singleLevel: true },      // Bow
+  1002: { level1: 1001, level2: null, level1Name: 'Christopher Frame', level2Name: null, singleLevel: true }, // Christine
+  812: { level1: 804, level2: null, level1Name: 'Cathy He', level2Name: null, singleLevel: true },        // Kareen
+  // Cathy He -> Kareen -> Paul (external)
+  804: { level1: 812, level2: null, level1Name: 'Kareen Ng', level2Name: null, singleLevel: true, externalApproval: 'Paul' },
 };
 
 const getApprovalWorkflow = (employeeId, officeCode) => {
@@ -1499,9 +1528,9 @@ export default function BerkeleyExpenseSystem() {
       '.detail-table th,.detail-table td{border:1px solid #ccc;padding:3px;}' +
       '.detail-table th{background:#e8eaf6;text-align:left;}' +
       '.receipt-page{padding:5mm;}' +
-      '.receipt-header{background:#1565c0;color:#fff;padding:10px;display:flex;align-items:flex-start;border-radius:4px;margin-bottom:10px;}' +
-      '.receipt-ref{font-size:24px;font-weight:bold;margin-right:15px;}' +
-      '.receipt-info{font-size:10px;line-height:1.6;}' +
+      '.receipt-header{background:#1565c0;color:#fff;padding:12px;display:flex;align-items:flex-start;border-radius:4px;margin-bottom:10px;}' +
+      '.receipt-ref{font-size:28px;font-weight:bold;margin-right:15px;}' +
+      '.receipt-info{font-size:13px;line-height:1.7;}' +
       '.receipt-img{max-width:100%;max-height:220mm;object-fit:contain;display:block;margin:0 auto;}' +
       '.no-receipt{background:#f5f5f5;padding:40px;text-align:center;color:#999;}' +
       '.statement-page{padding:5mm;}' +
@@ -1582,16 +1611,16 @@ export default function BerkeleyExpenseSystem() {
   const handleDownloadPreviewPDF = async () => {
     setDownloading(true);
     try {
-      // Generate draft claim number: LastName - YYYY - XX (what it will be on submit)
+      // Generate draft claim number: ClaimName - YYYY - XX (what it will be on submit)
       const year = new Date().getFullYear();
-      const lastName = currentUser.name.trim().split(' ').pop();
+      const claimName = currentUser.claimName || currentUser.name.trim().split(' ').pop();
       const userClaimsThisYear = claims.filter(c => 
         c.user_id === currentUser.id && 
         c.claim_number && 
-        c.claim_number.includes(`${lastName} - ${year} -`)
+        c.claim_number.includes(`${claimName} - ${year} -`)
       );
       const nextSeq = userClaimsThisYear.length + 1;
-      const draftClaimNumber = `${lastName} - ${year} - ${String(nextSeq).padStart(2, '0')} (Draft)`;
+      const draftClaimNumber = `${claimName} - ${year} - ${String(nextSeq).padStart(2, '0')} (Draft)`;
       await generatePDFFromHTML(pendingExpenses, currentUser.name, currentUser.office, draftClaimNumber, new Date().toISOString(), annotatedStatements, getUserReimburseCurrency(currentUser), null, null, statementAnnotations);
     } catch (err) { alert('❌ Failed'); }
     setDownloading(false);
@@ -1780,20 +1809,20 @@ export default function BerkeleyExpenseSystem() {
           throw new Error(`Failed to update claim: ${result.error.message || result.error.code || JSON.stringify(result.error)}`);
         }
       } else {
-        // Generate claim number: LastName - YYYY - XX (sequential per employee per year)
+        // Generate claim number: ClaimName - YYYY - XX (sequential per employee per year)
         const year = new Date().getFullYear();
-        const lastName = currentUser.name.trim().split(' ').pop();
+        const claimName = currentUser.claimName || currentUser.name.trim().split(' ').pop();
         
         // Count existing claims for this user in this year
         const userClaimsThisYear = claims.filter(c => 
           c.user_id === currentUser.id && 
           c.claim_number && 
-          c.claim_number.includes(`${lastName} - ${year} -`)
+          c.claim_number.includes(`${claimName} - ${year} -`)
         );
         
         // Next sequence number (1-based)
         const nextSeq = userClaimsThisYear.length + 1;
-        const claimNumber = `${lastName} - ${year} - ${String(nextSeq).padStart(2, '0')}`;
+        const claimNumber = `${claimName} - ${year} - ${String(nextSeq).padStart(2, '0')}`;
 
         const insertData = {
           claim_number: claimNumber, 
@@ -2131,7 +2160,8 @@ export default function BerkeleyExpenseSystem() {
       numberOfPax: editExpense.numberOfPax || '', 
       reimbursementAmount: editExpense.reimbursementAmount || '', 
       hasBackcharge: editExpense.hasBackcharge || false, 
-      backcharges: editExpense.backcharges || [] 
+      backcharges: editExpense.backcharges || [],
+      mileageDistance: editExpense.mileageDistance || ''
     } : { 
       merchant: '', 
       amount: '', 
@@ -2143,7 +2173,8 @@ export default function BerkeleyExpenseSystem() {
       numberOfPax: '', 
       reimbursementAmount: '', 
       hasBackcharge: false, 
-      backcharges: [] 
+      backcharges: [],
+      mileageDistance: ''
     });
     const isForeignCurrency = formData.currency !== userReimburseCurrency;
     const isCNY = formData.currency === 'CNY';
@@ -2346,6 +2377,31 @@ export default function BerkeleyExpenseSystem() {
                     </optgroup>
                   </select>
                 </div>
+                {/* Mileage Calculator for Category H */}
+                {formData.category === 'H' && currentUser.mileageRate && (
+                  <div className="bg-green-50 border-2 border-green-300 rounded-xl p-4">
+                    <p className="text-sm font-bold text-green-800 mb-2">📍 Mileage Calculator</p>
+                    <p className="text-xs text-green-600 mb-2">Rate: {currentUser.reimburseCurrency} {currentUser.mileageRate.toFixed(2)} per {currentUser.mileageUnit}</p>
+                    <div className="flex gap-3 items-center">
+                      <input type="number" step="0.1" className="flex-1 p-3 border-2 border-green-300 rounded-xl bg-white" 
+                        placeholder={`Total ${currentUser.mileageUnit}s`}
+                        value={formData.mileageDistance || ''}
+                        onChange={e => {
+                          const dist = e.target.value;
+                          const calc = dist ? (parseFloat(dist) * currentUser.mileageRate).toFixed(2) : '';
+                          setFormData(prev => ({ ...prev, mileageDistance: dist, amount: calc, currency: currentUser.reimburseCurrency }));
+                        }}
+                      />
+                      <span className="text-green-700 font-bold whitespace-nowrap">{currentUser.mileageUnit}s</span>
+                    </div>
+                    {formData.mileageDistance && (
+                      <div className="mt-2 p-2 bg-white rounded-lg border border-green-200 text-sm">
+                        <span className="text-slate-600">{formData.mileageDistance} {currentUser.mileageUnit}s × {currentUser.mileageRate.toFixed(2)} = </span>
+                        <span className="font-bold text-green-700">{currentUser.reimburseCurrency} {(parseFloat(formData.mileageDistance) * currentUser.mileageRate).toFixed(2)}</span>
+                      </div>
+                    )}
+                  </div>
+                )}
                 <textarea className="w-full p-3 border-2 border-slate-200 rounded-xl resize-none" rows="2" placeholder={EXPENSE_CATEGORIES[formData.category]?.example || 'Description *'} value={formData.description} onChange={e => setFormData(prev => ({ ...prev, description: e.target.value }))} />
                 {needsAttendees && (
                   <div className="space-y-3">
@@ -3427,12 +3483,12 @@ export default function BerkeleyExpenseSystem() {
         <div className="bg-white rounded-2xl shadow-lg p-6">
           <h3 className="font-bold mb-4">📊 To Review ({reviewableClaims.length})</h3>
           {reviewableClaims.length === 0 ? <div className="text-center py-12 text-slate-400">✅ Nothing to review</div> : (<div className="space-y-2">{reviewableClaims.map(claim => {
-            // Only show "Resubmission" badge to the reviewer who originally returned it
-            const isResubmissionForMe = claim.reviewed_by === currentUser.name;
-            return (<div key={claim.id} onClick={() => setSelectedClaim(claim)} className={`flex items-center justify-between p-4 rounded-xl border cursor-pointer hover:border-blue-300 ${isResubmissionForMe ? 'bg-amber-50 border-amber-200' : 'bg-slate-50'}`}><div><div className="flex items-center gap-2 flex-wrap"><span className="font-semibold">{claim.user_name}</span><span className={`text-xs px-2 py-0.5 rounded-full ${claim.approval_level === 2 ? 'bg-blue-100 text-blue-700' : 'bg-amber-100 text-amber-700'}`}>L{claim.approval_level || 1}</span>{isResubmissionForMe && <span className="bg-orange-500 text-white text-xs px-2 py-0.5 rounded-full font-semibold">🔄 Resubmission</span>}</div><p className="text-sm text-slate-500">{claim.claim_number} • {claim.office}</p></div><span className="font-bold">{formatCurrency(claim.total_amount, claim.currency)}</span></div>);
+            // Show "Resubmission" badge whenever claim has been returned, regardless of who's viewing
+            const isResubmission = (claim.review_history && claim.review_history.length > 0) || !!claim.admin_comment;
+            return (<div key={claim.id} onClick={() => setSelectedClaim(claim)} className={`flex items-center justify-between p-4 rounded-xl border cursor-pointer hover:border-blue-300 ${isResubmission ? 'bg-amber-50 border-amber-200' : 'bg-slate-50'}`}><div><div className="flex items-center gap-2 flex-wrap"><span className="font-semibold">{claim.user_name}</span><span className={`text-xs px-2 py-0.5 rounded-full ${claim.approval_level === 2 ? 'bg-blue-100 text-blue-700' : 'bg-amber-100 text-amber-700'}`}>L{claim.approval_level || 1}</span>{isResubmission && <span className="bg-orange-500 text-white text-xs px-2 py-0.5 rounded-full font-semibold">🔄 Resubmission</span>}</div><p className="text-sm text-slate-500">{claim.claim_number} • {claim.office}</p></div><span className="font-bold">{formatCurrency(claim.total_amount, claim.currency)}</span></div>);
           })}</div>)}
         </div>
-        {selectedClaim && (<div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50" onClick={() => setSelectedClaim(null)}><div className="bg-white rounded-2xl max-w-2xl w-full max-h-[90vh] overflow-auto" onClick={e => e.stopPropagation()}><div className="p-6 border-b flex justify-between"><div><div className="flex items-center gap-2"><h2 className="text-xl font-bold">{selectedClaim.user_name}</h2>{selectedClaim.reviewed_by === currentUser.name && <span className="bg-orange-500 text-white text-xs px-2 py-1 rounded-full font-semibold">🔄 Resubmission</span>}</div><p className="text-sm text-slate-500">{selectedClaim.claim_number} • Level {selectedClaim.approval_level || 1}</p></div><button onClick={() => setSelectedClaim(null)} className="text-2xl text-slate-400">×</button></div><div className="p-6"><button onClick={() => handleDownloadPDF(selectedClaim)} className="w-full bg-green-600 text-white py-3 rounded-xl font-semibold mb-4">📥 Download PDF</button>{[...(selectedClaim.expenses || [])].sort((a, b) => { const numA = parseInt(a.ref); const numB = parseInt(b.ref); if (!isNaN(numA) && !isNaN(numB)) return numA - numB; return (a.ref || '999').localeCompare(b.ref || '999', undefined, { numeric: true }); }).map((exp, i) => { const isOld = isOlderThan2Months(exp.date); const isApproaching = isApproaching2Months(exp.date); const daysLeft = getDaysUntil2Months(exp.date); const paxCount = parseInt(exp.numberOfPax) || 0; const isEntertaining = EXPENSE_CATEGORIES[exp.category]?.requiresAttendees; const perPaxAmount = isEntertaining && paxCount > 0 ? (parseFloat(exp.reimbursementAmount || exp.amount) / paxCount) : 0; return (<div key={i} className={`py-3 border-b ${isOld ? 'bg-red-50' : isApproaching ? 'bg-amber-50' : ''}`}><div className="flex justify-between items-start"><div className="flex-1"><div className="flex items-center gap-2 flex-wrap"><span className="bg-blue-100 text-blue-700 text-xs px-2 py-0.5 rounded font-bold">{exp.ref}</span><span className="font-semibold">{exp.merchant}</span>{exp.isPotentialDuplicate && <span className="bg-red-100 text-red-600 text-xs px-2 py-0.5 rounded">⚠️ Duplicate?</span>}{isOld && <span className="bg-red-100 text-red-600 text-xs px-2 py-0.5 rounded animate-pulse">🚨 &gt;2 Months</span>}{isApproaching && <span className="bg-amber-100 text-amber-700 text-xs px-2 py-0.5 rounded">⏰ {daysLeft}d left</span>}{paxCount > 0 && <span className="bg-purple-100 text-purple-600 text-xs px-2 py-0.5 rounded">👥 {paxCount} pax</span>}{isEntertaining && paxCount > 0 && <span className="bg-indigo-100 text-indigo-600 text-xs px-2 py-0.5 rounded">💰 {selectedClaim.currency} {perPaxAmount.toFixed(2)}/pax</span>}</div><p className="text-xs text-slate-500 mt-1">{exp.description}</p>{exp.isForeignCurrency && exp.forexRate && <p className="text-xs text-amber-600 mt-1">💱 Rate: 1 {exp.currency} = {exp.forexRate.toFixed(4)} {selectedClaim.currency}</p>}{exp.adminNotes && <div className="text-xs mt-1 bg-amber-50 px-2 py-1 rounded"><span className="font-semibold">📝 Notes:</span><div dangerouslySetInnerHTML={{ __html: formatAdminNotesReact(exp.adminNotes) }} /></div>}</div><span className="font-bold text-green-700 ml-2">{formatCurrency(exp.reimbursementAmount || exp.amount, selectedClaim.currency)}</span></div></div>); })}</div><div className="p-4 border-t bg-slate-50 space-y-3"><div className="flex gap-3"><button onClick={() => setEditingClaim(selectedClaim)} className="flex-1 py-3 rounded-xl bg-purple-500 text-white font-semibold">✏️ Edit / Add Notes</button><button onClick={() => setShowRequestChanges(true)} className="flex-1 py-3 rounded-xl bg-amber-500 text-white font-semibold">📝 Return</button></div><div className="flex gap-3">{(selectedClaim.admin_comment || (selectedClaim.review_history && selectedClaim.review_history.length > 0)) && <button onClick={() => setShowPreviousReview(selectedClaim)} className="flex-1 py-3 rounded-xl bg-blue-100 text-blue-700 font-semibold border-2 border-blue-200">📋 Review History</button>}<button onClick={() => handleApprove(selectedClaim)} disabled={loading} className="flex-[2] py-3 rounded-xl bg-green-600 text-white font-semibold disabled:opacity-50">{(() => { const workflow = SENIOR_STAFF_ROUTING[selectedClaim.user_id]; const isSingleLevel = workflow?.singleLevel; const level = selectedClaim.approval_level || 1; if (level === 1 && isSingleLevel) return workflow?.externalApproval ? '✓ Approve (→ Chairman)' : '✓ Final Approve'; if (level === 1) return '✓ Approve → L2'; return '✓ Final Approve'; })()}</button></div></div></div></div>)}
+        {selectedClaim && (<div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50" onClick={() => setSelectedClaim(null)}><div className="bg-white rounded-2xl max-w-2xl w-full max-h-[90vh] overflow-auto" onClick={e => e.stopPropagation()}><div className="p-6 border-b flex justify-between"><div><div className="flex items-center gap-2"><h2 className="text-xl font-bold">{selectedClaim.user_name}</h2>{((selectedClaim.review_history && selectedClaim.review_history.length > 0) || selectedClaim.admin_comment) && <span className="bg-orange-500 text-white text-xs px-2 py-1 rounded-full font-semibold">🔄 Resubmission</span>}</div><p className="text-sm text-slate-500">{selectedClaim.claim_number} • Level {selectedClaim.approval_level || 1}</p></div><button onClick={() => setSelectedClaim(null)} className="text-2xl text-slate-400">×</button></div><div className="p-6"><button onClick={() => handleDownloadPDF(selectedClaim)} className="w-full bg-green-600 text-white py-3 rounded-xl font-semibold mb-4">📥 Download PDF</button>{[...(selectedClaim.expenses || [])].sort((a, b) => { const numA = parseInt(a.ref); const numB = parseInt(b.ref); if (!isNaN(numA) && !isNaN(numB)) return numA - numB; return (a.ref || '999').localeCompare(b.ref || '999', undefined, { numeric: true }); }).map((exp, i) => { const isOld = isOlderThan2Months(exp.date); const isApproaching = isApproaching2Months(exp.date); const daysLeft = getDaysUntil2Months(exp.date); const paxCount = parseInt(exp.numberOfPax) || 0; const isEntertaining = EXPENSE_CATEGORIES[exp.category]?.requiresAttendees; const perPaxAmount = isEntertaining && paxCount > 0 ? (parseFloat(exp.reimbursementAmount || exp.amount) / paxCount) : 0; return (<div key={i} className={`py-3 border-b ${isOld ? 'bg-red-50' : isApproaching ? 'bg-amber-50' : ''}`}><div className="flex justify-between items-start"><div className="flex-1"><div className="flex items-center gap-2 flex-wrap"><span className="bg-blue-100 text-blue-700 text-xs px-2 py-0.5 rounded font-bold">{exp.ref}</span><span className="font-semibold">{exp.merchant}</span>{exp.isPotentialDuplicate && <span className="bg-red-100 text-red-600 text-xs px-2 py-0.5 rounded">⚠️ Duplicate?</span>}{isOld && <span className="bg-red-100 text-red-600 text-xs px-2 py-0.5 rounded animate-pulse">🚨 &gt;2 Months</span>}{isApproaching && <span className="bg-amber-100 text-amber-700 text-xs px-2 py-0.5 rounded">⏰ {daysLeft}d left</span>}{paxCount > 0 && <span className="bg-purple-100 text-purple-600 text-xs px-2 py-0.5 rounded">👥 {paxCount} pax</span>}{isEntertaining && paxCount > 0 && <span className="bg-indigo-100 text-indigo-600 text-xs px-2 py-0.5 rounded">💰 {selectedClaim.currency} {perPaxAmount.toFixed(2)}/pax</span>}</div><p className="text-xs text-slate-500 mt-1">{exp.description}</p>{exp.isForeignCurrency && exp.forexRate && <p className="text-xs text-amber-600 mt-1">💱 Rate: 1 {exp.currency} = {exp.forexRate.toFixed(4)} {selectedClaim.currency}</p>}{exp.adminNotes && <div className="text-xs mt-1 bg-amber-50 px-2 py-1 rounded"><span className="font-semibold">📝 Notes:</span><div dangerouslySetInnerHTML={{ __html: formatAdminNotesReact(exp.adminNotes) }} /></div>}</div><span className="font-bold text-green-700 ml-2">{formatCurrency(exp.reimbursementAmount || exp.amount, selectedClaim.currency)}</span></div></div>); })}</div><div className="p-4 border-t bg-slate-50 space-y-3"><div className="flex gap-3"><button onClick={() => setEditingClaim(selectedClaim)} className="flex-1 py-3 rounded-xl bg-purple-500 text-white font-semibold">✏️ Edit / Add Notes</button><button onClick={() => setShowRequestChanges(true)} className="flex-1 py-3 rounded-xl bg-amber-500 text-white font-semibold">📝 Return</button></div><div className="flex gap-3">{(selectedClaim.admin_comment || (selectedClaim.review_history && selectedClaim.review_history.length > 0)) && <button onClick={() => setShowPreviousReview(selectedClaim)} className="flex-1 py-3 rounded-xl bg-blue-100 text-blue-700 font-semibold border-2 border-blue-200">📋 Review History</button>}<button onClick={() => handleApprove(selectedClaim)} disabled={loading} className="flex-[2] py-3 rounded-xl bg-green-600 text-white font-semibold disabled:opacity-50">{(() => { const workflow = SENIOR_STAFF_ROUTING[selectedClaim.user_id]; const isSingleLevel = workflow?.singleLevel; const level = selectedClaim.approval_level || 1; if (level === 1 && isSingleLevel) return workflow?.externalApproval ? '✓ Approve (→ Chairman)' : '✓ Final Approve'; if (level === 1) return '✓ Approve → L2'; return '✓ Final Approve'; })()}</button></div></div></div></div>)}
         {/* Previous Review Popup */}
         {/* Previous Review History Popup */}
         {showPreviousReview && (<div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50" onClick={() => setShowPreviousReview(null)}><div className="bg-white rounded-2xl max-w-md w-full max-h-[80vh] overflow-auto p-6" onClick={e => e.stopPropagation()}><div className="flex justify-between items-center mb-4"><h3 className="font-bold text-lg">📋 Review History</h3><button onClick={() => setShowPreviousReview(null)} className="text-2xl text-slate-400">×</button></div>
