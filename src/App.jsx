@@ -1112,6 +1112,18 @@ export default function BerkeleyExpenseSystem() {
           updated.receiptPreview2 = url;
         }
         
+        // Migrate receiptPreview3 if it's base64
+        if (exp.receiptPreview3 && !isStorageUrl(exp.receiptPreview3)) {
+          const url = await uploadImageToStorage(exp.receiptPreview3, currentUser.id, 'receipt3');
+          updated.receiptPreview3 = url;
+        }
+        
+        // Migrate receiptPreview4 if it's base64
+        if (exp.receiptPreview4 && !isStorageUrl(exp.receiptPreview4)) {
+          const url = await uploadImageToStorage(exp.receiptPreview4, currentUser.id, 'receipt4');
+          updated.receiptPreview4 = url;
+        }
+        
         return updated;
       }));
       
@@ -1231,15 +1243,18 @@ export default function BerkeleyExpenseSystem() {
     
     return expenseList.map((exp, idx) => {
       // Check if any OTHER expense has same amount, date, currency
-      const hasDuplicate = expenseList.some((other, otherIdx) => 
+      const matchedExp = expenseList.find((other, otherIdx) => 
         otherIdx !== idx &&
         parseFloat(other.amount) === parseFloat(exp.amount) &&
         other.date === exp.date &&
         other.currency === exp.currency
       );
       
-      if (hasDuplicate && !exp.isPotentialDuplicate) {
-        return { ...exp, isPotentialDuplicate: true };
+      if (matchedExp) {
+        return { ...exp, isPotentialDuplicate: true, duplicateMatchRef: matchedExp.ref, duplicateMatchMerchant: matchedExp.merchant };
+      }
+      if (exp.isPotentialDuplicate && !matchedExp) {
+        return { ...exp, isPotentialDuplicate: false, duplicateMatchRef: null, duplicateMatchMerchant: null };
       }
       return exp;
     });
@@ -1486,17 +1501,24 @@ export default function BerkeleyExpenseSystem() {
       const attendeesLen = (exp.attendees || '').length;
       const heightPenalty = Math.min(50, Math.floor(notesLen / 50) * 10 + Math.floor(attendeesLen / 100) * 10 + (exp.hasBackcharge ? 10 : 0));
       
-      // Receipt sizing - proportionate for both receipts
-      const hasReceipt1 = !!exp.receiptPreview;
-      const hasReceipt2 = !!exp.receiptPreview2;
-      const hasTwoReceipts = hasReceipt1 && hasReceipt2;
+      // Receipt sizing - handle up to 4 receipts
+      const receipts = [exp.receiptPreview, exp.receiptPreview2, exp.receiptPreview3, exp.receiptPreview4].filter(Boolean);
+      const receiptCount = receipts.length;
       const baseHeight = matchStmtImg ? 130 : 200;
       const availableHeight = baseHeight - heightPenalty;
-      // If only receipt 2, give it full height. If both, split proportionally.
-      const firstH = hasTwoReceipts ? Math.floor(availableHeight * 0.55) : availableHeight;
-      const secondH = hasTwoReceipts ? Math.floor(availableHeight * 0.40) : (hasReceipt2 && !hasReceipt1 ? availableHeight : 0);
       
-      const receiptContent = (exp.receiptPreview ? '<img src="' + exp.receiptPreview + '" style="max-width:100%;max-height:' + firstH + 'mm;object-fit:contain;display:block;" />' : (hasReceipt2 ? '' : '<div style="background:#f5f5f5;padding:30px;text-align:center;color:#999;">No receipt</div>')) + (exp.receiptPreview2 ? '<div style="' + (hasReceipt1 ? 'margin-top:6px;border-top:2px dashed #ccc;padding-top:6px;' : '') + '"><img src="' + exp.receiptPreview2 + '" style="max-width:100%;max-height:' + secondH + 'mm;object-fit:contain;display:block;" /></div>' : '');
+      let receiptContent = '';
+      if (receiptCount === 0) {
+        receiptContent = '<div style="background:#f5f5f5;padding:30px;text-align:center;color:#999;">No receipt</div>';
+      } else if (receiptCount <= 2) {
+        // Stack vertically
+        const perH = receiptCount === 1 ? availableHeight : Math.floor(availableHeight * 0.48);
+        receiptContent = receipts.map((img, i) => '<div style="' + (i > 0 ? 'margin-top:4px;border-top:2px dashed #ccc;padding-top:4px;' : '') + '"><img src="' + img + '" style="max-width:100%;max-height:' + perH + 'mm;object-fit:contain;display:block;" /></div>').join('');
+      } else {
+        // 2x2 grid for 3-4 receipts
+        const perH = Math.floor(availableHeight * 0.46);
+        receiptContent = '<div style="display:grid;grid-template-columns:1fr 1fr;gap:4px;">' + receipts.map(img => '<div><img src="' + img + '" style="max-width:100%;max-height:' + perH + 'mm;object-fit:contain;display:block;" /></div>').join('') + '</div>';
+      }
       const stmtContent = matchStmtImg ? '<div style="flex:1;max-width:48%;border-left:3px solid #ff9800;padding-left:8px;"><div style="background:#ff9800;color:white;padding:5px 10px;font-weight:bold;font-size:9px;margin-bottom:8px;border-radius:4px;">💳 Matched Statement ' + (matchStmtIdx + 1) + '</div><img src="' + matchStmtImg + '" style="max-width:100%;max-height:' + (160 - heightPenalty) + 'mm;object-fit:contain;border:1px solid #ddd;" /></div>' : '';
       const contentHTML = matchStmtImg ? '<div style="display:flex;gap:10px;align-items:flex-start;"><div style="flex:1;max-width:50%;">' + receiptContent + '</div>' + stmtContent + '</div>' : receiptContent;
       return '<div class="page receipt-page"><div class="receipt-header"><div class="receipt-ref">' + exp.seqRef + '</div><div class="receipt-info"><strong>' + exp.merchant + '</strong> | ' + formatDDMMYYYY(new Date(exp.date)) + '<br>' + cat.name + ' | ' + exp.currency + ' ' + fmtAmt(exp.amount) + (exp.isForeignCurrency ? ' → ' + reimburseCurrency + ' ' + fmtAmt(exp.reimbursementAmount) : '') + '<br>' + (exp.description || '') + oldBadge + dupBadge + paxInfo + (exp.attendees ? '<br>' + exp.attendees.replace(/\n/g, ', ') : '') + (exp.adminNotes ? '<br><div style="background:#fff8e1;padding:2px 4px;border-radius:3px;">📝 ' + formatAdminNotesHTML(exp.adminNotes) + '</div>' : '') + backchargeHTML + '</div></div>' + contentHTML + '</div>';
@@ -2137,6 +2159,8 @@ export default function BerkeleyExpenseSystem() {
     const [step, setStep] = useState(editExpense ? 2 : 1);
     const [receiptPreview, setReceiptPreview] = useState(editExpense?.receiptPreview || null);
     const [receiptPreview2, setReceiptPreview2] = useState(editExpense?.receiptPreview2 || null);
+    const [receiptPreview3, setReceiptPreview3] = useState(editExpense?.receiptPreview3 || null);
+    const [receiptPreview4, setReceiptPreview4] = useState(editExpense?.receiptPreview4 || null);
     const [showFullImage, setShowFullImage] = useState(null);
     const userReimburseCurrency = getUserReimburseCurrency(currentUser);
     
@@ -2189,47 +2213,62 @@ export default function BerkeleyExpenseSystem() {
     useEffect(() => {
         if (!formData.amount || !formData.date || !formData.currency) return;
         
-        // 1. Scan Past Claims (History)
-        const foundInHistory = existingClaims.flatMap(c => c.expenses || []).find(e => 
+        // 1. Scan Past Claims (History) - across ALL employees
+        let matchInfo = null;
+        for (const claim of existingClaims) {
+          const match = (claim.expenses || []).find(e => 
             e.amount === parseFloat(formData.amount) && 
             e.date === formData.date && 
             e.currency === formData.currency &&
             e.id !== editExpense?.id
-        );
+          );
+          if (match) {
+            matchInfo = { source: 'history', claimNumber: claim.claim_number, claimant: claim.user_name, ref: match.ref, merchant: match.merchant };
+            break;
+          }
+        }
 
         // 2. Scan Current Drafts (Pending)
-        const foundInDrafts = expenses.filter(e => e.id !== editExpense?.id).find(e => 
+        if (!matchInfo) {
+          const foundInDrafts = expenses.filter(e => e.id !== editExpense?.id).find(e => 
             parseFloat(e.amount) === parseFloat(formData.amount) && 
             e.date === formData.date && 
             e.currency === formData.currency
-        );
+          );
+          if (foundInDrafts) {
+            matchInfo = { source: 'drafts', ref: foundInDrafts.ref, merchant: foundInDrafts.merchant };
+          }
+        }
 
-        if (foundInHistory || foundInDrafts) {
-            setDuplicateWarning(`⚠️ Possible Duplicate: Found matching amount/date in ${foundInHistory ? 'History' : 'Current Drafts'}.`);
+        if (matchInfo) {
+          const detail = matchInfo.source === 'history' 
+            ? `⚠️ Possible Duplicate: Matches ${matchInfo.claimant}'s ${matchInfo.claimNumber} (item ${matchInfo.ref} - ${matchInfo.merchant})`
+            : `⚠️ Possible Duplicate: Matches item ${matchInfo.ref} (${matchInfo.merchant}) in current drafts`;
+          setDuplicateWarning(detail);
         } else {
-            setDuplicateWarning(null);
+          setDuplicateWarning(null);
         }
     }, [formData.amount, formData.date, formData.currency, existingClaims, expenses, editExpense]);
 
     const [isUploading, setIsUploading] = useState(false);
     
-    const handleFileChange = async (e, isSecond = false) => { 
+    const handleFileChange = async (e, receiptNum = 1) => { 
       const file = e.target.files?.[0]; 
       if (!file) return;
       setIsUploading(true);
+      const setters = { 1: setReceiptPreview, 2: setReceiptPreview2, 3: setReceiptPreview3, 4: setReceiptPreview4 };
+      const setter = setters[receiptNum] || setReceiptPreview;
       const reader = new FileReader();
       reader.onload = async (event) => {
         try {
-          // Upload to Supabase Storage (falls back to compressed base64 if storage fails)
           const imageUrl = await uploadImageToStorage(event.target.result, currentUser.id, 'receipt');
-          if (isSecond) setReceiptPreview2(imageUrl); 
-          else { setReceiptPreview(imageUrl); setStep(2); }
+          setter(imageUrl);
+          if (receiptNum === 1) setStep(2);
         } catch (err) {
           console.error('Upload failed:', err);
-          // Fallback to compressed base64
           const compressed = await compressImage(event.target.result);
-          if (isSecond) setReceiptPreview2(compressed); 
-          else { setReceiptPreview(compressed); setStep(2); }
+          setter(compressed);
+          if (receiptNum === 1) setStep(2);
         }
         setIsUploading(false);
       };
@@ -2269,11 +2308,11 @@ export default function BerkeleyExpenseSystem() {
         
         let newExpenses;
         if (editExpense) { 
-          newExpenses = expenses.map(e => e.id === editExpense.id ? { ...e, ...formData, attendees: attendeesForSave, amount: parseFloat(formData.amount), reimbursementAmount: isForeignCurrency ? parseFloat(formData.reimbursementAmount) : parseFloat(formData.amount), receiptPreview: receiptPreview || e.receiptPreview, receiptPreview2: receiptPreview2 || e.receiptPreview2, isForeignCurrency, isPotentialDuplicate: !!duplicateWarning, forexRate, updatedAt: new Date().toISOString() } : e);
+          newExpenses = expenses.map(e => e.id === editExpense.id ? { ...e, ...formData, attendees: attendeesForSave, amount: parseFloat(formData.amount), reimbursementAmount: isForeignCurrency ? parseFloat(formData.reimbursementAmount) : parseFloat(formData.amount), receiptPreview: receiptPreview || e.receiptPreview, receiptPreview2: receiptPreview2 || e.receiptPreview2, receiptPreview3: receiptPreview3 || e.receiptPreview3, receiptPreview4: receiptPreview4 || e.receiptPreview4, isForeignCurrency, isPotentialDuplicate: !!duplicateWarning, forexRate, updatedAt: new Date().toISOString() } : e);
           newExpenses = sortAndReassignRefs(newExpenses);
           setExpenses(newExpenses);
         } else { 
-          const newExpense = { id: Date.now(), ref: 'temp', ...formData, attendees: attendeesForSave, amount: parseFloat(formData.amount) || 0, reimbursementAmount: isForeignCurrency ? (parseFloat(formData.reimbursementAmount) || 0) : (parseFloat(formData.amount) || 0), receiptPreview: receiptPreview || null, receiptPreview2: receiptPreview2 || null, status: 'draft', isForeignCurrency: isForeignCurrency || false, isOld: isOlderThan2Months(formData.date), createdAt: new Date().toISOString(), isPotentialDuplicate: !!duplicateWarning, forexRate };
+          const newExpense = { id: Date.now(), ref: 'temp', ...formData, attendees: attendeesForSave, amount: parseFloat(formData.amount) || 0, reimbursementAmount: isForeignCurrency ? (parseFloat(formData.reimbursementAmount) || 0) : (parseFloat(formData.amount) || 0), receiptPreview: receiptPreview || null, receiptPreview2: receiptPreview2 || null, receiptPreview3: receiptPreview3 || null, receiptPreview4: receiptPreview4 || null, status: 'draft', isForeignCurrency: isForeignCurrency || false, isOld: isOlderThan2Months(formData.date), createdAt: new Date().toISOString(), isPotentialDuplicate: !!duplicateWarning, forexRate };
           // If this is a duplicate, also mark the matching expense as duplicate
           let existingExpenses = [...expenses];
           if (duplicateWarning) {
@@ -2305,13 +2344,22 @@ export default function BerkeleyExpenseSystem() {
         <div className="bg-white rounded-2xl max-w-lg w-full max-h-[90vh] overflow-hidden shadow-2xl">
           <div className="bg-gradient-to-r from-blue-600 to-indigo-600 text-white p-5 flex justify-between items-center"><div><h2 className="text-lg font-bold">{editExpense ? '✏️ Edit' : '📸 Add'} Expense</h2><p className="text-blue-100 text-sm">Reimburse in {userReimburseCurrency}</p></div><button onClick={onClose} className="w-8 h-8 rounded-full bg-white/20">✕</button></div>
           <div className="p-6 overflow-y-auto max-h-[calc(90vh-180px)]">
-            {step === 1 && (<div className="space-y-3">{isUploading ? (<div className="text-center py-12"><div className="text-4xl mb-2 animate-pulse">☁️</div><p className="font-semibold text-blue-700">Uploading...</p><p className="text-xs text-slate-500">Please wait</p></div>) : (<><label className="block border-3 border-dashed border-blue-400 bg-blue-50 rounded-2xl p-6 text-center cursor-pointer hover:border-blue-500"><input type="file" accept="image/*" capture="environment" onChange={(e) => handleFileChange(e, false)} className="hidden" /><div className="text-4xl mb-2">📷</div><p className="font-semibold text-blue-700">Take Photo</p><p className="text-xs text-slate-500">Open camera</p></label><label className="block border-3 border-dashed border-green-400 bg-green-50 rounded-2xl p-6 text-center cursor-pointer hover:border-green-500"><input type="file" accept="image/*" onChange={(e) => handleFileChange(e, false)} className="hidden" /><div className="text-4xl mb-2">🖼️</div><p className="font-semibold text-green-700">Choose from Gallery</p><p className="text-xs text-slate-500">Select existing photo</p></label></>)}</div>)}
+            {step === 1 && (<div className="space-y-3">{isUploading ? (<div className="text-center py-12"><div className="text-4xl mb-2 animate-pulse">☁️</div><p className="font-semibold text-blue-700">Uploading...</p><p className="text-xs text-slate-500">Please wait</p></div>) : (<><label className="block border-3 border-dashed border-blue-400 bg-blue-50 rounded-2xl p-6 text-center cursor-pointer hover:border-blue-500"><input type="file" accept="image/*" capture="environment" onChange={(e) => handleFileChange(e, 1)} className="hidden" /><div className="text-4xl mb-2">📷</div><p className="font-semibold text-blue-700">Take Photo</p><p className="text-xs text-slate-500">Open camera</p></label><label className="block border-3 border-dashed border-green-400 bg-green-50 rounded-2xl p-6 text-center cursor-pointer hover:border-green-500"><input type="file" accept="image/*" onChange={(e) => handleFileChange(e, 1)} className="hidden" /><div className="text-4xl mb-2">🖼️</div><p className="font-semibold text-green-700">Choose from Gallery</p><p className="text-xs text-slate-500">Select existing photo</p></label></>)}</div>)}
             {step === 2 && (
               <div className="space-y-4">
                 {duplicateWarning && <div className="bg-red-100 border-l-4 border-red-500 text-red-700 p-3 text-sm font-bold animate-pulse">{duplicateWarning}</div>}
                 <div className="grid grid-cols-2 gap-3">
-                  <div><p className="text-xs font-semibold text-slate-500 mb-1">Receipt 1 {isCNY && '(发票)'}</p>{receiptPreview ? (<div className="relative"><img src={receiptPreview} alt="Receipt" className="w-full h-28 object-cover bg-slate-100 rounded-lg cursor-pointer" onClick={() => setShowFullImage(receiptPreview)} /><button onClick={() => setReceiptPreview(null)} className="absolute top-1 right-1 bg-red-500 text-white w-6 h-6 rounded-full text-xs">✕</button></div>) : (<label className="block border-2 border-dashed border-slate-300 rounded-lg p-4 text-center cursor-pointer hover:border-blue-400"><input type="file" accept="image/*" onChange={(e) => handleFileChange(e, false)} className="hidden" /><span className="text-2xl">📷</span></label>)}</div>
-                  <div><p className="text-xs font-semibold text-slate-500 mb-1">Receipt 2 {isCNY && '(小票)'} <span className="text-slate-400">Optional</span></p>{receiptPreview2 ? (<div className="relative"><img src={receiptPreview2} alt="Receipt 2" className="w-full h-28 object-cover bg-slate-100 rounded-lg cursor-pointer" onClick={() => setShowFullImage(receiptPreview2)} /><button onClick={() => setReceiptPreview2(null)} className="absolute top-1 right-1 bg-red-500 text-white w-6 h-6 rounded-full text-xs">✕</button></div>) : (<label className="block border-2 border-dashed border-slate-300 rounded-lg p-4 text-center cursor-pointer hover:border-blue-400"><input type="file" accept="image/*" onChange={(e) => handleFileChange(e, true)} className="hidden" /><span className="text-2xl">➕</span></label>)}</div>
+                  {[
+                    { num: 1, preview: receiptPreview, setPreview: setReceiptPreview, label: `Receipt 1${isCNY ? ' (发票)' : ''}`, required: true },
+                    { num: 2, preview: receiptPreview2, setPreview: setReceiptPreview2, label: `Receipt 2${isCNY ? ' (小票)' : ''}` },
+                    { num: 3, preview: receiptPreview3, setPreview: setReceiptPreview3, label: 'Receipt 3' },
+                    { num: 4, preview: receiptPreview4, setPreview: setReceiptPreview4, label: 'Receipt 4' },
+                  ].map(({ num, preview, setPreview, label, required }) => (
+                    <div key={num}><p className="text-xs font-semibold text-slate-500 mb-1">{label} {!required && <span className="text-slate-400">Optional</span>}</p>
+                    {preview ? (<div className="relative"><img src={preview} alt={label} className="w-full h-28 object-cover bg-slate-100 rounded-lg cursor-pointer" onClick={() => setShowFullImage(preview)} /><button onClick={() => setPreview(null)} className="absolute top-1 right-1 bg-red-500 text-white w-6 h-6 rounded-full text-xs">✕</button></div>
+                    ) : (<label className="block border-2 border-dashed border-slate-300 rounded-lg p-4 text-center cursor-pointer hover:border-blue-400"><input type="file" accept="image/*" capture="environment" onChange={(e) => handleFileChange(e, num)} className="hidden" /><span className="text-2xl">{num === 1 ? '📷' : '➕'}</span></label>)}
+                    </div>
+                  ))}
                 </div>
                 <div><label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Merchant *</label><input type="text" className="w-full p-3 border-2 border-slate-200 rounded-xl focus:border-blue-500 outline-none" value={formData.merchant} onChange={e => setFormData(prev => ({ ...prev, merchant: e.target.value }))} /></div>
                 <div className="bg-slate-50 rounded-xl p-4 space-y-3"><p className="text-xs font-semibold text-slate-600 uppercase">💵 Original Expense</p><div className="grid grid-cols-2 gap-4"><input type="number" step="0.01" className="p-3 border-2 border-slate-200 rounded-xl" placeholder="Amount" value={formData.amount} onChange={e => setFormData(prev => ({ ...prev, amount: e.target.value }))} /><select className="p-3 border-2 border-slate-200 rounded-xl bg-white" value={formData.currency} onChange={e => setFormData(prev => ({ ...prev, currency: e.target.value }))}>{CURRENCIES.map(c => <option key={c} value={c}>{c}</option>)}</select></div></div>
@@ -2464,7 +2512,7 @@ export default function BerkeleyExpenseSystem() {
               <table className="w-full text-sm"><tbody>{Object.entries(EXPENSE_CATEGORIES).filter(([cat, _]) => getCategoryTotal(cat) > 0).map(([cat, catData]) => (<tr key={cat} className="border-b"><td className="py-2 font-bold text-blue-700 w-10">{catData.icon}</td><td className="py-2">{catData.name}<span className="text-slate-400 text-xs ml-2">GL {catData.gl}</span></td><td className="py-2 text-right font-medium">{userReimburseCurrency} {getCategoryTotal(cat).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td></tr>))}</tbody></table>
               <div className="bg-blue-50 p-4 rounded-xl mt-4 flex justify-between items-center"><span className="font-bold text-lg">Total</span><span className="font-bold text-2xl text-blue-700">{formatCurrency(reimbursementTotal, userReimburseCurrency)}</span></div>
               <h3 className="font-bold mt-6 mb-3">Receipts ({pendingExpenses.length})</h3>
-              <div className="grid grid-cols-3 gap-3">{pendingExpenses.map(exp => (<div key={exp.id} className="border rounded-lg overflow-hidden"><div className="bg-blue-100 p-1 flex justify-between text-xs"><span className="font-bold text-blue-700">{exp.ref}</span><div className="flex gap-1">{exp.isForeignCurrency && <span>💳</span>}{exp.receiptPreview2 && <span>📑</span>}</div></div>{exp.receiptPreview ? (<img src={exp.receiptPreview} alt={exp.ref} className="w-full h-16 object-cover cursor-pointer" onClick={() => setViewImg(exp.receiptPreview)} />) : (<div className="w-full h-16 bg-slate-100 flex items-center justify-center">📄</div>)}<div className="p-1 bg-slate-50 text-xs"><p className="truncate">{exp.merchant}</p><p className="text-green-700 font-bold">{formatCurrency(exp.reimbursementAmount || exp.amount, userReimburseCurrency)}</p></div></div>))}</div>
+              <div className="grid grid-cols-3 gap-3">{pendingExpenses.map(exp => (<div key={exp.id} className="border rounded-lg overflow-hidden"><div className="bg-blue-100 p-1 flex justify-between text-xs"><span className="font-bold text-blue-700">{exp.ref}</span><div className="flex gap-1">{exp.isForeignCurrency && <span>💳</span>}{[exp.receiptPreview2, exp.receiptPreview3, exp.receiptPreview4].some(Boolean) && <span>📑{[exp.receiptPreview, exp.receiptPreview2, exp.receiptPreview3, exp.receiptPreview4].filter(Boolean).length}</span>}</div></div>{exp.receiptPreview ? (<img src={exp.receiptPreview} alt={exp.ref} className="w-full h-16 object-cover cursor-pointer" onClick={() => setViewImg(exp.receiptPreview)} />) : (<div className="w-full h-16 bg-slate-100 flex items-center justify-center">📄</div>)}<div className="p-1 bg-slate-50 text-xs"><p className="truncate">{exp.merchant}</p><p className="text-green-700 font-bold">{formatCurrency(exp.reimbursementAmount || exp.amount, userReimburseCurrency)}</p></div></div>))}</div>
               {hasForeignCurrency && annotatedStatements.length === 0 && (<div className="mt-4 bg-red-50 border-2 border-red-300 rounded-xl p-4"><p className="text-red-800 font-bold">❌ Statement(s) Required</p><button onClick={() => { setShowPreview(false); setShowStatementUpload(true); }} className="mt-2 bg-amber-500 text-white px-4 py-2 rounded-lg font-semibold text-sm">📎 Upload Statements</button></div>)}
               {annotatedStatements.length > 0 && (<div className="mt-4 bg-green-50 border border-green-200 rounded-xl p-4"><div className="flex justify-between items-start"><p className="text-green-800 font-semibold">✅ {annotatedStatements.length} Statement(s) Annotated</p><div className="flex gap-2"><button onClick={() => { 
                 // Use original images but keep existing annotations (positions now stored as %)
@@ -2545,7 +2593,7 @@ export default function BerkeleyExpenseSystem() {
             return (<div key={idx} className={`border-2 rounded-xl p-4 mb-4 ${exp.isPotentialDuplicate ? 'border-red-400 bg-red-50' : isOld ? 'border-red-400 bg-red-50' : isApproaching ? 'border-amber-400 bg-amber-50' : ''}`}>
             <div className="flex items-center gap-2 mb-3 flex-wrap">
               <span className="bg-blue-100 text-blue-700 font-bold px-3 py-1 rounded-lg">{exp.ref}</span>
-              {exp.isPotentialDuplicate && <span className="bg-red-100 text-red-600 text-xs px-2 py-1 rounded font-semibold">⚠️ Potential Duplicate</span>}
+              {exp.isPotentialDuplicate && <span className="bg-red-100 text-red-600 text-xs px-2 py-1 rounded font-semibold" title={exp.duplicateMatchRef ? `Matches item ${exp.duplicateMatchRef} (${exp.duplicateMatchMerchant || ''})` : 'Matching amount/date found'}>⚠️ Duplicate? {exp.duplicateMatchRef && `(→ item ${exp.duplicateMatchRef})`}</span>}
               {isOld && <span className="bg-red-100 text-red-600 text-xs px-2 py-1 rounded font-semibold animate-pulse">🚨 &gt;2 Months Old</span>}
               {isApproaching && <span className="bg-amber-100 text-amber-700 text-xs px-2 py-1 rounded font-semibold">⏰ {daysLeft}d until 2 months</span>}
               {paxCount > 0 && <span className="bg-purple-100 text-purple-600 text-xs px-2 py-1 rounded">👥 {paxCount} pax</span>}
@@ -2710,7 +2758,7 @@ export default function BerkeleyExpenseSystem() {
         )}
         
         <div className="grid grid-cols-2 gap-4"><div className="bg-white rounded-2xl shadow-lg p-6 text-center"><div className="text-4xl font-bold text-slate-800">{sortedExpenses.length}</div><div className="text-sm text-slate-500">{activeClaimTab === 'current' ? 'Pending' : 'In Claim'}</div></div><div className="bg-white rounded-2xl shadow-lg p-6 text-center"><div className="text-2xl font-bold text-green-600">{formatCurrency(reimbursementTotal, userReimburseCurrency)}</div><div className="text-sm text-slate-500">To Reimburse</div></div></div>
-        <div className="bg-white rounded-2xl shadow-lg p-6"><div className="flex flex-wrap gap-3"><button onClick={() => setShowAddExpense(true)} className="bg-blue-600 text-white px-6 py-3 rounded-xl font-semibold shadow-lg">📸 Add Receipt</button>{pendingExpenses.length > 0 && (<button onClick={() => setShowPreview(true)} className="border-2 border-green-500 text-green-600 px-6 py-3 rounded-xl font-semibold">📋 Preview ({pendingExpenses.length})</button>)}{activeReturnedClaim && (<button onClick={() => setResubmitClaim(activeReturnedClaim)} className="bg-green-600 text-white px-6 py-3 rounded-xl font-semibold shadow-lg">🔄 Address & Resubmit</button>)}<button onClick={handleManualSync} disabled={loading} className="border-2 border-slate-300 text-slate-600 px-4 py-3 rounded-xl font-semibold">{loading ? '⏳' : '🔄'} Sync</button></div></div>
+        <div className="bg-white rounded-2xl shadow-lg p-6"><div className="flex flex-wrap gap-3"><button onClick={() => setShowAddExpense(true)} className="bg-blue-600 text-white px-6 py-3 rounded-xl font-semibold shadow-lg">📸 Add Receipt</button>{pendingExpenses.length > 0 && (<button onClick={() => setShowPreview(true)} className="border-2 border-green-500 text-green-600 px-6 py-3 rounded-xl font-semibold">📋 Preview ({pendingExpenses.length})</button>)}{activeReturnedClaim && (<button onClick={() => setResubmitClaim(activeReturnedClaim)} className="bg-green-600 text-white px-6 py-3 rounded-xl font-semibold shadow-lg">🔄 Address & Resubmit</button>)}{activeClaimTab === 'current' && <button onClick={handleManualSync} disabled={loading} className="border-2 border-slate-300 text-slate-600 px-4 py-3 rounded-xl font-semibold">{loading ? '⏳' : '🔄'} Sync</button>}</div></div>
         <div className="bg-white rounded-2xl shadow-lg p-6">
           <h3 className="font-bold text-slate-800 mb-4">{activeClaimTab === 'current' ? '📋 Pending Expenses (sorted by date)' : `📋 ${activeReturnedClaim?.claim_number} Expenses`}</h3>
           {sortedExpenses.some(exp => isOlderThan2Months(exp.date)) && (
@@ -2738,11 +2786,11 @@ export default function BerkeleyExpenseSystem() {
                     <span className="font-semibold text-sm">{exp.merchant}</span>
                     <span className="text-xs text-slate-400">{formatShortDate(exp.date)}</span>
                     {isFlagged && <span className="bg-red-100 text-red-600 text-xs font-bold px-2 py-1 rounded animate-pulse">⚠️ Needs Attention</span>}
-                    {exp.isPotentialDuplicate && <span className="bg-orange-100 text-orange-700 text-xs font-bold px-2 py-1 rounded">⚠️ Duplicate?</span>}
+                    {exp.isPotentialDuplicate && <span className="bg-orange-100 text-orange-700 text-xs font-bold px-2 py-1 rounded" title={exp.duplicateMatchRef ? `Matches item ${exp.duplicateMatchRef} (${exp.duplicateMatchMerchant || ''})` : ''}>⚠️ Duplicate? {exp.duplicateMatchRef && `(→ ${exp.duplicateMatchRef})`}</span>}
                     {isOld && <span className="bg-red-100 text-red-600 text-xs font-bold px-2 py-1 rounded animate-pulse">🚨 &gt;2 Months</span>}
                     {isApproaching && <span className="bg-amber-100 text-amber-700 text-xs font-bold px-2 py-1 rounded">⏰ {daysLeft}d left</span>}
                     {exp.isForeignCurrency && <span className="text-amber-600 text-xs">💳</span>}
-                    {exp.receiptPreview2 && <span className="text-slate-500 text-xs">📑</span>}
+                    {[exp.receiptPreview2, exp.receiptPreview3, exp.receiptPreview4].some(Boolean) && <span className="text-slate-500 text-xs">📑{[exp.receiptPreview, exp.receiptPreview2, exp.receiptPreview3, exp.receiptPreview4].filter(Boolean).length}</span>}
                   </div>
                   <p className="text-xs text-slate-500 mt-1">{cat?.icon} {cat?.name} • {exp.description}</p>
                   {exp.adminNotes && <div className="text-xs mt-1 bg-amber-50 border border-amber-200 px-2 py-1 rounded"><span className="font-semibold">📝 Notes:</span><div dangerouslySetInnerHTML={{ __html: formatAdminNotesReact(exp.adminNotes) }} /></div>}
@@ -3488,7 +3536,7 @@ export default function BerkeleyExpenseSystem() {
             return (<div key={claim.id} onClick={() => setSelectedClaim(claim)} className={`flex items-center justify-between p-4 rounded-xl border cursor-pointer hover:border-blue-300 ${isResubmission ? 'bg-amber-50 border-amber-200' : 'bg-slate-50'}`}><div><div className="flex items-center gap-2 flex-wrap"><span className="font-semibold">{claim.user_name}</span><span className={`text-xs px-2 py-0.5 rounded-full ${claim.approval_level === 2 ? 'bg-blue-100 text-blue-700' : 'bg-amber-100 text-amber-700'}`}>L{claim.approval_level || 1}</span>{isResubmission && <span className="bg-orange-500 text-white text-xs px-2 py-0.5 rounded-full font-semibold">🔄 Resubmission</span>}</div><p className="text-sm text-slate-500">{claim.claim_number} • {claim.office}</p></div><span className="font-bold">{formatCurrency(claim.total_amount, claim.currency)}</span></div>);
           })}</div>)}
         </div>
-        {selectedClaim && (<div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50" onClick={() => setSelectedClaim(null)}><div className="bg-white rounded-2xl max-w-2xl w-full max-h-[90vh] overflow-auto" onClick={e => e.stopPropagation()}><div className="p-6 border-b flex justify-between"><div><div className="flex items-center gap-2"><h2 className="text-xl font-bold">{selectedClaim.user_name}</h2>{((selectedClaim.review_history && selectedClaim.review_history.length > 0) || selectedClaim.admin_comment) && <span className="bg-orange-500 text-white text-xs px-2 py-1 rounded-full font-semibold">🔄 Resubmission</span>}</div><p className="text-sm text-slate-500">{selectedClaim.claim_number} • Level {selectedClaim.approval_level || 1}</p></div><button onClick={() => setSelectedClaim(null)} className="text-2xl text-slate-400">×</button></div><div className="p-6"><button onClick={() => handleDownloadPDF(selectedClaim)} className="w-full bg-green-600 text-white py-3 rounded-xl font-semibold mb-4">📥 Download PDF</button>{[...(selectedClaim.expenses || [])].sort((a, b) => { const numA = parseInt(a.ref); const numB = parseInt(b.ref); if (!isNaN(numA) && !isNaN(numB)) return numA - numB; return (a.ref || '999').localeCompare(b.ref || '999', undefined, { numeric: true }); }).map((exp, i) => { const isOld = isOlderThan2Months(exp.date); const isApproaching = isApproaching2Months(exp.date); const daysLeft = getDaysUntil2Months(exp.date); const paxCount = parseInt(exp.numberOfPax) || 0; const isEntertaining = EXPENSE_CATEGORIES[exp.category]?.requiresAttendees; const perPaxAmount = isEntertaining && paxCount > 0 ? (parseFloat(exp.reimbursementAmount || exp.amount) / paxCount) : 0; return (<div key={i} className={`py-3 border-b ${isOld ? 'bg-red-50' : isApproaching ? 'bg-amber-50' : ''}`}><div className="flex justify-between items-start"><div className="flex-1"><div className="flex items-center gap-2 flex-wrap"><span className="bg-blue-100 text-blue-700 text-xs px-2 py-0.5 rounded font-bold">{exp.ref}</span><span className="font-semibold">{exp.merchant}</span>{exp.isPotentialDuplicate && <span className="bg-red-100 text-red-600 text-xs px-2 py-0.5 rounded">⚠️ Duplicate?</span>}{isOld && <span className="bg-red-100 text-red-600 text-xs px-2 py-0.5 rounded animate-pulse">🚨 &gt;2 Months</span>}{isApproaching && <span className="bg-amber-100 text-amber-700 text-xs px-2 py-0.5 rounded">⏰ {daysLeft}d left</span>}{paxCount > 0 && <span className="bg-purple-100 text-purple-600 text-xs px-2 py-0.5 rounded">👥 {paxCount} pax</span>}{isEntertaining && paxCount > 0 && <span className="bg-indigo-100 text-indigo-600 text-xs px-2 py-0.5 rounded">💰 {selectedClaim.currency} {perPaxAmount.toFixed(2)}/pax</span>}</div><p className="text-xs text-slate-500 mt-1">{exp.description}</p>{exp.isForeignCurrency && exp.forexRate && <p className="text-xs text-amber-600 mt-1">💱 Rate: 1 {exp.currency} = {exp.forexRate.toFixed(4)} {selectedClaim.currency}</p>}{exp.adminNotes && <div className="text-xs mt-1 bg-amber-50 px-2 py-1 rounded"><span className="font-semibold">📝 Notes:</span><div dangerouslySetInnerHTML={{ __html: formatAdminNotesReact(exp.adminNotes) }} /></div>}</div><span className="font-bold text-green-700 ml-2">{formatCurrency(exp.reimbursementAmount || exp.amount, selectedClaim.currency)}</span></div></div>); })}</div><div className="p-4 border-t bg-slate-50 space-y-3"><div className="flex gap-3"><button onClick={() => setEditingClaim(selectedClaim)} className="flex-1 py-3 rounded-xl bg-purple-500 text-white font-semibold">✏️ Edit / Add Notes</button><button onClick={() => setShowRequestChanges(true)} className="flex-1 py-3 rounded-xl bg-amber-500 text-white font-semibold">📝 Return</button></div><div className="flex gap-3">{(selectedClaim.admin_comment || (selectedClaim.review_history && selectedClaim.review_history.length > 0)) && <button onClick={() => setShowPreviousReview(selectedClaim)} className="flex-1 py-3 rounded-xl bg-blue-100 text-blue-700 font-semibold border-2 border-blue-200">📋 Review History</button>}<button onClick={() => handleApprove(selectedClaim)} disabled={loading} className="flex-[2] py-3 rounded-xl bg-green-600 text-white font-semibold disabled:opacity-50">{(() => { const workflow = SENIOR_STAFF_ROUTING[selectedClaim.user_id]; const isSingleLevel = workflow?.singleLevel; const level = selectedClaim.approval_level || 1; if (level === 1 && isSingleLevel) return workflow?.externalApproval ? '✓ Approve (→ Chairman)' : '✓ Final Approve'; if (level === 1) return '✓ Approve → L2'; return '✓ Final Approve'; })()}</button></div></div></div></div>)}
+        {selectedClaim && (<div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50" onClick={() => setSelectedClaim(null)}><div className="bg-white rounded-2xl max-w-2xl w-full max-h-[90vh] overflow-auto" onClick={e => e.stopPropagation()}><div className="p-6 border-b flex justify-between"><div><div className="flex items-center gap-2"><h2 className="text-xl font-bold">{selectedClaim.user_name}</h2>{((selectedClaim.review_history && selectedClaim.review_history.length > 0) || selectedClaim.admin_comment) && <span className="bg-orange-500 text-white text-xs px-2 py-1 rounded-full font-semibold">🔄 Resubmission</span>}</div><p className="text-sm text-slate-500">{selectedClaim.claim_number} • Level {selectedClaim.approval_level || 1}</p></div><button onClick={() => setSelectedClaim(null)} className="text-2xl text-slate-400">×</button></div><div className="p-6"><button onClick={() => handleDownloadPDF(selectedClaim)} className="w-full bg-green-600 text-white py-3 rounded-xl font-semibold mb-4">📥 Download PDF</button>{[...(selectedClaim.expenses || [])].sort((a, b) => { const numA = parseInt(a.ref); const numB = parseInt(b.ref); if (!isNaN(numA) && !isNaN(numB)) return numA - numB; return (a.ref || '999').localeCompare(b.ref || '999', undefined, { numeric: true }); }).map((exp, i) => { const isOld = isOlderThan2Months(exp.date); const isApproaching = isApproaching2Months(exp.date); const daysLeft = getDaysUntil2Months(exp.date); const paxCount = parseInt(exp.numberOfPax) || 0; const isEntertaining = EXPENSE_CATEGORIES[exp.category]?.requiresAttendees; const perPaxAmount = isEntertaining && paxCount > 0 ? (parseFloat(exp.reimbursementAmount || exp.amount) / paxCount) : 0; return (<div key={i} className={`py-3 border-b ${isOld ? 'bg-red-50' : isApproaching ? 'bg-amber-50' : ''}`}><div className="flex justify-between items-start"><div className="flex-1"><div className="flex items-center gap-2 flex-wrap"><span className="bg-blue-100 text-blue-700 text-xs px-2 py-0.5 rounded font-bold">{exp.ref}</span><span className="font-semibold">{exp.merchant}</span>{exp.isPotentialDuplicate && <span className="bg-red-100 text-red-600 text-xs px-2 py-0.5 rounded" title={exp.duplicateMatchRef ? 'Matches item ' + exp.duplicateMatchRef : ''}>⚠️ Duplicate? {exp.duplicateMatchRef && '(→ ' + exp.duplicateMatchRef + ')'}</span>}{isOld && <span className="bg-red-100 text-red-600 text-xs px-2 py-0.5 rounded animate-pulse">🚨 &gt;2 Months</span>}{isApproaching && <span className="bg-amber-100 text-amber-700 text-xs px-2 py-0.5 rounded">⏰ {daysLeft}d left</span>}{paxCount > 0 && <span className="bg-purple-100 text-purple-600 text-xs px-2 py-0.5 rounded">👥 {paxCount} pax</span>}{isEntertaining && paxCount > 0 && <span className="bg-indigo-100 text-indigo-600 text-xs px-2 py-0.5 rounded">💰 {selectedClaim.currency} {perPaxAmount.toFixed(2)}/pax</span>}</div><p className="text-xs text-slate-500 mt-1">{exp.description}</p>{exp.isForeignCurrency && exp.forexRate && <p className="text-xs text-amber-600 mt-1">💱 Rate: 1 {exp.currency} = {exp.forexRate.toFixed(4)} {selectedClaim.currency}</p>}{exp.adminNotes && <div className="text-xs mt-1 bg-amber-50 px-2 py-1 rounded"><span className="font-semibold">📝 Notes:</span><div dangerouslySetInnerHTML={{ __html: formatAdminNotesReact(exp.adminNotes) }} /></div>}</div><span className="font-bold text-green-700 ml-2">{formatCurrency(exp.reimbursementAmount || exp.amount, selectedClaim.currency)}</span></div></div>); })}</div><div className="p-4 border-t bg-slate-50 space-y-3"><div className="flex gap-3"><button onClick={() => setEditingClaim(selectedClaim)} className="flex-1 py-3 rounded-xl bg-purple-500 text-white font-semibold">✏️ Edit / Add Notes</button><button onClick={() => setShowRequestChanges(true)} className="flex-1 py-3 rounded-xl bg-amber-500 text-white font-semibold">📝 Return</button></div><div className="flex gap-3">{(selectedClaim.admin_comment || (selectedClaim.review_history && selectedClaim.review_history.length > 0)) && <button onClick={() => setShowPreviousReview(selectedClaim)} className="flex-1 py-3 rounded-xl bg-blue-100 text-blue-700 font-semibold border-2 border-blue-200">📋 Review History</button>}<button onClick={() => handleApprove(selectedClaim)} disabled={loading} className="flex-[2] py-3 rounded-xl bg-green-600 text-white font-semibold disabled:opacity-50">{(() => { const workflow = SENIOR_STAFF_ROUTING[selectedClaim.user_id]; const isSingleLevel = workflow?.singleLevel; const level = selectedClaim.approval_level || 1; if (level === 1 && isSingleLevel) return workflow?.externalApproval ? '✓ Approve (→ Chairman)' : '✓ Final Approve'; if (level === 1) return '✓ Approve → L2'; return '✓ Final Approve'; })()}</button></div></div></div></div>)}
         {/* Previous Review Popup */}
         {/* Previous Review History Popup */}
         {showPreviousReview && (<div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50" onClick={() => setShowPreviousReview(null)}><div className="bg-white rounded-2xl max-w-md w-full max-h-[80vh] overflow-auto p-6" onClick={e => e.stopPropagation()}><div className="flex justify-between items-center mb-4"><h3 className="font-bold text-lg">📋 Review History</h3><button onClick={() => setShowPreviousReview(null)} className="text-2xl text-slate-400">×</button></div>
