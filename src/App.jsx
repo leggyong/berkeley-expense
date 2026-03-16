@@ -1368,6 +1368,38 @@ export default function BerkeleyExpenseSystem() {
   
   const getReviewableClaims = () => { if (!currentUser) return []; return claims.filter(c => (c.status === 'pending_review' || c.status === 'pending_level2') && canUserReviewClaim(currentUser.id, c)); };
   
+  // Dynamic duplicate check: enrich a claim's expenses with duplicate info by scanning ALL claims
+  const enrichWithDuplicates = (claimExpenses, claimId) => {
+    if (!claimExpenses || !claims) return claimExpenses;
+    const otherClaims = claims.filter(c => c.id !== claimId);
+    return claimExpenses.map(exp => {
+      const amt = parseFloat(exp.amount);
+      const date = exp.date;
+      const currency = exp.currency;
+      if (!amt || !date || !currency) return exp;
+      
+      // Check against all other claims' expenses
+      for (const claim of otherClaims) {
+        const match = (claim.expenses || []).find(e => 
+          parseFloat(e.amount) === amt && e.date === date && e.currency === currency
+        );
+        if (match) {
+          return { ...exp, isPotentialDuplicate: true, duplicateMatchLabel: `${claim.claim_number} (item ${match.ref})` };
+        }
+      }
+      
+      // Also check within same claim (internal duplicates)
+      const internalMatch = claimExpenses.find(e => 
+        e.id !== exp.id && parseFloat(e.amount) === amt && e.date === date && e.currency === currency
+      );
+      if (internalMatch) {
+        return { ...exp, isPotentialDuplicate: true, duplicateMatchRef: internalMatch.ref, duplicateMatchMerchant: internalMatch.merchant };
+      }
+      
+      return { ...exp, isPotentialDuplicate: false, duplicateMatchLabel: null, duplicateMatchRef: null };
+    });
+  };
+  
 
   const generatePDFFromHTML = async (expenseList, userName, officeCode, claimNumber, submittedDate, statementImgs, reimburseCurrency, level2ApprovedBy, level2ApprovedAt, annotations = []) => {
     const printWindow = window.open('', '_blank');
@@ -2561,13 +2593,16 @@ export default function BerkeleyExpenseSystem() {
 
   // ============ COMBINED REVIEW MODAL ============
   const ReviewModal = ({ claim, onClose }) => {
-    const sortedExpenses = [...(claim.expenses || [])].sort((a, b) => {
+    const rawSorted = [...(claim.expenses || [])].sort((a, b) => {
       const numA = parseInt(a.ref); const numB = parseInt(b.ref);
       if (!isNaN(numA) && !isNaN(numB)) return numA - numB;
       return (a.ref || '999').localeCompare(b.ref || '999', undefined, { numeric: true });
     });
-    const [notes, setNotes] = useState({}); // idx -> note text (internal)
-    const [returnReasons, setReturnReasons] = useState({}); // idx -> return reason (goes to employee)
+    // Dynamic duplicate check against ALL claims
+    const sortedExpenses = enrichWithDuplicates(rawSorted, claim.id);
+    const [notes, setNotes] = useState({}); // idx -> note text (internal, persists in PDF)
+    const [returnReasons, setReturnReasons] = useState({}); // idx -> return reason (triggers Return button)
+    const [addressed, setAddressed] = useState({}); // idx -> true (marks previous return as addressed, stripped on final approval)
     const [saving, setSaving] = useState(false);
     const [showApproveConfirm, setShowApproveConfirm] = useState(false);
     const reviewerFirstName = currentUser.name.split(' ')[0];
@@ -2586,13 +2621,16 @@ export default function BerkeleyExpenseSystem() {
     
     const handleSaveAndApprove = async () => {
       setSaving(true);
-      // Save notes to expenses
+      // Save notes + addressed markers to expenses
       const updatedExpenses = sortedExpenses.map((exp, idx) => {
+        const parts = [];
         const note = notes[idx]?.trim();
-        if (note) {
-          const commentWithName = `${reviewerFirstName}: ${note}`;
+        if (note) parts.push(`${reviewerFirstName}: ${note}`);
+        if (addressed[idx]) parts.push(`${reviewerFirstName} [R]: ✓ Addressed`);
+        if (parts.length > 0) {
           const existing = exp.adminNotes || '';
-          return { ...exp, adminNotes: existing ? `${existing}\n${commentWithName}` : commentWithName };
+          const newNotes = parts.join('\n');
+          return { ...exp, adminNotes: existing ? `${existing}\n${newNotes}` : newNotes };
         }
         return exp;
       });
@@ -2604,12 +2642,13 @@ export default function BerkeleyExpenseSystem() {
     
     const handleSaveAndReturn = async () => {
       setSaving(true);
-      // Save both notes and return reasons to expenses
+      // Save notes, return reasons, and addressed markers to expenses
       const updatedExpenses = sortedExpenses.map((exp, idx) => {
         const parts = [];
         const note = notes[idx]?.trim();
         const reason = returnReasons[idx]?.trim();
         if (note) parts.push(`${reviewerFirstName}: ${note}`);
+        if (addressed[idx]) parts.push(`${reviewerFirstName} [R]: ✓ Addressed`);
         if (reason) parts.push(`${reviewerFirstName} [R]: ${reason}`);
         if (parts.length > 0) {
           const existing = exp.adminNotes || '';
@@ -2664,7 +2703,7 @@ export default function BerkeleyExpenseSystem() {
                       </div>
                       {/* Badges */}
                       <div className="flex flex-wrap gap-1 mt-1">
-                        {exp.isPotentialDuplicate && <span className="bg-red-100 text-red-600 text-xs px-2 py-0.5 rounded font-semibold">⚠️ Duplicate with {exp.duplicateMatchLabel || (exp.duplicateMatchRef ? `item ${exp.duplicateMatchRef}` : 'another expense')}?</span>}
+                        {exp.isPotentialDuplicate && <span className="bg-red-100 text-red-600 text-xs px-2 py-0.5 rounded font-semibold">⚠️ Duplicate{exp.duplicateMatchLabel ? ` with ${exp.duplicateMatchLabel}` : exp.duplicateMatchRef ? ` with item ${exp.duplicateMatchRef}` : ''}?</span>}
                         {isOld && <span className="bg-red-100 text-red-600 text-xs px-2 py-0.5 rounded font-semibold">🚨 &gt;2 Months</span>}
                         {isApproaching && <span className="bg-amber-100 text-amber-700 text-xs px-2 py-0.5 rounded">⏰ {daysLeft}d left</span>}
                       </div>
@@ -2683,13 +2722,39 @@ export default function BerkeleyExpenseSystem() {
                     {exp.mileageDistance && <div><span className="font-semibold text-slate-500">Mileage:</span> {exp.mileageDistance} {EMPLOYEES.find(e => e.id === claim.user_id)?.mileageUnit || 'km'}</div>}
                   </div>
                   
-                  {/* Previous notes/comments */}
-                  {exp.adminNotes && (
-                    <div className="bg-amber-50 border border-amber-200 rounded-lg p-2 mb-3">
-                      <p className="text-xs font-semibold text-amber-700 mb-1">📝 Previous:</p>
-                      <div className="text-xs" dangerouslySetInnerHTML={{ __html: formatAdminNotesReact(exp.adminNotes) }} />
-                    </div>
-                  )}
+                  {/* Previous notes and return reasons - shown separately */}
+                  {exp.adminNotes && (() => {
+                    const lines = exp.adminNotes.split('\n').filter(l => l.trim());
+                    const returnLines = lines.filter(l => l.includes('[R]:') || l.includes('[RETURN]:'));
+                    const noteLines = lines.filter(l => !l.includes('[R]:') && !l.includes('[RETURN]:'));
+                    const cleanLine = (l) => l.replace(/ \[R\]:/g, ':').replace(/ \[RETURN\]:/g, ':');
+                    return (<>
+                      {returnLines.length > 0 && (
+                        <div className="bg-red-50 border border-red-200 rounded-lg p-2 mb-2">
+                          <p className="text-xs font-semibold text-red-600 mb-1">🔄 Previous return reason:</p>
+                          {returnLines.map((line, li) => (
+                            <div key={li} className="flex items-center gap-2 text-xs text-red-700">
+                              <span className={`flex-1 ${addressed[idx] ? 'line-through opacity-50' : ''}`}>{cleanLine(line)}</span>
+                              {!addressed[idx] ? (
+                                <button 
+                                  onClick={() => setAddressed(prev => ({ ...prev, [idx]: true }))}
+                                  className="px-2 py-0.5 bg-green-100 text-green-700 text-xs font-semibold rounded hover:bg-green-200 flex-shrink-0"
+                                >✓</button>
+                              ) : (
+                                <span className="px-2 py-0.5 bg-green-200 text-green-800 text-xs font-semibold rounded flex-shrink-0">✓ Addressed</span>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                      {noteLines.length > 0 && (
+                        <div className="bg-blue-50 border border-blue-200 rounded-lg p-2 mb-2">
+                          <p className="text-xs font-semibold text-blue-600 mb-1">📝 Previous notes:</p>
+                          <div className="text-xs text-blue-700">{noteLines.map((line, li) => <div key={li}>{line}</div>)}</div>
+                        </div>
+                      )}
+                    </>);
+                  })()}
                   
                   {/* Notes input (internal audit trail) */}
                   <div className="flex gap-2 items-start mb-2">
@@ -2711,7 +2776,6 @@ export default function BerkeleyExpenseSystem() {
                       value={returnReasons[idx] || ''} 
                       onChange={e => setReturnReasons(prev => ({ ...prev, [idx]: e.target.value }))} 
                     />
-                    <button onClick={() => setReturnReasons(prev => ({ ...prev, [idx]: '✓ Addressed' }))} className="px-2 py-1 bg-green-100 text-green-700 text-xs font-semibold rounded hover:bg-green-200">✓</button>
                   </div>
                 </div>
               );
@@ -2899,7 +2963,7 @@ export default function BerkeleyExpenseSystem() {
                     <span className="font-semibold text-sm">{exp.merchant}</span>
                     <span className="text-xs text-slate-400">{formatShortDate(exp.date)}</span>
                     {isFlagged && <span className="bg-red-100 text-red-600 text-xs font-bold px-2 py-1 rounded animate-pulse">⚠️ Needs Attention</span>}
-                    {exp.isPotentialDuplicate && <span className="bg-orange-100 text-orange-700 text-xs font-bold px-2 py-1 rounded">⚠️ Duplicate with {exp.duplicateMatchLabel || (exp.duplicateMatchRef ? `item ${exp.duplicateMatchRef}` : 'another expense')}?</span>}
+                    {exp.isPotentialDuplicate && <span className="bg-orange-100 text-orange-700 text-xs font-bold px-2 py-1 rounded">⚠️ Duplicate{exp.duplicateMatchLabel ? ` with ${exp.duplicateMatchLabel}` : exp.duplicateMatchRef ? ` with item ${exp.duplicateMatchRef}` : ''}?</span>}
                     {isOld && <span className="bg-red-100 text-red-600 text-xs font-bold px-2 py-1 rounded animate-pulse">🚨 &gt;2 Months</span>}
                     {isApproaching && <span className="bg-amber-100 text-amber-700 text-xs font-bold px-2 py-1 rounded">⏰ {daysLeft}d left</span>}
                     {exp.isForeignCurrency && <span className="text-amber-600 text-xs">💳</span>}
@@ -3649,7 +3713,7 @@ export default function BerkeleyExpenseSystem() {
             return (<div key={claim.id} onClick={() => setSelectedClaim(claim)} className={`flex items-center justify-between p-4 rounded-xl border cursor-pointer hover:border-blue-300 ${isResubmission ? 'bg-amber-50 border-amber-200' : 'bg-slate-50'}`}><div><div className="flex items-center gap-2 flex-wrap"><span className="font-semibold">{claim.user_name}</span><span className={`text-xs px-2 py-0.5 rounded-full ${claim.approval_level === 2 ? 'bg-blue-100 text-blue-700' : 'bg-amber-100 text-amber-700'}`}>L{claim.approval_level || 1}</span>{isResubmission && <span className="bg-orange-500 text-white text-xs px-2 py-0.5 rounded-full font-semibold">🔄 Resubmission</span>}</div><p className="text-sm text-slate-500">{claim.claim_number} • {claim.office}</p></div><span className="font-bold">{formatCurrency(claim.total_amount, claim.currency)}</span></div>);
           })}</div>)}
         </div>
-        {selectedClaim && (<div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50" onClick={() => setSelectedClaim(null)}><div className="bg-white rounded-2xl max-w-2xl w-full max-h-[90vh] overflow-auto" onClick={e => e.stopPropagation()}><div className="p-6 border-b flex justify-between"><div><div className="flex items-center gap-2"><h2 className="text-xl font-bold">{selectedClaim.user_name}</h2>{((selectedClaim.review_history && selectedClaim.review_history.length > 0) || selectedClaim.admin_comment) && <span className="bg-orange-500 text-white text-xs px-2 py-1 rounded-full font-semibold">🔄 Resubmission</span>}</div><p className="text-sm text-slate-500">{selectedClaim.claim_number} • Level {selectedClaim.approval_level || 1}</p></div><button onClick={() => setSelectedClaim(null)} className="text-2xl text-slate-400">×</button></div><div className="p-6"><button onClick={() => handleDownloadPDF(selectedClaim)} className="w-full bg-green-600 text-white py-3 rounded-xl font-semibold mb-4">📥 Download PDF</button>{[...(selectedClaim.expenses || [])].sort((a, b) => { const numA = parseInt(a.ref); const numB = parseInt(b.ref); if (!isNaN(numA) && !isNaN(numB)) return numA - numB; return (a.ref || '999').localeCompare(b.ref || '999', undefined, { numeric: true }); }).map((exp, i) => { const isOld = isOlderThan2Months(exp.date); const isApproaching = isApproaching2Months(exp.date); const daysLeft = getDaysUntil2Months(exp.date); const paxCount = parseInt(exp.numberOfPax) || 0; const isEntertaining = EXPENSE_CATEGORIES[exp.category]?.requiresAttendees; const perPaxAmount = isEntertaining && paxCount > 0 ? (parseFloat(exp.reimbursementAmount || exp.amount) / paxCount) : 0; return (<div key={i} className={`py-3 border-b ${isOld ? 'bg-red-50' : isApproaching ? 'bg-amber-50' : ''}`}><div className="flex justify-between items-start"><div className="flex-1"><div className="flex items-center gap-2 flex-wrap"><span className="bg-blue-100 text-blue-700 text-xs px-2 py-0.5 rounded font-bold">{exp.ref}</span><span className="font-semibold">{exp.merchant}</span>{exp.isPotentialDuplicate && <span className="bg-red-100 text-red-600 text-xs px-2 py-0.5 rounded">⚠️ Duplicate with {exp.duplicateMatchLabel || (exp.duplicateMatchRef ? 'item ' + exp.duplicateMatchRef : 'another expense')}?</span>}{isOld && <span className="bg-red-100 text-red-600 text-xs px-2 py-0.5 rounded animate-pulse">🚨 &gt;2 Months</span>}{isApproaching && <span className="bg-amber-100 text-amber-700 text-xs px-2 py-0.5 rounded">⏰ {daysLeft}d left</span>}{paxCount > 0 && <span className="bg-purple-100 text-purple-600 text-xs px-2 py-0.5 rounded">👥 {paxCount} pax</span>}{isEntertaining && paxCount > 0 && <span className="bg-indigo-100 text-indigo-600 text-xs px-2 py-0.5 rounded">💰 {selectedClaim.currency} {perPaxAmount.toFixed(2)}/pax</span>}</div><p className="text-xs text-slate-500 mt-1">{exp.description}</p>{exp.isForeignCurrency && exp.forexRate && <p className="text-xs text-amber-600 mt-1">💱 Rate: 1 {exp.currency} = {exp.forexRate.toFixed(4)} {selectedClaim.currency}</p>}{exp.adminNotes && <div className="text-xs mt-1 bg-amber-50 px-2 py-1 rounded"><span className="font-semibold">📋 Review:</span><div dangerouslySetInnerHTML={{ __html: formatAdminNotesReact(exp.adminNotes) }} /></div>}</div><span className="font-bold text-green-700 ml-2">{formatCurrency(exp.reimbursementAmount || exp.amount, selectedClaim.currency)}</span></div></div>); })}</div><div className="p-4 border-t bg-slate-50 space-y-3"><div className="flex gap-3"><button onClick={() => setEditingClaim(selectedClaim)} className="flex-[2] py-3 rounded-xl bg-blue-600 text-white font-semibold">📋 Review</button>{(selectedClaim.admin_comment || (selectedClaim.review_history && selectedClaim.review_history.length > 0)) && <button onClick={() => setShowPreviousReview(selectedClaim)} className="flex-1 py-3 rounded-xl bg-blue-100 text-blue-700 font-semibold border-2 border-blue-200">📋 History</button>}</div></div></div></div>)}
+        {selectedClaim && (<div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50" onClick={() => setSelectedClaim(null)}><div className="bg-white rounded-2xl max-w-2xl w-full max-h-[90vh] overflow-auto" onClick={e => e.stopPropagation()}><div className="p-6 border-b flex justify-between"><div><div className="flex items-center gap-2"><h2 className="text-xl font-bold">{selectedClaim.user_name}</h2>{((selectedClaim.review_history && selectedClaim.review_history.length > 0) || selectedClaim.admin_comment) && <span className="bg-orange-500 text-white text-xs px-2 py-1 rounded-full font-semibold">🔄 Resubmission</span>}</div><p className="text-sm text-slate-500">{selectedClaim.claim_number} • Level {selectedClaim.approval_level || 1}</p></div><button onClick={() => setSelectedClaim(null)} className="text-2xl text-slate-400">×</button></div><div className="p-6"><button onClick={() => handleDownloadPDF(selectedClaim)} className="w-full bg-green-600 text-white py-3 rounded-xl font-semibold mb-4">📥 Download PDF</button>{enrichWithDuplicates([...(selectedClaim.expenses || [])].sort((a, b) => { const numA = parseInt(a.ref); const numB = parseInt(b.ref); if (!isNaN(numA) && !isNaN(numB)) return numA - numB; return (a.ref || '999').localeCompare(b.ref || '999', undefined, { numeric: true }); }), selectedClaim.id).map((exp, i) => { const isOld = isOlderThan2Months(exp.date); const isApproaching = isApproaching2Months(exp.date); const daysLeft = getDaysUntil2Months(exp.date); const paxCount = parseInt(exp.numberOfPax) || 0; const isEntertaining = EXPENSE_CATEGORIES[exp.category]?.requiresAttendees; const perPaxAmount = isEntertaining && paxCount > 0 ? (parseFloat(exp.reimbursementAmount || exp.amount) / paxCount) : 0; return (<div key={i} className={`py-3 border-b ${isOld ? 'bg-red-50' : isApproaching ? 'bg-amber-50' : ''}`}><div className="flex justify-between items-start"><div className="flex-1"><div className="flex items-center gap-2 flex-wrap"><span className="bg-blue-100 text-blue-700 text-xs px-2 py-0.5 rounded font-bold">{exp.ref}</span><span className="font-semibold">{exp.merchant}</span>{exp.isPotentialDuplicate && <span className="bg-red-100 text-red-600 text-xs px-2 py-0.5 rounded">⚠️ Duplicate{exp.duplicateMatchLabel ? ' with ' + exp.duplicateMatchLabel : exp.duplicateMatchRef ? ' with item ' + exp.duplicateMatchRef : ''}?</span>}{isOld && <span className="bg-red-100 text-red-600 text-xs px-2 py-0.5 rounded animate-pulse">🚨 &gt;2 Months</span>}{isApproaching && <span className="bg-amber-100 text-amber-700 text-xs px-2 py-0.5 rounded">⏰ {daysLeft}d left</span>}{paxCount > 0 && <span className="bg-purple-100 text-purple-600 text-xs px-2 py-0.5 rounded">👥 {paxCount} pax</span>}{isEntertaining && paxCount > 0 && <span className="bg-indigo-100 text-indigo-600 text-xs px-2 py-0.5 rounded">💰 {selectedClaim.currency} {perPaxAmount.toFixed(2)}/pax</span>}</div><p className="text-xs text-slate-500 mt-1">{exp.description}</p>{exp.isForeignCurrency && exp.forexRate && <p className="text-xs text-amber-600 mt-1">💱 Rate: 1 {exp.currency} = {exp.forexRate.toFixed(4)} {selectedClaim.currency}</p>}{exp.adminNotes && <div className="text-xs mt-1 bg-amber-50 px-2 py-1 rounded"><span className="font-semibold">📋 Review:</span><div dangerouslySetInnerHTML={{ __html: formatAdminNotesReact(exp.adminNotes) }} /></div>}</div><span className="font-bold text-green-700 ml-2">{formatCurrency(exp.reimbursementAmount || exp.amount, selectedClaim.currency)}</span></div></div>); })}</div><div className="p-4 border-t bg-slate-50 space-y-3"><div className="flex gap-3"><button onClick={() => setEditingClaim(selectedClaim)} className="flex-[2] py-3 rounded-xl bg-blue-600 text-white font-semibold">📋 Review</button>{(selectedClaim.admin_comment || (selectedClaim.review_history && selectedClaim.review_history.length > 0)) && <button onClick={() => setShowPreviousReview(selectedClaim)} className="flex-1 py-3 rounded-xl bg-blue-100 text-blue-700 font-semibold border-2 border-blue-200">📋 History</button>}</div></div></div></div>)}
         {/* Previous Review Popup */}
         {/* Previous Review History Popup */}
         {showPreviousReview && (<div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50" onClick={() => setShowPreviousReview(null)}><div className="bg-white rounded-2xl max-w-md w-full max-h-[80vh] overflow-auto p-6" onClick={e => e.stopPropagation()}><div className="flex justify-between items-center mb-4"><h3 className="font-bold text-lg">📋 Review History</h3><button onClick={() => setShowPreviousReview(null)} className="text-2xl text-slate-400">×</button></div>
