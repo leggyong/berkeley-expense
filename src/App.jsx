@@ -341,16 +341,16 @@ const CURRENCIES = [
 // Format admin notes with different colors for different reviewers (HTML for PDF)
 const formatAdminNotesHTML = (notes) => {
   if (!notes) return '';
+  // Strip [R] and [RETURN] markers for clean display
+  const cleaned = notes.replace(/ \[R\]:/g, ':').replace(/ \[RETURN\]:/g, ':');
   const reviewerColors = { 'Ann': '#2563eb', 'John': '#059669', 'Emma': '#7c3aed', 'Cathy': '#dc2626', 'default': '#d97706' };
-  const parts = notes.split(/(?=\b(?:Ann|John|Emma|Cathy|[A-Z][a-z]+):)/g).filter(p => p.trim());
-  if (parts.length <= 1) return '<span style="color:#d97706;">' + notes + '</span>';
-  // First part inline, subsequent parts on new lines
+  const parts = cleaned.split(/(?=\b(?:Ann|John|Emma|Cathy|[A-Z][a-z]+):)/g).filter(p => p.trim());
+  if (parts.length <= 1) return '<span style="color:#d97706;">' + cleaned + '</span>';
   return parts.map((part, idx) => {
     const match = part.match(/^([A-Z][a-z]+):\s*/);
     const reviewer = match ? match[1] : 'default';
     const color = reviewerColors[reviewer] || reviewerColors['default'];
     const content = match ? reviewer + ':</strong> ' + part.replace(match[0], '') : '</strong>' + part;
-    // First item inline (span), rest on new lines (div)
     if (idx === 0) return '<span style="color:' + color + ';"><strong>' + content + '</span>';
     return '<div style="color:' + color + ';margin-top:2px;"><strong>' + content + '</div>';
   }).join('');
@@ -359,9 +359,11 @@ const formatAdminNotesHTML = (notes) => {
 // Format admin notes with different colors for different reviewers (React for UI)
 const formatAdminNotesReact = (notes) => {
   if (!notes) return null;
+  // Strip [R] and [RETURN] markers for clean display
+  const cleaned = notes.replace(/ \[R\]:/g, ':').replace(/ \[RETURN\]:/g, ':');
   const reviewerColors = { 'Ann': 'text-blue-600', 'John': 'text-green-600', 'Emma': 'text-purple-600', 'Cathy': 'text-red-600', 'default': 'text-amber-700' };
-  const parts = notes.split(/(?=\b(?:Ann|John|Emma|Cathy|[A-Z][a-z]+):)/g).filter(p => p.trim());
-  if (parts.length <= 1) return notes;
+  const parts = cleaned.split(/(?=\b(?:Ann|John|Emma|Cathy|[A-Z][a-z]+):)/g).filter(p => p.trim());
+  if (parts.length <= 1) return cleaned;
   return parts.map((part, idx) => {
     const match = part.match(/^([A-Z][a-z]+):\s*/);
     const reviewer = match ? match[1] : 'default';
@@ -1441,7 +1443,7 @@ export default function BerkeleyExpenseSystem() {
         const perPaxGBP = pax > 0 ? toGBP(perPax, reimburseCurrency) : 0;
         const warnings = [];
         if (isOld) warnings.push('<span style="color:red;font-weight:bold;">⚠ >2 MONTHS</span>');
-        if (exp.isPotentialDuplicate) warnings.push('<span style="color:orange;font-weight:bold;">⚠ DUPLICATE' + (exp.duplicateMatchLabel ? ' with ' + exp.duplicateMatchLabel : '') + '</span>');
+        if (exp.isPotentialDuplicate) warnings.push('<span style="color:orange;font-weight:bold;">⚠ DUPLICATE with ' + (exp.duplicateMatchLabel || '?') + '?</span>');
         if (exp.adminNotes) warnings.push('<div style="background:#fff8e1;padding:2px 4px;border-radius:3px;">📝 ' + formatAdminNotesHTML(exp.adminNotes) + '</div>');
         // Add per pax info if applicable
         // Add per pax info BEFORE comments if applicable
@@ -1487,7 +1489,7 @@ export default function BerkeleyExpenseSystem() {
       const perPaxGBP = pax > 0 ? toGBP(perPax, reimburseCurrency) : 0;
       const isOld = isOlderThan2Months(exp.date);
       const oldBadge = isOld ? '<br><span style="background:#ffcdd2;color:#c62828;padding:2px 6px;border-radius:3px;font-weight:bold;">⚠ >2 MONTHS OLD</span>' : '';
-      const dupBadge = exp.isPotentialDuplicate ? '<br><span style="background:#fff3e0;color:#e65100;padding:2px 6px;border-radius:3px;font-weight:bold;">⚠ DUPLICATE' + (exp.duplicateMatchLabel ? ' with ' + exp.duplicateMatchLabel : exp.duplicateMatchRef ? ' with item ' + exp.duplicateMatchRef : '') + '</span>' : '';
+      const dupBadge = exp.isPotentialDuplicate ? '<br><span style="background:#fff3e0;color:#e65100;padding:2px 6px;border-radius:3px;font-weight:bold;">⚠ DUPLICATE with ' + (exp.duplicateMatchLabel || exp.duplicateMatchRef || '?') + '?</span>' : '';
       // FIXED: backcharge with white background and dark text for visibility
       const backchargeHTML = exp.hasBackcharge && exp.backcharges?.length > 0 ? '<div style="background:#fff;border:2px solid #9c27b0;color:#6a1b9a;padding:4px 8px;margin-top:5px;font-size:10px;border-radius:4px;"><strong>📊 Backcharge:</strong> ' + exp.backcharges.map(bc => bc.development + ': ' + bc.percentage + '%').join(' | ') + '</div>' : '';
       const paxInfo = pax > 0 ? '<br>👥 ' + pax + ' pax: ' + reimburseCurrency + ' ' + fmtAmt(perPax) + ' (£' + fmtAmt(perPaxGBP) + ')/pax' : '';
@@ -1963,15 +1965,28 @@ export default function BerkeleyExpenseSystem() {
       const isSingleLevel = workflow?.singleLevel === true;
       const externalNote = workflow?.externalApproval;
       
+      // Helper: strip return reasons from expenses on final approval (keep only notes)
+      const stripReturnReasons = (expenses) => {
+        return (expenses || []).map(exp => {
+          if (!exp.adminNotes) return exp;
+          const lines = exp.adminNotes.split('\n').filter(line => !line.includes('[R]:') && !line.includes('[RETURN]:'));
+          return { ...exp, adminNotes: lines.join('\n') || null };
+        });
+      };
+      
+      const isFinalApproval = (level === 1 && isSingleLevel) || level === 2;
+      
       if (level === 1) {
         if (isSingleLevel) {
-          const { error } = await supabase.from('claims').update({ 
+          const updateData = { 
             status: 'approved', 
             level1_approved_by: currentUser.name, 
             level1_approved_at: new Date().toISOString(),
             level2_approved_by: externalNote || currentUser.name,
             level2_approved_at: new Date().toISOString()
-          }).eq('id', claim.id);
+          };
+          if (isFinalApproval) updateData.expenses = stripReturnReasons(claim.expenses);
+          const { error } = await supabase.from('claims').update(updateData).eq('id', claim.id);
           if (error) throw error;
           await loadClaims();
           setSelectedClaim(null);
@@ -1990,11 +2005,13 @@ export default function BerkeleyExpenseSystem() {
           alert('✅ Approved → Sent to Level 2 reviewer');
         }
       } else {
-        const { error } = await supabase.from('claims').update({ 
+        const updateData = { 
           status: 'approved', 
           level2_approved_by: currentUser.name, 
           level2_approved_at: new Date().toISOString() 
-        }).eq('id', claim.id);
+        };
+        if (isFinalApproval) updateData.expenses = stripReturnReasons(claim.expenses);
+        const { error } = await supabase.from('claims').update(updateData).eq('id', claim.id);
         if (error) throw error;
         await loadClaims();
         setSelectedClaim(null);
@@ -2593,7 +2610,7 @@ export default function BerkeleyExpenseSystem() {
         const note = notes[idx]?.trim();
         const reason = returnReasons[idx]?.trim();
         if (note) parts.push(`${reviewerFirstName}: ${note}`);
-        if (reason) parts.push(`${reviewerFirstName} [RETURN]: ${reason}`);
+        if (reason) parts.push(`${reviewerFirstName} [R]: ${reason}`);
         if (parts.length > 0) {
           const existing = exp.adminNotes || '';
           const newNotes = parts.join('\n');
@@ -2647,7 +2664,7 @@ export default function BerkeleyExpenseSystem() {
                       </div>
                       {/* Badges */}
                       <div className="flex flex-wrap gap-1 mt-1">
-                        {exp.isPotentialDuplicate && <span className="bg-red-100 text-red-600 text-xs px-2 py-0.5 rounded font-semibold">⚠️ Duplicate{exp.duplicateMatchLabel ? ` with ${exp.duplicateMatchLabel}` : exp.duplicateMatchRef ? ` with item ${exp.duplicateMatchRef}` : ''}</span>}
+                        {exp.isPotentialDuplicate && <span className="bg-red-100 text-red-600 text-xs px-2 py-0.5 rounded font-semibold">⚠️ Duplicate with {exp.duplicateMatchLabel || (exp.duplicateMatchRef ? `item ${exp.duplicateMatchRef}` : 'another expense')}?</span>}
                         {isOld && <span className="bg-red-100 text-red-600 text-xs px-2 py-0.5 rounded font-semibold">🚨 &gt;2 Months</span>}
                         {isApproaching && <span className="bg-amber-100 text-amber-700 text-xs px-2 py-0.5 rounded">⏰ {daysLeft}d left</span>}
                       </div>
@@ -2674,16 +2691,15 @@ export default function BerkeleyExpenseSystem() {
                     </div>
                   )}
                   
-                  {/* Notes input (internal) */}
+                  {/* Notes input (internal audit trail) */}
                   <div className="flex gap-2 items-start mb-2">
                     <span className="text-xs font-semibold text-blue-600 whitespace-nowrap pt-2 w-20">📝 Notes:</span>
                     <input 
                       className="flex-1 p-2 border-2 border-blue-200 bg-blue-50 rounded-lg text-sm" 
-                      placeholder="Internal note (not visible to employee)..." 
+                      placeholder="Internal note for audit trail..." 
                       value={notes[idx] || ''} 
                       onChange={e => setNotes(prev => ({ ...prev, [idx]: e.target.value }))} 
                     />
-                    <button onClick={() => setNotes(prev => ({ ...prev, [idx]: '✓ Reviewed' }))} className="px-2 py-1 bg-green-100 text-green-700 text-xs font-semibold rounded hover:bg-green-200">✓</button>
                   </div>
                   
                   {/* Return reason input */}
@@ -2695,6 +2711,7 @@ export default function BerkeleyExpenseSystem() {
                       value={returnReasons[idx] || ''} 
                       onChange={e => setReturnReasons(prev => ({ ...prev, [idx]: e.target.value }))} 
                     />
+                    <button onClick={() => setReturnReasons(prev => ({ ...prev, [idx]: '✓ Addressed' }))} className="px-2 py-1 bg-green-100 text-green-700 text-xs font-semibold rounded hover:bg-green-200">✓</button>
                   </div>
                 </div>
               );
@@ -2882,14 +2899,14 @@ export default function BerkeleyExpenseSystem() {
                     <span className="font-semibold text-sm">{exp.merchant}</span>
                     <span className="text-xs text-slate-400">{formatShortDate(exp.date)}</span>
                     {isFlagged && <span className="bg-red-100 text-red-600 text-xs font-bold px-2 py-1 rounded animate-pulse">⚠️ Needs Attention</span>}
-                    {exp.isPotentialDuplicate && <span className="bg-orange-100 text-orange-700 text-xs font-bold px-2 py-1 rounded">⚠️ Duplicate{exp.duplicateMatchLabel ? ` with ${exp.duplicateMatchLabel}` : exp.duplicateMatchRef ? ` with item ${exp.duplicateMatchRef}` : ''}</span>}
+                    {exp.isPotentialDuplicate && <span className="bg-orange-100 text-orange-700 text-xs font-bold px-2 py-1 rounded">⚠️ Duplicate with {exp.duplicateMatchLabel || (exp.duplicateMatchRef ? `item ${exp.duplicateMatchRef}` : 'another expense')}?</span>}
                     {isOld && <span className="bg-red-100 text-red-600 text-xs font-bold px-2 py-1 rounded animate-pulse">🚨 &gt;2 Months</span>}
                     {isApproaching && <span className="bg-amber-100 text-amber-700 text-xs font-bold px-2 py-1 rounded">⏰ {daysLeft}d left</span>}
                     {exp.isForeignCurrency && <span className="text-amber-600 text-xs">💳</span>}
                     {[exp.receiptPreview2, exp.receiptPreview3, exp.receiptPreview4].some(Boolean) && <span className="text-slate-500 text-xs">📑{[exp.receiptPreview, exp.receiptPreview2, exp.receiptPreview3, exp.receiptPreview4].filter(Boolean).length}</span>}
                   </div>
                   <p className="text-xs text-slate-500 mt-1">{cat?.icon} {cat?.name} • {exp.description}</p>
-                  {exp.adminNotes && <div className="text-xs mt-1 bg-amber-50 border border-amber-200 px-2 py-1 rounded"><span className="font-semibold">📝 Notes:</span><div dangerouslySetInnerHTML={{ __html: formatAdminNotesReact(exp.adminNotes) }} /></div>}
+                  {exp.adminNotes && <div className="text-xs mt-1 bg-amber-50 border border-amber-200 px-2 py-1 rounded"><span className="font-semibold">📋 Review:</span><div dangerouslySetInnerHTML={{ __html: formatAdminNotesReact(exp.adminNotes) }} /></div>}
                   {exp.isForeignCurrency && exp.forexRate && <p className="text-xs text-amber-600 mt-0.5">💱 {exp.currency} → {userReimburseCurrency} @ {exp.forexRate.toFixed(4)}</p>}
                 </div>
                 <div className="flex items-center gap-2">
@@ -3632,7 +3649,7 @@ export default function BerkeleyExpenseSystem() {
             return (<div key={claim.id} onClick={() => setSelectedClaim(claim)} className={`flex items-center justify-between p-4 rounded-xl border cursor-pointer hover:border-blue-300 ${isResubmission ? 'bg-amber-50 border-amber-200' : 'bg-slate-50'}`}><div><div className="flex items-center gap-2 flex-wrap"><span className="font-semibold">{claim.user_name}</span><span className={`text-xs px-2 py-0.5 rounded-full ${claim.approval_level === 2 ? 'bg-blue-100 text-blue-700' : 'bg-amber-100 text-amber-700'}`}>L{claim.approval_level || 1}</span>{isResubmission && <span className="bg-orange-500 text-white text-xs px-2 py-0.5 rounded-full font-semibold">🔄 Resubmission</span>}</div><p className="text-sm text-slate-500">{claim.claim_number} • {claim.office}</p></div><span className="font-bold">{formatCurrency(claim.total_amount, claim.currency)}</span></div>);
           })}</div>)}
         </div>
-        {selectedClaim && (<div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50" onClick={() => setSelectedClaim(null)}><div className="bg-white rounded-2xl max-w-2xl w-full max-h-[90vh] overflow-auto" onClick={e => e.stopPropagation()}><div className="p-6 border-b flex justify-between"><div><div className="flex items-center gap-2"><h2 className="text-xl font-bold">{selectedClaim.user_name}</h2>{((selectedClaim.review_history && selectedClaim.review_history.length > 0) || selectedClaim.admin_comment) && <span className="bg-orange-500 text-white text-xs px-2 py-1 rounded-full font-semibold">🔄 Resubmission</span>}</div><p className="text-sm text-slate-500">{selectedClaim.claim_number} • Level {selectedClaim.approval_level || 1}</p></div><button onClick={() => setSelectedClaim(null)} className="text-2xl text-slate-400">×</button></div><div className="p-6"><button onClick={() => handleDownloadPDF(selectedClaim)} className="w-full bg-green-600 text-white py-3 rounded-xl font-semibold mb-4">📥 Download PDF</button>{[...(selectedClaim.expenses || [])].sort((a, b) => { const numA = parseInt(a.ref); const numB = parseInt(b.ref); if (!isNaN(numA) && !isNaN(numB)) return numA - numB; return (a.ref || '999').localeCompare(b.ref || '999', undefined, { numeric: true }); }).map((exp, i) => { const isOld = isOlderThan2Months(exp.date); const isApproaching = isApproaching2Months(exp.date); const daysLeft = getDaysUntil2Months(exp.date); const paxCount = parseInt(exp.numberOfPax) || 0; const isEntertaining = EXPENSE_CATEGORIES[exp.category]?.requiresAttendees; const perPaxAmount = isEntertaining && paxCount > 0 ? (parseFloat(exp.reimbursementAmount || exp.amount) / paxCount) : 0; return (<div key={i} className={`py-3 border-b ${isOld ? 'bg-red-50' : isApproaching ? 'bg-amber-50' : ''}`}><div className="flex justify-between items-start"><div className="flex-1"><div className="flex items-center gap-2 flex-wrap"><span className="bg-blue-100 text-blue-700 text-xs px-2 py-0.5 rounded font-bold">{exp.ref}</span><span className="font-semibold">{exp.merchant}</span>{exp.isPotentialDuplicate && <span className="bg-red-100 text-red-600 text-xs px-2 py-0.5 rounded">⚠️ Duplicate{exp.duplicateMatchLabel ? ' with ' + exp.duplicateMatchLabel : exp.duplicateMatchRef ? ' with item ' + exp.duplicateMatchRef : ''}</span>}{isOld && <span className="bg-red-100 text-red-600 text-xs px-2 py-0.5 rounded animate-pulse">🚨 &gt;2 Months</span>}{isApproaching && <span className="bg-amber-100 text-amber-700 text-xs px-2 py-0.5 rounded">⏰ {daysLeft}d left</span>}{paxCount > 0 && <span className="bg-purple-100 text-purple-600 text-xs px-2 py-0.5 rounded">👥 {paxCount} pax</span>}{isEntertaining && paxCount > 0 && <span className="bg-indigo-100 text-indigo-600 text-xs px-2 py-0.5 rounded">💰 {selectedClaim.currency} {perPaxAmount.toFixed(2)}/pax</span>}</div><p className="text-xs text-slate-500 mt-1">{exp.description}</p>{exp.isForeignCurrency && exp.forexRate && <p className="text-xs text-amber-600 mt-1">💱 Rate: 1 {exp.currency} = {exp.forexRate.toFixed(4)} {selectedClaim.currency}</p>}{exp.adminNotes && <div className="text-xs mt-1 bg-amber-50 px-2 py-1 rounded"><span className="font-semibold">📝 Notes:</span><div dangerouslySetInnerHTML={{ __html: formatAdminNotesReact(exp.adminNotes) }} /></div>}</div><span className="font-bold text-green-700 ml-2">{formatCurrency(exp.reimbursementAmount || exp.amount, selectedClaim.currency)}</span></div></div>); })}</div><div className="p-4 border-t bg-slate-50 space-y-3"><div className="flex gap-3"><button onClick={() => setEditingClaim(selectedClaim)} className="flex-[2] py-3 rounded-xl bg-blue-600 text-white font-semibold">📋 Review</button>{(selectedClaim.admin_comment || (selectedClaim.review_history && selectedClaim.review_history.length > 0)) && <button onClick={() => setShowPreviousReview(selectedClaim)} className="flex-1 py-3 rounded-xl bg-blue-100 text-blue-700 font-semibold border-2 border-blue-200">📋 History</button>}</div></div></div></div>)}
+        {selectedClaim && (<div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50" onClick={() => setSelectedClaim(null)}><div className="bg-white rounded-2xl max-w-2xl w-full max-h-[90vh] overflow-auto" onClick={e => e.stopPropagation()}><div className="p-6 border-b flex justify-between"><div><div className="flex items-center gap-2"><h2 className="text-xl font-bold">{selectedClaim.user_name}</h2>{((selectedClaim.review_history && selectedClaim.review_history.length > 0) || selectedClaim.admin_comment) && <span className="bg-orange-500 text-white text-xs px-2 py-1 rounded-full font-semibold">🔄 Resubmission</span>}</div><p className="text-sm text-slate-500">{selectedClaim.claim_number} • Level {selectedClaim.approval_level || 1}</p></div><button onClick={() => setSelectedClaim(null)} className="text-2xl text-slate-400">×</button></div><div className="p-6"><button onClick={() => handleDownloadPDF(selectedClaim)} className="w-full bg-green-600 text-white py-3 rounded-xl font-semibold mb-4">📥 Download PDF</button>{[...(selectedClaim.expenses || [])].sort((a, b) => { const numA = parseInt(a.ref); const numB = parseInt(b.ref); if (!isNaN(numA) && !isNaN(numB)) return numA - numB; return (a.ref || '999').localeCompare(b.ref || '999', undefined, { numeric: true }); }).map((exp, i) => { const isOld = isOlderThan2Months(exp.date); const isApproaching = isApproaching2Months(exp.date); const daysLeft = getDaysUntil2Months(exp.date); const paxCount = parseInt(exp.numberOfPax) || 0; const isEntertaining = EXPENSE_CATEGORIES[exp.category]?.requiresAttendees; const perPaxAmount = isEntertaining && paxCount > 0 ? (parseFloat(exp.reimbursementAmount || exp.amount) / paxCount) : 0; return (<div key={i} className={`py-3 border-b ${isOld ? 'bg-red-50' : isApproaching ? 'bg-amber-50' : ''}`}><div className="flex justify-between items-start"><div className="flex-1"><div className="flex items-center gap-2 flex-wrap"><span className="bg-blue-100 text-blue-700 text-xs px-2 py-0.5 rounded font-bold">{exp.ref}</span><span className="font-semibold">{exp.merchant}</span>{exp.isPotentialDuplicate && <span className="bg-red-100 text-red-600 text-xs px-2 py-0.5 rounded">⚠️ Duplicate with {exp.duplicateMatchLabel || (exp.duplicateMatchRef ? 'item ' + exp.duplicateMatchRef : 'another expense')}?</span>}{isOld && <span className="bg-red-100 text-red-600 text-xs px-2 py-0.5 rounded animate-pulse">🚨 &gt;2 Months</span>}{isApproaching && <span className="bg-amber-100 text-amber-700 text-xs px-2 py-0.5 rounded">⏰ {daysLeft}d left</span>}{paxCount > 0 && <span className="bg-purple-100 text-purple-600 text-xs px-2 py-0.5 rounded">👥 {paxCount} pax</span>}{isEntertaining && paxCount > 0 && <span className="bg-indigo-100 text-indigo-600 text-xs px-2 py-0.5 rounded">💰 {selectedClaim.currency} {perPaxAmount.toFixed(2)}/pax</span>}</div><p className="text-xs text-slate-500 mt-1">{exp.description}</p>{exp.isForeignCurrency && exp.forexRate && <p className="text-xs text-amber-600 mt-1">💱 Rate: 1 {exp.currency} = {exp.forexRate.toFixed(4)} {selectedClaim.currency}</p>}{exp.adminNotes && <div className="text-xs mt-1 bg-amber-50 px-2 py-1 rounded"><span className="font-semibold">📋 Review:</span><div dangerouslySetInnerHTML={{ __html: formatAdminNotesReact(exp.adminNotes) }} /></div>}</div><span className="font-bold text-green-700 ml-2">{formatCurrency(exp.reimbursementAmount || exp.amount, selectedClaim.currency)}</span></div></div>); })}</div><div className="p-4 border-t bg-slate-50 space-y-3"><div className="flex gap-3"><button onClick={() => setEditingClaim(selectedClaim)} className="flex-[2] py-3 rounded-xl bg-blue-600 text-white font-semibold">📋 Review</button>{(selectedClaim.admin_comment || (selectedClaim.review_history && selectedClaim.review_history.length > 0)) && <button onClick={() => setShowPreviousReview(selectedClaim)} className="flex-1 py-3 rounded-xl bg-blue-100 text-blue-700 font-semibold border-2 border-blue-200">📋 History</button>}</div></div></div></div>)}
         {/* Previous Review Popup */}
         {/* Previous Review History Popup */}
         {showPreviousReview && (<div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50" onClick={() => setShowPreviousReview(null)}><div className="bg-white rounded-2xl max-w-md w-full max-h-[80vh] overflow-auto p-6" onClick={e => e.stopPropagation()}><div className="flex justify-between items-center mb-4"><h3 className="font-bold text-lg">📋 Review History</h3><button onClick={() => setShowPreviousReview(null)} className="text-2xl text-slate-400">×</button></div>
