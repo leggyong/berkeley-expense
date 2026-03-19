@@ -483,9 +483,9 @@ const isStorageUrl = (str) => {
 };
 
 const APPROVAL_WORKFLOWS = {
-  'BEJ': { level1: 102, level2: 302, level1Name: 'Caroline Zhu', level2Name: 'Eddy Tao' },
-  'SHE': { level1: 102, level2: 302, level1Name: 'Caroline Zhu', level2Name: 'Eddy Tao' },
-  'SHA': { level1: 306, level2: 302, level1Name: 'Cathy Liu', level2Name: 'Eddy Tao' },
+  'BEJ': { level1: 102, level2: 103, level1Name: 'Caroline Zhu', level2Name: 'Even Huang' },
+  'SHE': { level1: 102, level2: 401, level1Name: 'Caroline Zhu', level2Name: 'Ryan Lee' },
+  'SHA': { level1: 306, level2: 303, level1Name: 'Cathy Liu', level2Name: 'Elsa Huang' },
   'CHE': { level1: 306, level2: 302, level1Name: 'Cathy Liu', level2Name: 'Eddy Tao' },
   'SIN': { level1: 805, level2: 803, level1Name: 'Ann Low', level2Name: 'Karen Chia' },
   'BKK': { level1: 905, level2: 803, level1Name: 'Bow', level2Name: 'Karen Chia' },
@@ -496,41 +496,51 @@ const APPROVAL_WORKFLOWS = {
 };
 
 const SPECIAL_REVIEWERS = {
-  // HKG exceptions
-  503: { finalReviewer: 806, finalReviewerName: 'Praba' },         // Suki Fong -> Praba
-  504: { finalReviewer: 811, finalReviewerName: 'Ng Ziyao' },      // Ron -> Zi Yao
-  // SIN exceptions
-  806: { finalReviewer: 801, finalReviewerName: 'John Yan' },      // Praba -> John
-  810: { finalReviewer: 806, finalReviewerName: 'Praba' },         // Fiolita -> Praba
-  811: { finalReviewer: 808, finalReviewerName: 'Ong Yongle' },    // Zi Yao -> Yongle
-  813: { finalReviewer: 811, finalReviewerName: 'Ng Ziyao' },      // Danny -> Zi Yao
-  815: { finalReviewer: 804, finalReviewerName: 'Cathy He' },      // Jeslyn -> Cathy
-  817: { finalReviewer: 811, finalReviewerName: 'Ng Ziyao' },      // Ruo Fan -> Zi Yao
-  818: { finalReviewer: 806, finalReviewerName: 'Praba' },         // May -> Praba
-  // BKK exceptions
-  904: { finalReviewer: 806, finalReviewerName: 'Praba' },         // Nora -> Praba
-  // DXB exceptions
-  1004: { finalReviewer: 801, finalReviewerName: 'John Yan' },     // Leila -> John
-  1007: { finalReviewer: 801, finalReviewerName: 'John Yan' },     // Olivia -> John
+  // BEJ: Even can't approve himself
+  103: { finalReviewer: 302, finalReviewerName: 'Eddy Tao' },
+  // CHE: Icey/Dora → Suki instead of Eddy
+  202: { finalReviewer: 201, finalReviewerName: 'Suki Li' },
+  203: { finalReviewer: 201, finalReviewerName: 'Suki Li' },
+  // SHA: Johnnie → Eddy, Echo → Johnnie
+  305: { finalReviewer: 302, finalReviewerName: 'Eddy Tao' },
+  308: { finalReviewer: 305, finalReviewerName: 'Johnnie Huang' },
+  // SHE: Ryan → Eddy (can't approve himself)
+  401: { finalReviewer: 302, finalReviewerName: 'Eddy Tao' },
+  // HKG
+  503: { finalReviewer: 806, finalReviewerName: 'Praba' },
+  504: { finalReviewer: 811, finalReviewerName: 'Ng Ziyao' },
+  // SIN
+  806: { finalReviewer: 801, finalReviewerName: 'John Yan' },
+  810: { finalReviewer: 806, finalReviewerName: 'Praba' },
+  811: { finalReviewer: 808, finalReviewerName: 'Ong Yongle' },
+  813: { finalReviewer: 811, finalReviewerName: 'Ng Ziyao' },
+  817: { finalReviewer: 811, finalReviewerName: 'Ng Ziyao' },
+  818: { finalReviewer: 806, finalReviewerName: 'Praba' },
+  // BKK
+  904: { finalReviewer: 806, finalReviewerName: 'Praba' },
 };
 
 const SENIOR_STAFF_ROUTING = {
-  // Managers -> Admin -> Cathy He
-  302: { level1: 306, level2: 804, level1Name: 'Cathy Liu', level2Name: 'Cathy He' },          // Eddy
-  502: { level1: 505, level2: 804, level1Name: 'Cherry Lai', level2Name: 'Cathy He' },         // Anthony
-  801: { level1: 805, level2: 804, level1Name: 'Ann Low', level2Name: 'Cathy He' },            // John
-  803: { level1: 805, level2: 804, level1Name: 'Ann Low', level2Name: 'Cathy He' },            // Karen
-  808: { level1: 805, level2: 804, level1Name: 'Ann Low', level2Name: 'Cathy He' },            // Yongle
-  1001: { level1: 1002, level2: 804, level1Name: 'Christine Dimaranan', level2Name: 'Cathy He' }, // Christopher
-  // Admins -> their manager (single level)
-  102: { level1: 302, level2: null, level1Name: 'Eddy Tao', level2Name: null, singleLevel: true },        // Caroline
-  306: { level1: 302, level2: null, level1Name: 'Eddy Tao', level2Name: null, singleLevel: true },        // Cathy Liu
-  505: { level1: 502, level2: null, level1Name: 'Anthony Jurenko', level2Name: null, singleLevel: true }, // Cherry
-  805: { level1: 803, level2: null, level1Name: 'Karen Chia', level2Name: null, singleLevel: true },      // Ann
-  905: { level1: 803, level2: null, level1Name: 'Karen Chia', level2Name: null, singleLevel: true },      // Bow
-  1002: { level1: 1001, level2: null, level1Name: 'Christopher Frame', level2Name: null, singleLevel: true }, // Christine
-  812: { level1: 804, level2: null, level1Name: 'Cathy He', level2Name: null, singleLevel: true },        // Kareen
-  // Cathy He -> Kareen -> Paul (external)
+  // Managers → Kareen → Cathy He
+  302: { level1: 812, level2: 804, level1Name: 'Kareen Ng', level2Name: 'Cathy He' },
+  502: { level1: 812, level2: 804, level1Name: 'Kareen Ng', level2Name: 'Cathy He' },
+  1001: { level1: 812, level2: 804, level1Name: 'Kareen Ng', level2Name: 'Cathy He' },
+  // Jeslyn → Kareen → Cathy He
+  815: { level1: 812, level2: 804, level1Name: 'Kareen Ng', level2Name: 'Cathy He' },
+  // Other managers → Ann → Cathy He
+  801: { level1: 805, level2: 804, level1Name: 'Ann Low', level2Name: 'Cathy He' },
+  803: { level1: 805, level2: 804, level1Name: 'Ann Low', level2Name: 'Cathy He' },
+  808: { level1: 805, level2: 804, level1Name: 'Ann Low', level2Name: 'Cathy He' },
+  // Admins → their approver (single level)
+  102: { level1: 103, level2: null, level1Name: 'Even Huang', level2Name: null, singleLevel: true },
+  306: { level1: 303, level2: null, level1Name: 'Elsa Huang', level2Name: null, singleLevel: true },
+  505: { level1: 502, level2: null, level1Name: 'Anthony Jurenko', level2Name: null, singleLevel: true },
+  805: { level1: 803, level2: null, level1Name: 'Karen Chia', level2Name: null, singleLevel: true },
+  905: { level1: 803, level2: null, level1Name: 'Karen Chia', level2Name: null, singleLevel: true },
+  1002: { level1: 1001, level2: null, level1Name: 'Christopher Frame', level2Name: null, singleLevel: true },
+  // Kareen → Cathy He (single level)
+  812: { level1: 804, level2: null, level1Name: 'Cathy He', level2Name: null, singleLevel: true },
+  // Cathy He → Kareen → Paul (external)
   804: { level1: 812, level2: null, level1Name: 'Kareen Ng', level2Name: null, singleLevel: true, externalApproval: 'Paul' },
 };
 
@@ -1484,14 +1494,14 @@ export default function BerkeleyExpenseSystem() {
         
         // Mileage route info for category H
         const mileageInfo = exp.category === 'H' && exp.mileageDistance 
-          ? '<div style="background:#e8f5e9;padding:2px 6px;border-radius:3px;margin-top:2px;">📍 <strong>' + (exp.mileageFrom || '') + ' → ' + (exp.mileageTo || '') + '</strong> | ' + exp.mileageDistance + ' ' + (exp.mileageUnit || 'km') + 's @ ' + reimburseCurrency + ' ' + (exp.mileageRate ? exp.mileageRate.toFixed(2) : fmtAmt(claimAmt / parseFloat(exp.mileageDistance))) + '/' + (exp.mileageUnit || 'km') + '</div>'
+          ? '<br>' + (exp.mileageFrom || '') + ' → ' + (exp.mileageTo || '') + ' | ' + exp.mileageDistance + ' ' + (exp.mileageUnit || 'km') + 's @ ' + reimburseCurrency + ' ' + (exp.mileageRate ? exp.mileageRate.toFixed(2) : fmtAmt(claimAmt / parseFloat(exp.mileageDistance))) + '/' + (exp.mileageUnit || 'km')
           : '';
         
         return '<tr>' +
           '<td style="text-align:center;">' + exp.seqRef + '</td>' +
           '<td style="text-align:center;">' + formatDDMMYYYY(new Date(exp.date)) + '</td>' +
           '<td>' + cat.name + '</td>' +
-          '<td>' + (exp.description || '') + mileageInfo + (warnings.length > 0 ? '<br>' + warnings.join('<br>') : '') + '</td>' +
+          '<td>' + (exp.category === 'H' && mileageInfo ? mileageInfo.replace(/^<br>/, '') : (exp.description || '')) + (exp.category !== 'H' && mileageInfo ? mileageInfo : '') + (warnings.length > 0 ? '<br>' + warnings.join('<br>') : '') + '</td>' +
           '<td style="text-align:right;">' + originalCurrency + ' ' + fmtAmt(originalAmt) + '</td>' +
           '<td style="text-align:right;">' + fmtAmt(claimAmt) + '</td>' +
           '<td style="text-align:right;">' + fxRate + '</td>' +
@@ -3730,6 +3740,44 @@ export default function BerkeleyExpenseSystem() {
           )}
         </div>
         <button onClick={() => setShowPreviousReview(null)} className="w-full mt-4 bg-slate-100 text-slate-700 py-2 rounded-lg font-semibold">Close</button></div></div>)}
+        
+        {/* Approved Claims Archive - for admins */}
+        {(currentUser.role === 'admin' || currentUser.role === 'manager' || currentUser.role === 'finance') && (() => {
+          const approvedClaims = claims.filter(c => 
+            (c.status === 'approved' || c.status === 'submitted_to_finance') && 
+            c.office_code === currentUser.office
+          ).sort((a, b) => new Date(b.level2_approved_at || b.submitted_at || 0) - new Date(a.level2_approved_at || a.submitted_at || 0));
+          
+          return (
+            <div className="bg-white rounded-2xl shadow-lg p-6 mt-4">
+              <h3 className="font-bold mb-4">📁 Approved Claims ({approvedClaims.length})</h3>
+              {approvedClaims.length === 0 ? (
+                <p className="text-center text-slate-400 py-4">No approved claims yet</p>
+              ) : (
+                <div className="space-y-2 max-h-[400px] overflow-y-auto">
+                  {approvedClaims.map(claim => (
+                    <div key={claim.id} className="flex items-center justify-between p-3 rounded-xl bg-green-50 border border-green-200">
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="font-semibold text-sm">{claim.user_name}</span>
+                          <span className="bg-green-100 text-green-700 text-xs px-2 py-0.5 rounded-full">{claim.claim_number}</span>
+                        </div>
+                        <p className="text-xs text-slate-500 mt-0.5">
+                          {claim.level2_approved_at ? formatShortDate(claim.level2_approved_at) : formatShortDate(claim.submitted_at)} • {claim.item_count || '?'} items
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-2 flex-shrink-0">
+                        <span className="font-bold text-green-700">{formatCurrency(claim.total_amount, claim.currency)}</span>
+                        <button onClick={() => handleDownloadPDF(claim)} className="bg-green-100 text-green-700 px-3 py-2 rounded-lg text-sm">📥</button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          );
+        })()}
+        
         {editingClaim && <ReviewModal claim={editingClaim} onClose={() => { setEditingClaim(null); loadClaims(); }} />}
       </div>
     );
@@ -3787,7 +3835,7 @@ export default function BerkeleyExpenseSystem() {
           
           const handleSave = async () => {
             setSaving(true);
-            const description = `${from.trim()} → ${to.trim()} = ${distance} ${unit}s`;
+            const description = `Business Mileage Claim`;
             const newExpense = {
               id: Date.now(), ref: 'temp', merchant: `Mileage: ${from.trim()} → ${to.trim()}`,
               amount: parseFloat(amount), currency, reimbursementAmount: parseFloat(amount),
