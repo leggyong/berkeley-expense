@@ -1062,6 +1062,7 @@ export default function BerkeleyExpenseSystem() {
   const [savingStatus, setSavingStatus] = useState(null); // 'saving', 'saved', null
   const [downloading, setDownloading] = useState(false);
   const [showAddExpense, setShowAddExpense] = useState(false);
+  const [showMileageModal, setShowMileageModal] = useState(false);
   const [showPreview, setShowPreview] = useState(false);
   const [editingReturnedClaimId, setEditingReturnedClaimId] = useState(null); // Track which returned claim we're editing
   const [activeClaimTab, setActiveClaimTab] = useState('current'); // 'current' or claim.id — lifted to parent
@@ -1481,11 +1482,16 @@ export default function BerkeleyExpenseSystem() {
         // Add per pax info BEFORE comments if applicable
         if (pax > 0) warnings.unshift('<span style="color:#7c3aed;">' + pax + ' pax: ' + reimburseCurrency + ' ' + fmtAmt(perPax) + ' (£' + fmtAmt(perPaxGBP) + ')/pax</span>');
         
+        // Mileage route info for category H
+        const mileageInfo = exp.category === 'H' && exp.mileageDistance 
+          ? '<div style="background:#e8f5e9;padding:2px 6px;border-radius:3px;margin-top:2px;">📍 <strong>' + (exp.mileageFrom || '') + ' → ' + (exp.mileageTo || '') + '</strong> | ' + exp.mileageDistance + ' ' + (exp.mileageUnit || 'km') + 's @ ' + reimburseCurrency + ' ' + (exp.mileageRate ? exp.mileageRate.toFixed(2) : fmtAmt(claimAmt / parseFloat(exp.mileageDistance))) + '/' + (exp.mileageUnit || 'km') + '</div>'
+          : '';
+        
         return '<tr>' +
           '<td style="text-align:center;">' + exp.seqRef + '</td>' +
           '<td style="text-align:center;">' + formatDDMMYYYY(new Date(exp.date)) + '</td>' +
           '<td>' + cat.name + '</td>' +
-          '<td>' + (exp.description || '') + (warnings.length > 0 ? '<br>' + warnings.join('<br>') : '') + '</td>' +
+          '<td>' + (exp.description || '') + mileageInfo + (warnings.length > 0 ? '<br>' + warnings.join('<br>') : '') + '</td>' +
           '<td style="text-align:right;">' + originalCurrency + ' ' + fmtAmt(originalAmt) + '</td>' +
           '<td style="text-align:right;">' + fmtAmt(claimAmt) + '</td>' +
           '<td style="text-align:right;">' + fxRate + '</td>' +
@@ -1513,7 +1519,7 @@ export default function BerkeleyExpenseSystem() {
     const statementsArray = Array.isArray(statementImgs) ? statementImgs : (statementImgs ? [statementImgs] : []);
 
     // Receipt pages - with matched statement shown beside receipt for foreign currency expenses
-    const receiptsHTML = expensesWithRefs.map(exp => {
+    const receiptsHTML = expensesWithRefs.filter(exp => exp.category !== 'H').map(exp => {
       const cat = EXPENSE_CATEGORIES[exp.category] || { name: 'Unknown' };
       const pax = parseInt(exp.numberOfPax) || 0;
       const claimAmt = parseFloat(exp.reimbursementAmount || exp.amount);
@@ -2449,7 +2455,6 @@ export default function BerkeleyExpenseSystem() {
                     <p><strong>🅿️ Parking & Tolls:</strong> Business-related parking fees</p>
                     <p><strong>📋 Visas & Tourist Fees:</strong> Work travel permits only</p>
                     <p><strong>🚗 Car Hire & Petrol:</strong> Business trips - Include mileage/route</p>
-                    <p><strong>📍 Business Mileage:</strong> Personal car for business - £0.45/mile first 10k</p>
                     <p><strong>🍽️ Meals Self:</strong> When travelling for work</p>
                     <p><strong>👥 Meals with Berkeley:</strong> Internal team meals - List all attendees</p>
                     <p><strong>🍷 Meals with Non-Berkeley:</strong> Client entertainment - List all attendees & companies</p>
@@ -2464,7 +2469,7 @@ export default function BerkeleyExpenseSystem() {
                   <input type="date" className="p-3 border-2 border-slate-200 rounded-xl" value={formData.date} onChange={e => setFormData(prev => ({ ...prev, date: e.target.value }))} />
                   <select className="p-3 border-2 border-slate-200 rounded-xl bg-white text-sm" value={formData.category} onChange={e => setFormData(prev => ({ ...prev, category: e.target.value }))}>
                     <optgroup label="Travel">
-                      {Object.entries(EXPENSE_CATEGORIES).filter(([k,v]) => v.group === 'TRAVEL').map(([key, val]) => <option key={key} value={key}>{val.icon} {val.name}</option>)}
+                      {Object.entries(EXPENSE_CATEGORIES).filter(([k,v]) => v.group === 'TRAVEL' && k !== 'H').map(([key, val]) => <option key={key} value={key}>{val.icon} {val.name}</option>)}
                     </optgroup>
                     <optgroup label="Subsistence & Welfare">
                       {Object.entries(EXPENSE_CATEGORIES).filter(([k,v]) => v.group === 'SUBSISTENCE').map(([key, val]) => <option key={key} value={key}>{val.icon} {val.name}</option>)}
@@ -2486,31 +2491,6 @@ export default function BerkeleyExpenseSystem() {
                     </optgroup>
                   </select>
                 </div>
-                {/* Mileage Calculator for Category H */}
-                {formData.category === 'H' && currentUser.mileageRate && (
-                  <div className="bg-green-50 border-2 border-green-300 rounded-xl p-4">
-                    <p className="text-sm font-bold text-green-800 mb-2">📍 Mileage Calculator</p>
-                    <p className="text-xs text-green-600 mb-2">Rate: {currentUser.reimburseCurrency} {currentUser.mileageRate.toFixed(2)} per {currentUser.mileageUnit}</p>
-                    <div className="flex gap-3 items-center">
-                      <input type="number" step="0.1" className="flex-1 p-3 border-2 border-green-300 rounded-xl bg-white" 
-                        placeholder={`Total ${currentUser.mileageUnit}s`}
-                        value={formData.mileageDistance || ''}
-                        onChange={e => {
-                          const dist = e.target.value;
-                          const calc = dist ? (parseFloat(dist) * currentUser.mileageRate).toFixed(2) : '';
-                          setFormData(prev => ({ ...prev, mileageDistance: dist, amount: calc, currency: currentUser.reimburseCurrency }));
-                        }}
-                      />
-                      <span className="text-green-700 font-bold whitespace-nowrap">{currentUser.mileageUnit}s</span>
-                    </div>
-                    {formData.mileageDistance && (
-                      <div className="mt-2 p-2 bg-white rounded-lg border border-green-200 text-sm">
-                        <span className="text-slate-600">{formData.mileageDistance} {currentUser.mileageUnit}s × {currentUser.mileageRate.toFixed(2)} = </span>
-                        <span className="font-bold text-green-700">{currentUser.reimburseCurrency} {(parseFloat(formData.mileageDistance) * currentUser.mileageRate).toFixed(2)}</span>
-                      </div>
-                    )}
-                  </div>
-                )}
                 <textarea className="w-full p-3 border-2 border-slate-200 rounded-xl resize-none" rows="2" placeholder={EXPENSE_CATEGORIES[formData.category]?.example || 'Description *'} value={formData.description} onChange={e => setFormData(prev => ({ ...prev, description: e.target.value }))} />
                 {needsAttendees && (
                   <div className="space-y-3">
@@ -2719,7 +2699,7 @@ export default function BerkeleyExpenseSystem() {
                     {isDiffCurrency && exp.forexRate && <div><span className="font-semibold text-slate-500">FX Rate:</span> 1 {exp.currency} = {exp.forexRate.toFixed(4)} {claim.currency}</div>}
                     {paxCount > 0 && <div><span className="font-semibold text-slate-500">Pax:</span> 👥 {paxCount}{isEntertaining && perPax > 0 && <span> • 💰 {claim.currency} {perPax.toFixed(2)}/pax</span>}</div>}
                     {exp.attendees && <div><span className="font-semibold text-slate-500">Attendees:</span> {exp.attendees.replace(/\n/g, ', ')}</div>}
-                    {exp.mileageDistance && <div><span className="font-semibold text-slate-500">Mileage:</span> {exp.mileageDistance} {EMPLOYEES.find(e => e.id === claim.user_id)?.mileageUnit || 'km'}</div>}
+                    {exp.mileageDistance && <div><span className="font-semibold text-slate-500">Mileage:</span> {exp.mileageFrom && <span>{exp.mileageFrom} → {exp.mileageTo} | </span>}{exp.mileageDistance} {exp.mileageUnit || 'km'}s</div>}
                   </div>
                   
                   {/* Previous notes and return reasons - shown separately */}
@@ -2935,7 +2915,7 @@ export default function BerkeleyExpenseSystem() {
         )}
         
         <div className="grid grid-cols-2 gap-4"><div className="bg-white rounded-2xl shadow-lg p-6 text-center"><div className="text-4xl font-bold text-slate-800">{sortedExpenses.length}</div><div className="text-sm text-slate-500">{activeClaimTab === 'current' ? 'Pending' : 'In Claim'}</div></div><div className="bg-white rounded-2xl shadow-lg p-6 text-center"><div className="text-2xl font-bold text-green-600">{formatCurrency(reimbursementTotal, userReimburseCurrency)}</div><div className="text-sm text-slate-500">To Reimburse</div></div></div>
-        <div className="bg-white rounded-2xl shadow-lg p-6"><div className="flex flex-wrap gap-3"><button onClick={() => setShowAddExpense(true)} className="bg-blue-600 text-white px-6 py-3 rounded-xl font-semibold shadow-lg">📸 Add Receipt</button>{pendingExpenses.length > 0 && (<button onClick={() => setShowPreview(true)} className="border-2 border-green-500 text-green-600 px-6 py-3 rounded-xl font-semibold">📋 Preview ({pendingExpenses.length})</button>)}{activeClaimTab === 'current' && <button onClick={handleManualSync} disabled={loading} className="border-2 border-slate-300 text-slate-600 px-4 py-3 rounded-xl font-semibold">{loading ? '⏳' : '🔄'} Sync</button>}</div></div>
+        <div className="bg-white rounded-2xl shadow-lg p-6"><div className="flex flex-wrap gap-3"><button onClick={() => setShowAddExpense(true)} className="bg-blue-600 text-white px-6 py-3 rounded-xl font-semibold shadow-lg">📸 Add Receipt</button>{currentUser.mileageRate && <button onClick={() => setShowMileageModal(true)} className="bg-green-600 text-white px-6 py-3 rounded-xl font-semibold shadow-lg">📍 Mileage</button>}{pendingExpenses.length > 0 && (<button onClick={() => setShowPreview(true)} className="border-2 border-green-500 text-green-600 px-6 py-3 rounded-xl font-semibold">📋 Preview ({pendingExpenses.length})</button>)}{activeClaimTab === 'current' && <button onClick={handleManualSync} disabled={loading} className="border-2 border-slate-300 text-slate-600 px-4 py-3 rounded-xl font-semibold">{loading ? '⏳' : '🔄'} Sync</button>}</div></div>
         <div className="bg-white rounded-2xl shadow-lg p-6">
           <h3 className="font-bold text-slate-800 mb-4">{activeClaimTab === 'current' ? '📋 Pending Expenses (sorted by date)' : `📋 ${activeReturnedClaim?.claim_number} Expenses`}</h3>
           {sortedExpenses.some(exp => isOlderThan2Months(exp.date)) && (
@@ -3792,6 +3772,67 @@ export default function BerkeleyExpenseSystem() {
       {canReview && (<div className="bg-white border-b sticky top-14 z-30"><div className="max-w-3xl mx-auto flex"><button onClick={() => setActiveTab('my_expenses')} className={`flex-1 py-3 text-sm font-semibold border-b-2 ${activeTab === 'my_expenses' ? 'border-blue-600 text-blue-600' : 'border-transparent text-slate-500'}`}>📋 My Expenses</button><button onClick={() => setActiveTab('review')} className={`flex-1 py-3 text-sm font-semibold border-b-2 ${activeTab === 'review' ? 'border-blue-600 text-blue-600' : 'border-transparent text-slate-500'}`}>👀 Review{getReviewableClaims().length > 0 && <span className="ml-2 bg-amber-500 text-white text-xs px-2 py-0.5 rounded-full">{getReviewableClaims().length}</span>}</button>{currentUser?.role === 'group_finance' && <button onClick={() => setActiveTab('finance')} className={`flex-1 py-3 text-sm font-semibold border-b-2 ${activeTab === 'finance' ? 'border-purple-600 text-purple-600' : 'border-transparent text-slate-500'}`}>📊 Finance</button>}</div></div>)}
       <main className="max-w-3xl mx-auto p-4 pb-20">{activeTab === 'finance' && currentUser?.role === 'group_finance' ? <FinanceDashboard /> : canReview && activeTab === 'review' ? <ReviewClaimsTab /> : <MyExpensesTab />}</main>
       {(showAddExpense || editingExpense) && <AddExpenseModal editExpense={editingExpense} existingClaims={claims} expenses={expenses} onClose={() => { setShowAddExpense(false); setEditingExpense(null); }} />}
+      {showMileageModal && currentUser.mileageRate && (() => {
+        const MileageModalInner = () => {
+          const [from, setFrom] = useState('');
+          const [to, setTo] = useState('');
+          const [distance, setDistance] = useState('');
+          const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
+          const [saving, setSaving] = useState(false);
+          const unit = currentUser.mileageUnit || 'km';
+          const rate = currentUser.mileageRate;
+          const currency = currentUser.reimburseCurrency || getUserReimburseCurrency(currentUser);
+          const amount = distance ? (parseFloat(distance) * rate).toFixed(2) : '';
+          const canSave = from.trim() && to.trim() && distance && date;
+          
+          const handleSave = async () => {
+            setSaving(true);
+            const description = `${from.trim()} → ${to.trim()} = ${distance} ${unit}s`;
+            const newExpense = {
+              id: Date.now(), ref: 'temp', merchant: `Mileage: ${from.trim()} → ${to.trim()}`,
+              amount: parseFloat(amount), currency, reimbursementAmount: parseFloat(amount),
+              date, category: 'H', description,
+              mileageDistance: distance, mileageFrom: from.trim(), mileageTo: to.trim(), mileageUnit: unit, mileageRate: rate,
+              receiptPreview: null, receiptPreview2: null, receiptPreview3: null, receiptPreview4: null,
+              status: 'draft', isForeignCurrency: false, createdAt: new Date().toISOString()
+            };
+            const newExpenses = sortAndReassignRefs([...expenses, newExpense]);
+            const processed = markDuplicatePairs(newExpenses);
+            setExpenses(processed);
+            await saveToServer(processed, annotatedStatements, statementAnnotations, originalStatementImages);
+            setSaving(false);
+            setShowMileageModal(false);
+          };
+          
+          return (
+            <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+              <div className="bg-white rounded-2xl max-w-md w-full shadow-2xl overflow-hidden">
+                <div className="bg-gradient-to-r from-green-600 to-emerald-600 text-white p-5 flex justify-between items-center">
+                  <div><h2 className="text-lg font-bold">📍 Business Mileage</h2><p className="text-green-100 text-sm">{currency} {rate.toFixed(2)} per {unit}</p></div>
+                  <button onClick={() => setShowMileageModal(false)} className="w-8 h-8 rounded-full bg-white/20">✕</button>
+                </div>
+                <div className="p-6 space-y-4">
+                  <div><label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Date *</label><input type="date" className="w-full p-3 border-2 border-slate-200 rounded-xl" value={date} onChange={e => setDate(e.target.value)} /></div>
+                  <div><label className="block text-xs font-semibold text-slate-500 uppercase mb-1">From *</label><input type="text" className="w-full p-3 border-2 border-slate-200 rounded-xl" placeholder="e.g. Home TW18 4AB" value={from} onChange={e => setFrom(e.target.value)} /></div>
+                  <div><label className="block text-xs font-semibold text-slate-500 uppercase mb-1">To *</label><input type="text" className="w-full p-3 border-2 border-slate-200 rounded-xl" placeholder="e.g. Guildford site GU1 4AF" value={to} onChange={e => setTo(e.target.value)} /></div>
+                  <div><label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Distance ({unit}s) *</label><input type="number" step="0.1" className="w-full p-3 border-2 border-green-300 rounded-xl bg-green-50" placeholder={`Total ${unit}s`} value={distance} onChange={e => setDistance(e.target.value)} /></div>
+                  {amount && (
+                    <div className="bg-green-50 border-2 border-green-300 rounded-xl p-4 text-center">
+                      <p className="text-sm text-slate-600">{distance} {unit}s × {rate.toFixed(2)} =</p>
+                      <p className="text-2xl font-bold text-green-700">{currency} {amount}</p>
+                    </div>
+                  )}
+                </div>
+                <div className="p-4 border-t flex gap-3">
+                  <button onClick={() => setShowMileageModal(false)} className="flex-1 py-3 rounded-xl border-2 font-semibold">Cancel</button>
+                  <button onClick={handleSave} disabled={!canSave || saving} className={`flex-[2] py-3 rounded-xl font-semibold ${canSave && !saving ? 'bg-green-600 text-white' : 'bg-slate-300 text-slate-500'}`}>{saving ? '⏳...' : '💾 Save'}</button>
+                </div>
+              </div>
+            </div>
+          );
+        };
+        return <MileageModalInner />;
+      })()}
       {showPreview && <PreviewClaimModal />}
       {showStatementUpload && (
         <StatementUploadModal 
