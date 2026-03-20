@@ -1577,7 +1577,7 @@ export default function BerkeleyExpenseSystem() {
       }
       const stmtContent = matchStmtImg ? '<div style="flex:1;max-width:48%;border-left:3px solid #ff9800;padding-left:8px;"><div style="background:#ff9800;color:white;padding:5px 10px;font-weight:bold;font-size:9px;margin-bottom:8px;border-radius:4px;">💳 Matched Statement ' + (matchStmtIdx + 1) + '</div><img src="' + matchStmtImg + '" style="max-width:100%;max-height:' + (160 - heightPenalty) + 'mm;object-fit:contain;border:1px solid #ddd;" /></div>' : '';
       const contentHTML = matchStmtImg ? '<div style="display:flex;gap:10px;align-items:flex-start;"><div style="flex:1;max-width:50%;">' + receiptContent + '</div>' + stmtContent + '</div>' : receiptContent;
-      return '<div class="page receipt-page"><div class="receipt-header"><div class="receipt-ref">' + exp.seqRef + '</div><div class="receipt-info"><strong>' + exp.merchant + '</strong> | ' + formatDDMMYYYY(new Date(exp.date)) + '<br>' + cat.name + ' | ' + exp.currency + ' ' + fmtAmt(exp.amount) + (exp.isForeignCurrency ? ' → ' + reimburseCurrency + ' ' + fmtAmt(exp.reimbursementAmount) : '') + '<br>' + (exp.description || '') + oldBadge + dupBadge + paxInfo + (exp.attendees ? '<br>' + exp.attendees.replace(/\n/g, ', ') : '') + (exp.adminNotes ? '<br><div style="background:#fff8e1;padding:2px 4px;border-radius:3px;">📝 ' + formatAdminNotesHTML(exp.adminNotes) + '</div>' : '') + backchargeHTML + '</div></div>' + contentHTML + '</div>';
+      return '<div class="page receipt-page"><div class="receipt-header"><div class="receipt-ref">' + exp.seqRef + '</div><div class="receipt-info"><strong>' + exp.merchant + '</strong> | ' + formatDDMMYYYY(new Date(exp.date)) + '<br>' + cat.name + ' | ' + exp.currency + ' ' + fmtAmt(exp.amount) + (exp.isForeignCurrency ? ' → ' + reimburseCurrency + ' ' + fmtAmt(exp.reimbursementAmount) : '') + (exp.isForeignCurrency && exp.forexRate ? '<br>FX Rate: 1 ' + exp.currency + ' = ' + exp.forexRate.toFixed(4) + ' ' + reimburseCurrency : '') + '<br>' + (exp.description || '') + oldBadge + dupBadge + paxInfo + (exp.attendees ? '<br>' + exp.attendees.replace(/\n/g, ', ') : '') + (exp.adminNotes ? '<br><div style="background:#fff8e1;padding:2px 4px;border-radius:3px;">📝 ' + formatAdminNotesHTML(exp.adminNotes) + '</div>' : '') + backchargeHTML + '</div></div>' + contentHTML + '</div>';
     }).join('');
 
     // Statement pages - only include if there are foreign currency expenses without inline matched statements
@@ -2599,6 +2599,8 @@ export default function BerkeleyExpenseSystem() {
     const [notes, setNotes] = useState({}); // idx -> note text (internal, persists in PDF)
     const [returnReasons, setReturnReasons] = useState({}); // idx -> return reason (triggers Return button)
     const [addressed, setAddressed] = useState({}); // idx -> true (marks previous return as addressed, stripped on final approval)
+    const [editingPrevNotes, setEditingPrevNotes] = useState({}); // idx -> true when editing previous notes
+    const [editedPrevNotes, setEditedPrevNotes] = useState({}); // idx -> edited adminNotes string
     const [saving, setSaving] = useState(false);
     const [showApproveConfirm, setShowApproveConfirm] = useState(false);
     const reviewerFirstName = currentUser.name.split(' ')[0];
@@ -2615,19 +2617,29 @@ export default function BerkeleyExpenseSystem() {
       return '✓ Final Approve';
     })();
     
+    // Helper: get base notes for an expense (use edited version if available, preserve return lines)
+    const getBaseNotes = (exp, idx) => {
+      if (editedPrevNotes[idx] === undefined) return exp.adminNotes || '';
+      // Reconstruct: keep original return lines + edited note lines
+      const allLines = (exp.adminNotes || '').split('\n').filter(l => l.trim());
+      const returnLines = allLines.filter(l => l.includes('[R]:') || l.includes('[RETURN]:'));
+      const editedNoteLines = editedPrevNotes[idx].split('\n').filter(l => l.trim());
+      return [...returnLines, ...editedNoteLines].join('\n');
+    };
+    
     const handleSaveAndApprove = async () => {
       setSaving(true);
-      // Save notes + addressed markers to expenses
       const updatedExpenses = sortedExpenses.map((exp, idx) => {
         const parts = [];
         const note = notes[idx]?.trim();
         if (note) parts.push(`${reviewerFirstName}: ${note}`);
         if (addressed[idx]) parts.push(`${reviewerFirstName} [R]: ✓ Addressed`);
+        const base = getBaseNotes(exp, idx);
         if (parts.length > 0) {
-          const existing = exp.adminNotes || '';
           const newNotes = parts.join('\n');
-          return { ...exp, adminNotes: existing ? `${existing}\n${newNotes}` : newNotes };
+          return { ...exp, adminNotes: base ? `${base}\n${newNotes}` : newNotes };
         }
+        if (editedPrevNotes[idx] !== undefined) return { ...exp, adminNotes: base };
         return exp;
       });
       await handleSaveAdminEdits(claim, updatedExpenses);
@@ -2638,7 +2650,6 @@ export default function BerkeleyExpenseSystem() {
     
     const handleSaveAndReturn = async () => {
       setSaving(true);
-      // Save notes, return reasons, and addressed markers to expenses
       const updatedExpenses = sortedExpenses.map((exp, idx) => {
         const parts = [];
         const note = notes[idx]?.trim();
@@ -2646,11 +2657,12 @@ export default function BerkeleyExpenseSystem() {
         if (note) parts.push(`${reviewerFirstName}: ${note}`);
         if (addressed[idx]) parts.push(`${reviewerFirstName} [R]: ✓ Addressed`);
         if (reason) parts.push(`${reviewerFirstName} [R]: ${reason}`);
+        const base = getBaseNotes(exp, idx);
         if (parts.length > 0) {
-          const existing = exp.adminNotes || '';
           const newNotes = parts.join('\n');
-          return { ...exp, adminNotes: existing ? `${existing}\n${newNotes}` : newNotes };
+          return { ...exp, adminNotes: base ? `${base}\n${newNotes}` : newNotes };
         }
+        if (editedPrevNotes[idx] !== undefined) return { ...exp, adminNotes: base };
         return exp;
       });
       await handleSaveAdminEdits(claim, updatedExpenses);
@@ -2745,8 +2757,31 @@ export default function BerkeleyExpenseSystem() {
                       )}
                       {noteLines.length > 0 && (
                         <div className="bg-blue-50 border border-blue-200 rounded-lg p-2 mb-2">
-                          <p className="text-xs font-semibold text-blue-600 mb-1">📝 Previous notes:</p>
-                          <div className="text-xs text-blue-700">{noteLines.map((line, li) => <div key={li}>{line}</div>)}</div>
+                          <div className="flex justify-between items-center mb-1">
+                            <p className="text-xs font-semibold text-blue-600">📝 Previous notes:</p>
+                            <button 
+                              onClick={() => {
+                                if (editingPrevNotes[idx]) {
+                                  setEditingPrevNotes(prev => ({ ...prev, [idx]: false }));
+                                } else {
+                                  setEditingPrevNotes(prev => ({ ...prev, [idx]: true }));
+                                  if (editedPrevNotes[idx] === undefined) {
+                                    setEditedPrevNotes(prev => ({ ...prev, [idx]: noteLines.join('\n') }));
+                                  }
+                                }
+                              }}
+                              className="text-xs text-blue-500 hover:text-blue-700 font-semibold"
+                            >{editingPrevNotes[idx] ? 'Done' : '✏️ Edit'}</button>
+                          </div>
+                          {editingPrevNotes[idx] ? (
+                            <textarea 
+                              className="w-full p-2 border border-blue-300 rounded text-xs text-blue-700 bg-white resize-y min-h-[60px]"
+                              value={editedPrevNotes[idx] ?? noteLines.join('\n')}
+                              onChange={e => setEditedPrevNotes(prev => ({ ...prev, [idx]: e.target.value }))}
+                            />
+                          ) : (
+                            <div className="text-xs text-blue-700">{(editedPrevNotes[idx] !== undefined ? editedPrevNotes[idx] : noteLines.join('\n')).split('\n').map((line, li) => <div key={li}>{line}</div>)}</div>
+                          )}
                         </div>
                       )}
                     </>);
