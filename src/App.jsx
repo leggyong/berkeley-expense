@@ -181,6 +181,12 @@ const DEVELOPMENTS = [
 ];
 
 // --- FOREX RATE HELPERS ---
+// Financial year starts in May. Before May = previous year. May onwards = current year.
+const getFinancialYear = () => {
+  const now = new Date();
+  return now.getMonth() >= 4 ? now.getFullYear() : now.getFullYear() - 1;
+};
+
 const calculateForexRate = (foreignAmount, reimbursementAmount) => {
   const foreign = parseFloat(foreignAmount);
   const reimburse = parseFloat(reimbursementAmount);
@@ -224,7 +230,7 @@ const EMPLOYEES = [
   { id: 508, name: 'Jennifer Wong', office: 'HKG', role: 'employee', reimburseCurrency: 'HKD', claimName: 'Jennifer', password: 'berkeley123' },
   { id: 509, name: 'Annabelle Yiu', office: 'HKG', role: 'employee', reimburseCurrency: 'HKD', claimName: 'Annabelle', password: 'berkeley123' },
   // London
-  { id: 601, name: 'Mouna', office: 'LON', role: 'employee', reimburseCurrency: 'GBP', claimName: 'Mouna', password: 'berkeley123', mileageRate: 0.45, mileageUnit: 'mile' },
+  { id: 601, name: 'Mouna', office: 'LON', role: 'employee', reimburseCurrency: 'GBP', claimName: 'Mouna', password: 'berkeley123', mileageRate: 0.45, mileageUnit: 'miles' },
   { id: 602, name: 'Farah', office: 'LON', role: 'employee', reimburseCurrency: 'GBP', claimName: 'Farah', password: 'berkeley123' },
   // Malaysia
   { id: 701, name: 'Joanne Chee', office: 'MYS', role: 'employee', reimburseCurrency: 'MYR', claimName: 'Joanne', password: 'berkeley123', mileageRate: 0.80, mileageUnit: 'km' },
@@ -1494,7 +1500,7 @@ export default function BerkeleyExpenseSystem() {
         
         // Mileage route info for category H
         const mileageInfo = exp.category === 'H' && exp.mileageDistance 
-          ? '<br>' + (exp.mileageFrom || '') + ' → ' + (exp.mileageTo || '') + ' | ' + exp.mileageDistance + ' ' + (exp.mileageUnit || 'km') + 's @ ' + reimburseCurrency + ' ' + (exp.mileageRate ? exp.mileageRate.toFixed(2) : fmtAmt(claimAmt / parseFloat(exp.mileageDistance))) + '/' + (exp.mileageUnit || 'km')
+          ? '<br>' + (exp.mileageFrom || '') + ' → ' + (exp.mileageTo || '') + ' | ' + exp.mileageDistance + ' ' + (exp.mileageUnit || 'km') + ' @ ' + reimburseCurrency + ' ' + (exp.mileageRate ? exp.mileageRate.toFixed(2) : fmtAmt(claimAmt / parseFloat(exp.mileageDistance))) + '/' + (exp.mileageUnit || 'km')
           : '';
         
         return '<tr>' +
@@ -1690,7 +1696,7 @@ export default function BerkeleyExpenseSystem() {
     setDownloading(true);
     try {
       // Generate draft claim number: ClaimName - YYYY - XX (what it will be on submit)
-      const year = new Date().getFullYear();
+      const year = getFinancialYear();
       const claimName = currentUser.claimName || currentUser.name.trim().split(' ').pop();
       const userClaimsThisYear = claims.filter(c => 
         c.user_id === currentUser.id && 
@@ -1888,7 +1894,7 @@ export default function BerkeleyExpenseSystem() {
         }
       } else {
         // Generate claim number: ClaimName - YYYY - XX (sequential per employee per year)
-        const year = new Date().getFullYear();
+        const year = getFinancialYear();
         const claimName = currentUser.claimName || currentUser.name.trim().split(' ').pop();
         
         // Count existing claims for this user in this year
@@ -2434,7 +2440,7 @@ export default function BerkeleyExpenseSystem() {
                   ].map(({ num, preview, setPreview, label, required }) => (
                     <div key={num}><p className="text-xs font-semibold text-slate-500 mb-1">{label} {!required && <span className="text-slate-400">Optional</span>}</p>
                     {preview ? (<div className="relative"><img src={preview} alt={label} className="w-full h-28 object-cover bg-slate-100 rounded-lg cursor-pointer" onClick={() => setShowFullImage(preview)} /><button onClick={() => setPreview(null)} className="absolute top-1 right-1 bg-red-500 text-white w-6 h-6 rounded-full text-xs">✕</button></div>
-                    ) : (<label className="block border-2 border-dashed border-slate-300 rounded-lg p-4 text-center cursor-pointer hover:border-blue-400"><input type="file" accept="image/*" capture="environment" onChange={(e) => handleFileChange(e, num)} className="hidden" /><span className="text-2xl">{num === 1 ? '📷' : '➕'}</span></label>)}
+                    ) : (<label className="block border-2 border-dashed border-slate-300 rounded-lg p-4 text-center cursor-pointer hover:border-blue-400"><input type="file" accept="image/*" onChange={(e) => handleFileChange(e, num)} className="hidden" /><span className="text-2xl">{num === 1 ? '📷' : '➕'}</span></label>)}
                     </div>
                   ))}
                 </div>
@@ -2709,7 +2715,7 @@ export default function BerkeleyExpenseSystem() {
                     {isDiffCurrency && exp.forexRate && <div><span className="font-semibold text-slate-500">FX Rate:</span> 1 {exp.currency} = {exp.forexRate.toFixed(4)} {claim.currency}</div>}
                     {paxCount > 0 && <div><span className="font-semibold text-slate-500">Pax:</span> 👥 {paxCount}{isEntertaining && perPax > 0 && <span> • 💰 {claim.currency} {perPax.toFixed(2)}/pax</span>}</div>}
                     {exp.attendees && <div><span className="font-semibold text-slate-500">Attendees:</span> {exp.attendees.replace(/\n/g, ', ')}</div>}
-                    {exp.mileageDistance && <div><span className="font-semibold text-slate-500">Mileage:</span> {exp.mileageFrom && <span>{exp.mileageFrom} → {exp.mileageTo} | </span>}{exp.mileageDistance} {exp.mileageUnit || 'km'}s</div>}
+                    {exp.mileageDistance && <div><span className="font-semibold text-slate-500">Mileage:</span> {exp.mileageFrom && <span>{exp.mileageFrom} → {exp.mileageTo} | </span>}{exp.mileageDistance} {exp.mileageUnit || 'km'}</div>}
                   </div>
                   
                   {/* Previous notes and return reasons - shown separately */}
@@ -3863,10 +3869,10 @@ export default function BerkeleyExpenseSystem() {
                   <div><label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Date *</label><input type="date" className="w-full p-3 border-2 border-slate-200 rounded-xl" value={date} onChange={e => setDate(e.target.value)} /></div>
                   <div><label className="block text-xs font-semibold text-slate-500 uppercase mb-1">From *</label><input type="text" className="w-full p-3 border-2 border-slate-200 rounded-xl" placeholder="e.g. Home TW18 4AB" value={from} onChange={e => setFrom(e.target.value)} /></div>
                   <div><label className="block text-xs font-semibold text-slate-500 uppercase mb-1">To *</label><input type="text" className="w-full p-3 border-2 border-slate-200 rounded-xl" placeholder="e.g. Guildford site GU1 4AF" value={to} onChange={e => setTo(e.target.value)} /></div>
-                  <div><label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Distance ({unit}s) *</label><input type="number" step="0.1" className="w-full p-3 border-2 border-green-300 rounded-xl bg-green-50" placeholder={`Total ${unit}s`} value={distance} onChange={e => setDistance(e.target.value)} /></div>
+                  <div><label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Distance ({unit}) *</label><input type="number" step="0.1" className="w-full p-3 border-2 border-green-300 rounded-xl bg-green-50" placeholder={`Total ${unit}`} value={distance} onChange={e => setDistance(e.target.value)} /></div>
                   {amount && (
                     <div className="bg-green-50 border-2 border-green-300 rounded-xl p-4 text-center">
-                      <p className="text-sm text-slate-600">{distance} {unit}s × {rate.toFixed(2)} =</p>
+                      <p className="text-sm text-slate-600">{distance} {unit} × {rate.toFixed(2)} =</p>
                       <p className="text-2xl font-bold text-green-700">{currency} {amount}</p>
                     </div>
                   )}
