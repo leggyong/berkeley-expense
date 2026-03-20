@@ -3100,6 +3100,48 @@ export default function BerkeleyExpenseSystem() {
     const [dateTo, setDateTo] = useState(() => new Date().toISOString().split('T')[0]);
     const [reportType, setReportType] = useState('gl');
     const [includePending, setIncludePending] = useState(true); // Default ON for forecasting
+    const [includeDrafts, setIncludeDrafts] = useState(false); // Include unsaved drafts for forecasting
+    const [allDrafts, setAllDrafts] = useState([]); // Drafts from all users
+    const [loadingDrafts, setLoadingDrafts] = useState(false);
+    
+    // Fetch all user drafts when toggle is enabled
+    useEffect(() => {
+      if (!includeDrafts) { setAllDrafts([]); return; }
+      const fetchDrafts = async () => {
+        setLoadingDrafts(true);
+        try {
+          const { data, error } = await supabase.from('user_drafts').select('*');
+          if (!error && data) {
+            const draftClaims = data.filter(d => d.expenses).map(d => {
+              const emp = EMPLOYEES.find(e => e.id === d.user_id);
+              if (!emp) return null;
+              try {
+                const expenses = JSON.parse(d.expenses);
+                if (!Array.isArray(expenses) || expenses.length === 0) return null;
+                const total = expenses.reduce((sum, e) => sum + parseFloat(e.reimbursementAmount || e.amount || 0), 0);
+                return {
+                  id: 'draft_' + d.user_id,
+                  claim_number: (emp.claimName || emp.name) + ' (Draft)',
+                  user_id: d.user_id,
+                  user_name: emp.name,
+                  office: OFFICES.find(o => o.code === emp.office)?.name,
+                  office_code: emp.office,
+                  currency: emp.reimburseCurrency,
+                  total_amount: total,
+                  item_count: expenses.length,
+                  status: 'draft',
+                  expenses: expenses,
+                  submitted_at: d.updated_at
+                };
+              } catch { return null; }
+            }).filter(Boolean);
+            setAllDrafts(draftClaims);
+          }
+        } catch (err) { console.error('Failed to fetch drafts:', err); }
+        setLoadingDrafts(false);
+      };
+      fetchDrafts();
+    }, [includeDrafts]);
     const [expandedGL, setExpandedGL] = useState(null);
     const [migrating, setMigrating] = useState(false);
     const [migrationLog, setMigrationLog] = useState([]);
@@ -3184,17 +3226,23 @@ export default function BerkeleyExpenseSystem() {
     // Safety check - ensure claims is an array
     const allClaims = Array.isArray(claims) ? claims : [];
     
+    // Combine submitted claims with drafts when enabled
+    const claimsPool = includeDrafts ? [...allClaims, ...allDrafts] : allClaims;
+    
     // Get relevant claims based on filters
-    const relevantClaims = allClaims.filter(c => {
+    const relevantClaims = claimsPool.filter(c => {
       if (!c) return false;
       const isApproved = c.status === 'approved';
+      const isDraft = c.status === 'draft';
       // Include ALL non-rejected statuses when includePending is checked
       const isPendingOrInProgress = c.status === 'pending_review' || 
                                      c.status === 'pending_level2' || 
                                      c.status === 'changes_requested';
       
-      if (!includePending && !isApproved) return false;
-      if (includePending && !isApproved && !isPendingOrInProgress) return false;
+      if (!includePending && !includeDrafts && !isApproved) return false;
+      if (isDraft && !includeDrafts) return false;
+      if (!isApproved && !isDraft && !isPendingOrInProgress) return false;
+      if (!includePending && isPendingOrInProgress) return false;
       
       // Date filter based on submission date
       const subDate = c.submitted_at?.split('T')[0];
@@ -3400,10 +3448,14 @@ export default function BerkeleyExpenseSystem() {
               <input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} className="w-full p-2 border rounded-lg text-sm" />
             </div>
           </div>
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-3 flex-wrap">
             <label className="flex items-center gap-2 text-sm">
               <input type="checkbox" checked={includePending} onChange={e => setIncludePending(e.target.checked)} className="rounded" />
-              <span>Include pending claims (forecasting)</span>
+              <span>Include pending claims</span>
+            </label>
+            <label className="flex items-center gap-2 text-sm">
+              <input type="checkbox" checked={includeDrafts} onChange={e => setIncludeDrafts(e.target.checked)} className="rounded" />
+              <span>Include unsaved drafts {loadingDrafts && '⏳'}{!loadingDrafts && includeDrafts && allDrafts.length > 0 && `(${allDrafts.length})`}</span>
             </label>
           </div>
           <div className="flex gap-2 flex-wrap">
