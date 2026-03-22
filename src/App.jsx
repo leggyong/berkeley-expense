@@ -1,4 +1,4 @@
-﻿import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 
 /*
  * BERKELEY INTERNATIONAL EXPENSE MANAGEMENT SYSTEM
@@ -156,7 +156,7 @@ const OFFICES = [
   { code: 'SHA', name: 'Shanghai', currency: 'CNY', companyName: 'Berkeley Real Estate Consulting (Beijing) Co., Ltd. Shanghai Branch' },
   { code: 'SHE', name: 'Shenzhen', currency: 'CNY', companyName: 'Berkeley Real Estate Consulting (Beijing) Co., Ltd. Shenzhen Branch' },
   { code: 'HKG', name: 'Hong Kong', currency: 'HKD', companyName: 'Berkeley (Hong Kong) Limited' },
-  { code: 'LON', name: 'London', currency: 'GBP', companyName: 'Berkeley London Residential Ltd' },
+  { code: 'LON', name: 'MENA (London)', currency: 'GBP', companyName: 'Berkeley London Residential Ltd' },
   { code: 'MYS', name: 'Malaysia', currency: 'MYR', companyName: 'Berkeley (Singapore)' },
   { code: 'SIN', name: 'Singapore', currency: 'SGD', companyName: 'Berkeley (Singapore)' },
   { code: 'BKK', name: 'Bangkok', currency: 'THB', companyName: 'Berkeley (Thailand)' },
@@ -536,7 +536,7 @@ const SENIOR_STAFF_ROUTING = {
   // Other managers → Ann → Cathy He
   801: { level1: 805, level2: 804, level1Name: 'Ann Low', level2Name: 'Cathy He' },
   803: { level1: 805, level2: 804, level1Name: 'Ann Low', level2Name: 'Cathy He' },
-  808: { level1: 812, level2: 804, level1Name: 'Kareen Ng', level2Name: 'Cathy He' },
+  808: { level1: 805, level2: 804, level1Name: 'Ann Low', level2Name: 'Cathy He' },
   // Admins → their approver (single level)
   102: { level1: 103, level2: null, level1Name: 'Even Huang', level2Name: null, singleLevel: true },
   306: { level1: 303, level2: null, level1Name: 'Elsa Huang', level2Name: null, singleLevel: true },
@@ -3178,6 +3178,7 @@ export default function BerkeleyExpenseSystem() {
       fetchDrafts();
     }, [includeDrafts]);
     const [expandedGL, setExpandedGL] = useState(null);
+    const [expandedEmployee, setExpandedEmployee] = useState(null);
     const [migrating, setMigrating] = useState(false);
     const [migrationLog, setMigrationLog] = useState([]);
     
@@ -3371,10 +3372,19 @@ export default function BerkeleyExpenseSystem() {
           lastExpenseDate: null,
           totalClaims: 0,
           claimsInRange: 0,
-          lateCount: 0
+          lateCount: 0,
+          claimsList: [] // All claims for dropdown
         };
       }
       employeeData[empId].totalClaims++;
+      employeeData[empId].claimsList.push({ 
+        claimNumber: claim.claim_number, 
+        submittedAt: claim.submitted_at, 
+        status: claim.status,
+        itemCount: (claim.expenses || []).length,
+        total: claim.total_amount,
+        currency: claim.currency
+      });
       
       // Check if this claim is in the date range
       const subDate = claim.submitted_at?.split('T')[0];
@@ -3421,15 +3431,15 @@ export default function BerkeleyExpenseSystem() {
         csvContent = 'Development,Claimant,Office,Date,Merchant,Category,Percentage,Amount (Local),Amount (GBP),Status\n';
         Object.entries(backchargeData).forEach(([dev, data]) => {
           data.items.forEach(item => {
-            csvContent += `"${dev}","${item.claimant}","${item.office}","${item.date}","${item.merchant}","${item.category || ''}","${item.percentage}%","${item.currency} ${item.amount.toFixed(2)}","£${item.gbpAmount.toFixed(2)}","${item.status}"\n`;
+            csvContent += `"${dev}","${item.claimant}","${item.office}","${item.date}","${item.merchant}","${item.category || ''}","${item.percentage}%","${item.currency} ${item.amount.toFixed(2)}","${item.gbpAmount.toFixed(2)}","${fmtStatus(item.status)}"\n`;
           });
         });
       } else if (reportType === 'gl') {
         filename = `gl_report_${dateFrom}_to_${dateTo}.csv`;
-        csvContent = 'GL Code,Category,Office,Claimant,Date,Merchant,Description,Amount (Local),Amount (GBP),Status\n';
+        csvContent = 'GL Code,Category,Claim Number,Office,Claimant,Date,Merchant,Amount (Local),Amount (GBP),Status,Description\n';
         Object.entries(glData).forEach(([gl, data]) => {
           data.items.forEach(item => {
-            csvContent += `"${gl}","${data.name}","${item.office}","${item.claimant}","${item.date}","${item.merchant}","${item.description}","${item.currency} ${item.amount.toFixed(2)}","£${item.gbpAmount.toFixed(2)}","${item.status}"\n`;
+            csvContent += `"${gl}","${data.name}","${item.claimNumber || ''}","${item.office}","${item.claimant}","${item.date}","${item.merchant}","${item.currency} ${item.amount.toFixed(2)}","${item.gbpAmount.toFixed(2)}","${fmtStatus(item.status)}","${(item.description || '').replace(/"/g, '""')}"\n`;
           });
         });
       } else if (reportType === 'submissions') {
@@ -3446,8 +3456,11 @@ export default function BerkeleyExpenseSystem() {
         });
       }
       
+      // Format status for CSV
+      const fmtStatus = (s) => s === 'approved' ? 'Approved' : s === 'pending_review' ? 'Pending L1' : s === 'pending_level2' ? 'Pending L2' : s === 'changes_requested' ? 'Returned' : s === 'draft' ? 'Draft' : s;
+      
       // Download CSV
-      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+      const blob = new Blob(['\ufeff' + csvContent], { type: 'text/csv;charset=utf-8;' });
       const link = document.createElement('a');
       link.href = URL.createObjectURL(blob);
       link.download = filename;
@@ -3572,8 +3585,8 @@ export default function BerkeleyExpenseSystem() {
                       {data.items.slice(0, 5).map((item, i) => (
                         <div key={i} className="flex justify-between">
                           <span>{item.claimant} • {item.merchant} ({item.percentage}%)</span>
-                          <span className={item.status === 'approved' ? 'text-green-600' : 'text-amber-600'}>
-                            £{item.gbpAmount.toFixed(2)} {item.status !== 'approved' && '(pending)'}
+                          <span className={item.status === 'approved' ? 'text-green-600' : item.status === 'pending_level2' ? 'text-blue-600' : 'text-amber-600'}>
+                            £{item.gbpAmount.toFixed(2)} {item.status === 'pending_review' ? '(L1)' : item.status === 'pending_level2' ? '(L2)' : item.status === 'changes_requested' ? '(returned)' : item.status === 'draft' ? '(draft)' : ''}
                           </span>
                         </div>
                       ))}
@@ -3599,17 +3612,53 @@ export default function BerkeleyExpenseSystem() {
               {Object.entries(employeeData)
                 .sort((a, b) => (b[1].lastSubmission || '').localeCompare(a[1].lastSubmission || ''))
                 .map(([empId, data]) => (
-                  <div key={empId} className="p-3 flex justify-between items-center">
-                    <div>
-                      <span className="font-semibold">{data.name}</span>
-                      <span className="text-xs text-slate-400 ml-2">{data.office}</span>
-                    </div>
-                    <div className="text-right text-xs">
-                      <div className="text-slate-600">
-                        In range: <strong className="text-blue-600">{data.claimsInRange}</strong> / {data.totalClaims} total
+                  <div key={empId}>
+                    <div 
+                      className="p-3 flex justify-between items-center cursor-pointer hover:bg-green-50"
+                      onClick={() => setExpandedEmployee(expandedEmployee === empId ? null : empId)}
+                    >
+                      <div className="flex items-center gap-2">
+                        <span className={`text-xs transition-transform ${expandedEmployee === empId ? 'rotate-90' : ''}`}>▶</span>
+                        <span className="font-semibold">{data.name}</span>
+                        <span className="text-xs text-slate-400">{data.office}</span>
                       </div>
-                      <div className="text-slate-400">Latest: {formatDateShort(data.lastSubmission)}</div>
+                      <div className="text-right text-xs">
+                        <div className="text-slate-600">
+                          In range: <strong className="text-blue-600">{data.claimsInRange}</strong> / {data.totalClaims} total
+                        </div>
+                        <div className="text-slate-400">Latest: {formatDateShort(data.lastSubmission)}</div>
+                      </div>
                     </div>
+                    {expandedEmployee === empId && (
+                      <div className="bg-green-50 px-6 pb-3">
+                        {data.claimsList.sort((a, b) => (b.submittedAt || '').localeCompare(a.submittedAt || '')).map((cl, ci) => (
+                          <div key={ci} className="flex justify-between items-center py-1.5 border-b border-green-200 last:border-0 text-sm">
+                            <div>
+                              <span className="font-medium">{cl.claimNumber}</span>
+                              <span className="text-xs text-slate-500 ml-2">{cl.itemCount} items</span>
+                            </div>
+                            <div className="flex items-center gap-3 text-xs">
+                              <span className={`px-2 py-0.5 rounded-full font-semibold ${
+                                cl.status === 'approved' ? 'bg-green-100 text-green-700' : 
+                                cl.status === 'pending_review' ? 'bg-amber-100 text-amber-700' : 
+                                cl.status === 'pending_level2' ? 'bg-blue-100 text-blue-700' : 
+                                cl.status === 'changes_requested' ? 'bg-red-100 text-red-700' :
+                                cl.status === 'draft' ? 'bg-slate-100 text-slate-600' :
+                                'bg-slate-100 text-slate-600'
+                              }`}>{
+                                cl.status === 'approved' ? '✅ Approved' : 
+                                cl.status === 'pending_review' ? '⏳ Pending L1' : 
+                                cl.status === 'pending_level2' ? '⏳ Pending L2' : 
+                                cl.status === 'changes_requested' ? '🔄 Returned' :
+                                cl.status === 'draft' ? '📝 Draft' :
+                                cl.status
+                              }</span>
+                              <span className="text-slate-400">{formatDateShort(cl.submittedAt)}</span>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 ))}
             </div>
@@ -3834,8 +3883,8 @@ export default function BerkeleyExpenseSystem() {
         </div>
         <button onClick={() => setShowPreviousReview(null)} className="w-full mt-4 bg-slate-100 text-slate-700 py-2 rounded-lg font-semibold">Close</button></div></div>)}
         
-        {/* Approved Claims Archive - for admins */}
-        {(currentUser.role === 'admin' || currentUser.role === 'manager' || currentUser.role === 'finance') && (() => {
+        {/* Approved Claims Archive - for office admins only */}
+        {currentUser.role === 'admin' && (() => {
           const approvedClaims = claims.filter(c => 
             (c.status === 'approved' || c.status === 'submitted_to_finance') && 
             c.office_code === currentUser.office
