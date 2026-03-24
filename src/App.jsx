@@ -574,6 +574,7 @@ const getApproverName = (approverId) => {
 const getClaimStatusText = (claim) => {
   if (claim.status === 'approved') return '✅ Approved';
   if (claim.status === 'submitted_to_finance') return '📤 Submitted to Finance';
+  if (claim.status === 'paid') return '💰 Paid';
   if (claim.status === 'rejected') return 'Rejected';
   if (claim.status === 'changes_requested') return 'Changes Requested';
   if (claim.status === 'pending_review') {
@@ -1687,7 +1688,7 @@ export default function BerkeleyExpenseSystem() {
     try {
       const emp = EMPLOYEES.find(e => e.id === claim.user_id);
       const statements = claim.annotated_statements || (claim.annotated_statement ? [claim.annotated_statement] : []);
-      await generatePDFFromHTML(claim.expenses || [], claim.user_name, emp?.office, claim.claim_number, claim.submitted_at, statements, emp?.reimburseCurrency || claim.currency, claim.level2_approved_by, claim.level2_approved_at, claim.annotations || []);
+      await generatePDFFromHTML(enrichWithDuplicates(claim.expenses || [], claim.id), claim.user_name, emp?.office, claim.claim_number, claim.submitted_at, statements, emp?.reimburseCurrency || claim.currency, claim.level2_approved_by, claim.level2_approved_at, claim.annotations || []);
     } catch (err) { alert('❌ Failed'); }
     setDownloading(false);
   };
@@ -2188,8 +2189,23 @@ export default function BerkeleyExpenseSystem() {
       }).eq('id', claimId);
       if (error) throw error;
       await loadClaims();
-      alert('✅ Marked as submitted');
+      alert('✅ Marked as submitted to finance');
     } catch (err) { console.error('Mark submitted error:', err); alert('❌ Failed'); }
+    setLoading(false);
+  };
+
+  const handleMarkPaid = async (claimId) => {
+    setLoading(true);
+    try {
+      const { error } = await supabase.from('claims').update({ 
+        status: 'paid',
+        paid_by: currentUser.name,
+        paid_at: new Date().toISOString()
+      }).eq('id', claimId);
+      if (error) throw error;
+      await loadClaims();
+      alert('✅ Marked as paid');
+    } catch (err) { console.error('Mark paid error:', err); alert('❌ Failed'); }
     setLoading(false);
   };
 
@@ -2268,7 +2284,7 @@ export default function BerkeleyExpenseSystem() {
       amount: '', 
       currency: userOffice?.currency || 'SGD', 
       date: new Date().toISOString().split('T')[0], 
-      category: 'C', 
+      category: '', 
       description: '', 
       attendeesList: [],
       numberOfPax: '', 
@@ -2420,7 +2436,7 @@ export default function BerkeleyExpenseSystem() {
       }
     };
     
-    const canSave = formData.merchant && formData.amount && formData.date && formData.description && (!needsAttendees || (attendeeCount > 0 && formData.numberOfPax)) && (!isForeignCurrency || formData.reimbursementAmount) && backchargeValid && attendeePaxMatch;
+    const canSave = formData.merchant && formData.amount && formData.date && formData.category && formData.description && (!needsAttendees || (attendeeCount > 0 && formData.numberOfPax)) && (!isForeignCurrency || formData.reimbursementAmount) && backchargeValid && attendeePaxMatch;
 
     return (
       <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-50">
@@ -2483,7 +2499,8 @@ export default function BerkeleyExpenseSystem() {
                 </details>
                 <div className="grid grid-cols-2 gap-4">
                   <input type="date" className="p-3 border-2 border-slate-200 rounded-xl" value={formData.date} onChange={e => setFormData(prev => ({ ...prev, date: e.target.value }))} />
-                  <select className="p-3 border-2 border-slate-200 rounded-xl bg-white text-sm" value={formData.category} onChange={e => setFormData(prev => ({ ...prev, category: e.target.value }))}>
+                  <select className={`p-3 border-2 rounded-xl bg-white text-sm ${!formData.category ? 'border-red-400' : 'border-slate-200'}`} value={formData.category} onChange={e => setFormData(prev => ({ ...prev, category: e.target.value }))}>
+                    <option value="">— Select Category —</option>
                     <optgroup label="Travel">
                       {Object.entries(EXPENSE_CATEGORIES).filter(([k,v]) => v.group === 'TRAVEL' && k !== 'H').map(([key, val]) => <option key={key} value={key}>{val.icon} {val.name}</option>)}
                     </optgroup>
@@ -2601,6 +2618,11 @@ export default function BerkeleyExpenseSystem() {
     const [addressed, setAddressed] = useState({}); // idx -> true (marks previous return as addressed, stripped on final approval)
     const [editingPrevNotes, setEditingPrevNotes] = useState({}); // idx -> true when editing previous notes
     const [editedPrevNotes, setEditedPrevNotes] = useState({}); // idx -> edited adminNotes string
+    const [expenseEdits, setExpenseEdits] = useState({}); // idx -> { field: value } for editing approved claims
+    const [deletedExpenses, setDeletedExpenses] = useState(new Set()); // idx of expenses to remove
+    
+    const getExpField = (idx, field, defaultVal) => expenseEdits[idx]?.[field] !== undefined ? expenseEdits[idx][field] : defaultVal;
+    const setExpField = (idx, field, value) => setExpenseEdits(prev => ({ ...prev, [idx]: { ...(prev[idx] || {}), [field]: value } }));
     const [saving, setSaving] = useState(false);
     const [showApproveConfirm, setShowApproveConfirm] = useState(false);
     const reviewerFirstName = currentUser.name.split(' ')[0];
@@ -2608,7 +2630,11 @@ export default function BerkeleyExpenseSystem() {
     const hasAnyReturnReason = Object.values(returnReasons).some(v => v?.trim());
     const itemsWithReasons = Object.entries(returnReasons).filter(([_, v]) => v?.trim()).map(([idx]) => sortedExpenses[parseInt(idx)]?.ref).filter(Boolean);
     
+    const isAlreadyApproved = claim.status === 'approved' || claim.status === 'submitted_to_finance' || claim.status === 'paid';
+    const isEditable = claim.status === 'submitted_to_finance'; // Only editable during finance review
+    
     const approveButtonText = (() => {
+      if (isAlreadyApproved) return isEditable ? (deletedExpenses.size > 0 ? `💾 Save (${deletedExpenses.size} removed)` : '💾 Save Changes') : '💾 Save Notes';
       const workflow = SENIOR_STAFF_ROUTING[claim.user_id];
       const isSingleLevel = workflow?.singleLevel;
       const level = claim.approval_level || 1;
@@ -2620,49 +2646,67 @@ export default function BerkeleyExpenseSystem() {
     // Helper: get base notes for an expense (use edited version if available, preserve return lines)
     const getBaseNotes = (exp, idx) => {
       if (editedPrevNotes[idx] === undefined) return exp.adminNotes || '';
-      // Reconstruct: keep original return lines + edited note lines
       const allLines = (exp.adminNotes || '').split('\n').filter(l => l.trim());
       const returnLines = allLines.filter(l => l.includes('[R]:') || l.includes('[RETURN]:'));
       const editedNoteLines = editedPrevNotes[idx].split('\n').filter(l => l.trim());
       return [...returnLines, ...editedNoteLines].join('\n');
     };
     
-    const handleSaveAndApprove = async () => {
-      setSaving(true);
-      const updatedExpenses = sortedExpenses.map((exp, idx) => {
+    // Build updated expenses with current notes/edits
+    const buildUpdatedExpenses = () => {
+      return sortedExpenses.map((exp, idx) => {
+        if (deletedExpenses.has(idx)) return null; // Mark for removal
+        let updated = { ...exp };
+        // Apply field edits (for approved claims)
+        if (expenseEdits[idx]) {
+          const edits = expenseEdits[idx];
+          if (edits.merchant !== undefined) updated.merchant = edits.merchant;
+          if (edits.description !== undefined) updated.description = edits.description;
+          if (edits.category !== undefined) updated.category = edits.category;
+          if (edits.reimbursementAmount !== undefined) {
+            updated.reimbursementAmount = parseFloat(edits.reimbursementAmount) || 0;
+          }
+        }
+        // Apply notes
         const parts = [];
         const note = notes[idx]?.trim();
         if (note) parts.push(`${reviewerFirstName}: ${note}`);
         if (addressed[idx]) parts.push(`${reviewerFirstName} [R]: ✓ Addressed`);
-        const base = getBaseNotes(exp, idx);
+        const base = getBaseNotes(updated, idx);
         if (parts.length > 0) {
           const newNotes = parts.join('\n');
-          return { ...exp, adminNotes: base ? `${base}\n${newNotes}` : newNotes };
+          updated.adminNotes = base ? `${base}\n${newNotes}` : newNotes;
+        } else if (editedPrevNotes[idx] !== undefined) {
+          updated.adminNotes = base;
         }
-        if (editedPrevNotes[idx] !== undefined) return { ...exp, adminNotes: base };
-        return exp;
-      });
+        return updated;
+      }).filter(Boolean); // Remove deleted expenses
+    };
+    
+    const handleSaveAndApprove = async () => {
+      setSaving(true);
+      const updatedExpenses = buildUpdatedExpenses();
       await handleSaveAdminEdits(claim, updatedExpenses);
-      await handleApprove(claim);
+      if (!isAlreadyApproved) {
+        await handleApprove(claim);
+      } else {
+        alert('✅ Changes saved');
+      }
       setSaving(false);
       onClose();
     };
     
     const handleSaveAndReturn = async () => {
       setSaving(true);
-      const updatedExpenses = sortedExpenses.map((exp, idx) => {
-        const parts = [];
-        const note = notes[idx]?.trim();
+      const updatedExpensesBase = buildUpdatedExpenses();
+      // Also append return reasons
+      const updatedExpenses = updatedExpensesBase.map((exp, idx) => {
         const reason = returnReasons[idx]?.trim();
-        if (note) parts.push(`${reviewerFirstName}: ${note}`);
-        if (addressed[idx]) parts.push(`${reviewerFirstName} [R]: ✓ Addressed`);
-        if (reason) parts.push(`${reviewerFirstName} [R]: ${reason}`);
-        const base = getBaseNotes(exp, idx);
-        if (parts.length > 0) {
-          const newNotes = parts.join('\n');
-          return { ...exp, adminNotes: base ? `${base}\n${newNotes}` : newNotes };
+        if (reason) {
+          const existing = exp.adminNotes || '';
+          const returnNote = `${reviewerFirstName} [R]: ${reason}`;
+          return { ...exp, adminNotes: existing ? `${existing}\n${returnNote}` : returnNote };
         }
-        if (editedPrevNotes[idx] !== undefined) return { ...exp, adminNotes: base };
         return exp;
       });
       await handleSaveAdminEdits(claim, updatedExpenses);
@@ -2689,6 +2733,11 @@ export default function BerkeleyExpenseSystem() {
             <button onClick={onClose} className="w-8 h-8 rounded-full bg-white/20 text-lg">✕</button>
           </div>
           <div className="p-4 overflow-y-auto max-h-[calc(90vh-200px)]">
+            {isAlreadyApproved && (
+              <div className="bg-amber-50 border border-amber-300 rounded-xl p-3 mb-3 text-sm text-amber-800">
+                {isEditable ? '✏️ This claim is submitted to finance. You can edit expenses, add notes, or return it.' : '📁 This claim is finalized. You can add notes or return it for changes.'}
+              </div>
+            )}
             {sortedExpenses.map((exp, idx) => {
               const cat = EXPENSE_CATEGORIES[exp.category] || {};
               const isOld = isOlderThan2Months(exp.date);
@@ -2700,13 +2749,23 @@ export default function BerkeleyExpenseSystem() {
               const isDiffCurrency = exp.isForeignCurrency || (exp.currency !== claim.currency);
               
               return (
-                <div key={idx} className={`border-2 rounded-xl p-4 mb-3 ${exp.isPotentialDuplicate ? 'border-red-400 bg-red-50' : isOld ? 'border-red-300 bg-red-50' : isApproaching ? 'border-amber-300 bg-amber-50' : 'border-slate-200'}`}>
+                <div key={idx} className={`border-2 rounded-xl p-4 mb-3 ${deletedExpenses.has(idx) ? 'border-red-400 bg-red-100 opacity-50' : exp.isPotentialDuplicate ? 'border-red-400 bg-red-50' : isOld ? 'border-red-300 bg-red-50' : isApproaching ? 'border-amber-300 bg-amber-50' : 'border-slate-200'}`}>
+                  {deletedExpenses.has(idx) ? (
+                    <div className="flex justify-between items-center py-2">
+                      <span className="line-through text-red-600 font-semibold">{exp.ref} — {exp.merchant} — {formatCurrency(exp.reimbursementAmount || exp.amount, claim.currency)}</span>
+                      <button onClick={() => setDeletedExpenses(prev => { const n = new Set(prev); n.delete(idx); return n; })} className="bg-white text-blue-600 px-3 py-1 rounded-lg text-xs font-semibold border border-blue-300">↩ Undo</button>
+                    </div>
+                  ) : (<>
                   {/* Header: Ref + Vendor + Date + Amount */}
                   <div className="flex justify-between items-start mb-2">
                     <div className="flex-1">
                       <div className="flex items-center gap-2 flex-wrap">
                         <span className="bg-blue-600 text-white font-bold px-3 py-1 rounded-lg text-sm">{exp.ref}</span>
-                        <span className="font-bold text-slate-800">{exp.merchant}</span>
+                        {isEditable ? (
+                          <input className="font-bold text-slate-800 border-b border-slate-300 bg-transparent text-sm px-1" value={getExpField(idx, 'merchant', exp.merchant)} onChange={e => setExpField(idx, 'merchant', e.target.value)} />
+                        ) : (
+                          <span className="font-bold text-slate-800">{exp.merchant}</span>
+                        )}
                         <span className="text-slate-500 text-sm">{formatShortDate(exp.date)}</span>
                       </div>
                       {/* Badges */}
@@ -2716,13 +2775,29 @@ export default function BerkeleyExpenseSystem() {
                         {isApproaching && <span className="bg-amber-100 text-amber-700 text-xs px-2 py-0.5 rounded">⏰ {daysLeft}d left</span>}
                       </div>
                     </div>
-                    <span className="font-bold text-green-700 text-lg ml-3 whitespace-nowrap">{formatCurrency(exp.reimbursementAmount || exp.amount, claim.currency)}</span>
+                    {isEditable ? (
+                      <div className="ml-3 flex items-center gap-1">
+                        <span className="text-green-700 font-bold">{claim.currency}</span>
+                        <input type="number" step="0.01" className="font-bold text-green-700 text-lg w-24 text-right border-b border-green-300 bg-transparent" 
+                          value={getExpField(idx, 'reimbursementAmount', exp.reimbursementAmount || exp.amount)} 
+                          onChange={e => setExpField(idx, 'reimbursementAmount', e.target.value)} 
+                        />
+                      </div>
+                    ) : (
+                      <span className="font-bold text-green-700 text-lg ml-3 whitespace-nowrap">{formatCurrency(exp.reimbursementAmount || exp.amount, claim.currency)}</span>
+                    )}
                   </div>
                   
                   {/* Details grid */}
                   <div className="text-sm text-slate-600 space-y-1 mb-3 bg-slate-50 rounded-lg p-3">
-                    <div><span className="font-semibold text-slate-500">Category:</span> {cat.icon} {cat.name}</div>
-                    <div><span className="font-semibold text-slate-500">Description:</span> {exp.description || '—'}</div>
+                    <div><span className="font-semibold text-slate-500">Category:</span> {isEditable ? (
+                      <select className="ml-1 border border-slate-300 rounded px-1 py-0.5 text-sm bg-white" value={getExpField(idx, 'category', exp.category)} onChange={e => setExpField(idx, 'category', e.target.value)}>
+                        {Object.entries(EXPENSE_CATEGORIES).map(([k, v]) => <option key={k} value={k}>{v.icon} {v.name}</option>)}
+                      </select>
+                    ) : <span>{cat.icon} {cat.name}</span>}</div>
+                    <div><span className="font-semibold text-slate-500">Description:</span> {isEditable ? (
+                      <input className="ml-1 w-full border-b border-slate-300 bg-transparent text-sm" value={getExpField(idx, 'description', exp.description || '')} onChange={e => setExpField(idx, 'description', e.target.value)} />
+                    ) : <span>{exp.description || '—'}</span>}</div>
                     <div><span className="font-semibold text-slate-500">Receipt amount:</span> {exp.currency} {parseFloat(exp.amount).toFixed(2)}{isDiffCurrency && <span> → <strong>{claim.currency} {parseFloat(exp.reimbursementAmount || exp.amount).toFixed(2)}</strong></span>}</div>
                     {isDiffCurrency && exp.forexRate && <div><span className="font-semibold text-slate-500">FX Rate:</span> 1 {exp.currency} = {exp.forexRate.toFixed(4)} {claim.currency}</div>}
                     {paxCount > 0 && <div><span className="font-semibold text-slate-500">Pax:</span> 👥 {paxCount}{isEntertaining && perPax > 0 && <span> • 💰 {claim.currency} {perPax.toFixed(2)}/pax</span>}</div>}
@@ -2808,6 +2883,12 @@ export default function BerkeleyExpenseSystem() {
                       onChange={e => setReturnReasons(prev => ({ ...prev, [idx]: e.target.value }))} 
                     />
                   </div>
+                  {isEditable && !deletedExpenses.has(idx) && (
+                    <div className="mt-2 pt-2 border-t border-slate-200">
+                      <button onClick={() => setDeletedExpenses(prev => new Set([...prev, idx]))} className="text-xs text-red-500 hover:text-red-700 font-semibold">🗑️ Remove this expense</button>
+                    </div>
+                  )}
+                </>)}
                 </div>
               );
             })}
@@ -2832,15 +2913,15 @@ export default function BerkeleyExpenseSystem() {
             </button>
           </div>
           
-          {/* Confirm approve with comments dialog */}
+          {/* Confirm approve/save with return reasons dialog */}
           {showApproveConfirm && (
             <div className="absolute inset-0 bg-black/40 flex items-center justify-center p-6 rounded-2xl">
               <div className="bg-white rounded-xl p-6 max-w-sm shadow-xl">
-                <h3 className="font-bold text-lg mb-2">⚠️ Approve with return reasons?</h3>
-                <p className="text-sm text-slate-600 mb-4">You have return reasons on items {itemsWithReasons.join(', ')}. Approving will save your notes but NOT return the claim to the employee.</p>
+                <h3 className="font-bold text-lg mb-2">⚠️ {isAlreadyApproved ? 'Save with return reasons?' : 'Approve with return reasons?'}</h3>
+                <p className="text-sm text-slate-600 mb-4">You have return reasons on items {itemsWithReasons.join(', ')}. {isAlreadyApproved ? 'Saving will keep the notes but NOT return the claim.' : 'Approving will save your notes but NOT return the claim to the employee.'}</p>
                 <div className="flex gap-3">
                   <button onClick={() => setShowApproveConfirm(false)} className="flex-1 py-2 rounded-lg border-2 font-semibold text-sm">Cancel</button>
-                  <button onClick={() => { setShowApproveConfirm(false); handleSaveAndApprove(); }} className="flex-1 py-2 rounded-lg bg-green-600 text-white font-semibold text-sm">Yes, Approve</button>
+                  <button onClick={() => { setShowApproveConfirm(false); handleSaveAndApprove(); }} className="flex-1 py-2 rounded-lg bg-green-600 text-white font-semibold text-sm">Yes, {isAlreadyApproved ? 'Save' : 'Approve'}</button>
                 </div>
               </div>
             </div>
@@ -3015,7 +3096,7 @@ export default function BerkeleyExpenseSystem() {
         </div>
         <div className="bg-white rounded-2xl shadow-lg p-6">
           <h3 className="font-bold text-slate-800 mb-4">📁 My Claims</h3>
-          {myClaims.filter(c => c.status !== 'changes_requested').length === 0 ? <p className="text-center text-slate-400 py-8">None</p> : (<div className="space-y-2">{myClaims.filter(c => c.status !== 'changes_requested').map(claim => (<div key={claim.id} className="flex items-center justify-between p-4 rounded-xl bg-slate-50 border"><div><span className="font-semibold">{claim.claim_number}</span><span className={`ml-2 text-xs px-2 py-0.5 rounded-full ${claim.status === 'approved' ? 'bg-green-100 text-green-700' : claim.status === 'rejected' ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-700'}`}>{getClaimStatusText(claim)}</span></div><div className="flex items-center gap-3"><span className="font-bold">{formatCurrency(claim.total_amount, claim.currency)}</span><button onClick={() => handleDownloadPDF(claim)} className="bg-green-100 text-green-700 px-3 py-2 rounded-lg text-sm">📥</button></div></div>))}</div>)}
+          {myClaims.filter(c => c.status !== 'changes_requested').length === 0 ? <p className="text-center text-slate-400 py-8">None</p> : (<div className="space-y-2">{myClaims.filter(c => c.status !== 'changes_requested').map(claim => (<div key={claim.id} className="flex items-center justify-between p-4 rounded-xl bg-slate-50 border"><div><span className="font-semibold">{claim.claim_number}</span><span className={`ml-2 text-xs px-2 py-0.5 rounded-full ${claim.status === 'approved' || claim.status === 'paid' ? 'bg-green-100 text-green-700' : claim.status === 'rejected' ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-700'}`}>{getClaimStatusText(claim)}</span></div><div className="flex items-center gap-3"><span className="font-bold">{formatCurrency(claim.total_amount, claim.currency)}</span><button onClick={() => handleDownloadPDF(claim)} className="bg-green-100 text-green-700 px-3 py-2 rounded-lg text-sm">📥</button></div></div>))}</div>)}
         </div>
         
         {/* Resubmit Claim Modal */}
@@ -3179,6 +3260,7 @@ export default function BerkeleyExpenseSystem() {
     }, [includeDrafts]);
     const [expandedGL, setExpandedGL] = useState(null);
     const [expandedEmployee, setExpandedEmployee] = useState(null);
+    const [expandedLate, setExpandedLate] = useState(null);
     const [migrating, setMigrating] = useState(false);
     const [migrationLog, setMigrationLog] = useState([]);
     
@@ -3268,7 +3350,7 @@ export default function BerkeleyExpenseSystem() {
     // Get relevant claims based on filters
     const relevantClaims = claimsPool.filter(c => {
       if (!c) return false;
-      const isApproved = c.status === 'approved';
+      const isApproved = c.status === 'approved' || c.status === 'paid' || c.status === 'submitted_to_finance';
       const isDraft = c.status === 'draft';
       // Include ALL non-rejected statuses when includePending is checked
       const isPendingOrInProgress = c.status === 'pending_review' || 
@@ -3373,6 +3455,7 @@ export default function BerkeleyExpenseSystem() {
           totalClaims: 0,
           claimsInRange: 0,
           lateCount: 0,
+          lateItems: [], // Detailed late items for dropdown
           claimsList: [] // All claims for dropdown
         };
       }
@@ -3408,7 +3491,20 @@ export default function BerkeleyExpenseSystem() {
             const expDate = new Date(exp.date);
             const subDateObj = new Date(claim.submitted_at);
             const monthsDiff = (subDateObj - expDate) / (1000 * 60 * 60 * 24 * 30);
-            if (monthsDiff > 2) employeeData[empId].lateCount++;
+            if (monthsDiff > 2) {
+              employeeData[empId].lateCount++;
+              employeeData[empId].lateItems.push({
+                claimNumber: claim.claim_number,
+                ref: exp.ref,
+                merchant: exp.merchant,
+                date: exp.date,
+                description: exp.description,
+                amount: parseFloat(exp.reimbursementAmount || exp.amount) || 0,
+                currency: claim.currency,
+                adminNotes: exp.adminNotes,
+                monthsLate: Math.floor(monthsDiff)
+              });
+            }
           } catch (e) { /* ignore */ }
         }
       });
@@ -3457,7 +3553,7 @@ export default function BerkeleyExpenseSystem() {
       }
       
       // Format status for CSV
-      const fmtStatus = (s) => s === 'approved' ? 'Approved' : s === 'pending_review' ? 'Pending L1' : s === 'pending_level2' ? 'Pending L2' : s === 'changes_requested' ? 'Returned' : s === 'draft' ? 'Draft' : s;
+      const fmtStatus = (s) => s === 'approved' ? 'Approved' : s === 'paid' ? 'Paid' : s === 'submitted_to_finance' ? 'With Finance' : s === 'pending_review' ? 'Pending L1' : s === 'pending_level2' ? 'Pending L2' : s === 'changes_requested' ? 'Returned' : s === 'draft' ? 'Draft' : s;
       
       // Download CSV
       const blob = new Blob(['\ufeff' + csvContent], { type: 'text/csv;charset=utf-8;' });
@@ -3640,6 +3736,8 @@ export default function BerkeleyExpenseSystem() {
                             <div className="flex items-center gap-3 text-xs">
                               <span className={`px-2 py-0.5 rounded-full font-semibold ${
                                 cl.status === 'approved' ? 'bg-green-100 text-green-700' : 
+                                cl.status === 'paid' ? 'bg-green-200 text-green-800' : 
+                                cl.status === 'submitted_to_finance' ? 'bg-purple-100 text-purple-700' : 
                                 cl.status === 'pending_review' ? 'bg-amber-100 text-amber-700' : 
                                 cl.status === 'pending_level2' ? 'bg-blue-100 text-blue-700' : 
                                 cl.status === 'changes_requested' ? 'bg-red-100 text-red-700' :
@@ -3647,6 +3745,8 @@ export default function BerkeleyExpenseSystem() {
                                 'bg-slate-100 text-slate-600'
                               }`}>{
                                 cl.status === 'approved' ? '✅ Approved' : 
+                                cl.status === 'paid' ? '💰 Paid' : 
+                                cl.status === 'submitted_to_finance' ? '📤 With Finance' : 
                                 cl.status === 'pending_review' ? '⏳ Pending L1' : 
                                 cl.status === 'pending_level2' ? '⏳ Pending L2' : 
                                 cl.status === 'changes_requested' ? '🔄 Returned' :
@@ -3677,17 +3777,48 @@ export default function BerkeleyExpenseSystem() {
             ) : (
               <div className="divide-y">
                 {lateSubmitters.map(([empId, data]) => (
-                  <div key={empId} className="p-3 flex justify-between items-center">
-                    <div>
-                      <span className="font-semibold">{data.name}</span>
-                      <span className="text-xs text-slate-400 ml-2">{data.office}</span>
+                  <div key={empId}>
+                    <div 
+                      className="p-3 flex justify-between items-center cursor-pointer hover:bg-red-50"
+                      onClick={() => setExpandedLate(expandedLate === empId ? null : empId)}
+                    >
+                      <div className="flex items-center gap-2">
+                        <span className={`text-xs transition-transform ${expandedLate === empId ? 'rotate-90' : ''}`}>▶</span>
+                        <span className="font-semibold">{data.name}</span>
+                        <span className="text-xs text-slate-400">{data.office}</span>
+                      </div>
+                      <div className="text-right">
+                        <span className="bg-red-100 text-red-700 px-2 py-1 rounded text-xs font-bold">
+                          {data.lateCount} late receipt{data.lateCount !== 1 ? 's' : ''}
+                        </span>
+                        <div className="text-xs text-slate-400 mt-1">{data.totalClaims} total claims</div>
+                      </div>
                     </div>
-                    <div className="text-right">
-                      <span className="bg-red-100 text-red-700 px-2 py-1 rounded text-xs font-bold">
-                        {data.lateCount} late receipt{data.lateCount !== 1 ? 's' : ''}
-                      </span>
-                      <div className="text-xs text-slate-400 mt-1">{data.totalClaims} total claims</div>
-                    </div>
+                    {expandedLate === empId && (
+                      <div className="bg-red-50 px-6 pb-3">
+                        {data.lateItems.map((item, i) => {
+                          const cleanNotes = item.adminNotes ? item.adminNotes.replace(/ \[R\]:/g, ':').replace(/ \[RETURN\]:/g, ':') : '';
+                          return (
+                            <div key={i} className="py-2 border-b border-red-200 last:border-0 text-sm">
+                              <div className="flex justify-between items-start">
+                                <div className="flex-1">
+                                  <div className="flex items-center gap-2 flex-wrap">
+                                    <span className="bg-red-200 text-red-800 text-xs px-1.5 py-0.5 rounded font-bold">{item.ref}</span>
+                                    <span className="font-medium">{item.merchant}</span>
+                                    <span className="text-xs text-slate-400">{formatShortDate(item.date)}</span>
+                                    <span className="bg-red-100 text-red-600 text-xs px-1.5 py-0.5 rounded">{item.monthsLate}mo late</span>
+                                  </div>
+                                  <p className="text-xs text-slate-500 mt-0.5">{item.claimNumber}</p>
+                                  {item.description && <p className="text-xs text-slate-600 mt-0.5">{item.description}</p>}
+                                  {cleanNotes && <p className="text-xs text-amber-700 mt-0.5 bg-amber-50 px-2 py-0.5 rounded">📋 {cleanNotes.split('\n').join(' | ')}</p>}
+                                </div>
+                                <span className="font-bold text-red-700 text-sm ml-2 whitespace-nowrap">{item.currency} {item.amount.toFixed(2)}</span>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
                   </div>
                 ))}
               </div>
@@ -3883,21 +4014,56 @@ export default function BerkeleyExpenseSystem() {
         </div>
         <button onClick={() => setShowPreviousReview(null)} className="w-full mt-4 bg-slate-100 text-slate-700 py-2 rounded-lg font-semibold">Close</button></div></div>)}
         
-        {/* Approved Claims Archive - for office admins only */}
-        {currentUser.role === 'admin' && (() => {
-          const approvedClaims = claims.filter(c => 
-            (c.status === 'approved' || c.status === 'submitted_to_finance') && 
-            c.office_code === currentUser.office
-          ).sort((a, b) => new Date(b.level2_approved_at || b.submitted_at || 0) - new Date(a.level2_approved_at || a.submitted_at || 0));
+        {/* Submitted to Finance - editable by admin */}
+        {(currentUser.role === 'admin' || currentUser.role === 'group_finance') && (() => {
+          const submittedClaims = claims.filter(c => 
+            c.status === 'submitted_to_finance' && 
+            (currentUser.role === 'group_finance' || c.office_code === currentUser.office)
+          ).sort((a, b) => new Date(b.submitted_to_finance_at || b.submitted_at || 0) - new Date(a.submitted_to_finance_at || a.submitted_at || 0));
+          
+          return submittedClaims.length > 0 ? (
+            <div className="bg-white rounded-2xl shadow-lg p-6 mt-4 border-2 border-amber-300">
+              <h3 className="font-bold mb-4 text-amber-700">📝 Submitted to Finance ({submittedClaims.length})</h3>
+              <div className="space-y-2 max-h-[400px] overflow-y-auto">
+                {submittedClaims.map(claim => (
+                  <div key={claim.id} className="flex items-center justify-between p-3 rounded-xl bg-amber-50 border border-amber-200">
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="font-semibold text-sm">{claim.user_name}</span>
+                        <span className="bg-amber-100 text-amber-700 text-xs px-2 py-0.5 rounded-full">{claim.claim_number}</span>
+                      </div>
+                      <p className="text-xs text-slate-500 mt-0.5">
+                        {formatShortDate(claim.submitted_to_finance_at || claim.submitted_at)} • {(claim.expenses || []).length} items
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-1.5 flex-shrink-0">
+                      <span className="font-bold text-amber-700 text-sm mr-1">{formatCurrency(claim.total_amount, claim.currency)}</span>
+                      <button onClick={() => handleDownloadPDF(claim)} className="bg-green-100 text-green-700 px-2 py-1.5 rounded-lg text-xs">📥</button>
+                      <button onClick={() => setEditingClaim(claim)} className="bg-blue-100 text-blue-700 px-2 py-1.5 rounded-lg text-xs">✏️</button>
+                      <button onClick={() => handleMarkPaid(claim.id)} disabled={loading} className="bg-green-600 text-white px-2 py-1.5 rounded-lg text-xs font-semibold disabled:opacity-50">✓ Paid</button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : null;
+        })()}
+        
+        {/* Paid Claims Archive - read only */}
+        {(currentUser.role === 'admin' || currentUser.role === 'group_finance') && (() => {
+          const paidClaims = claims.filter(c => 
+            c.status === 'paid' && 
+            (currentUser.role === 'group_finance' || c.office_code === currentUser.office)
+          ).sort((a, b) => new Date(b.paid_at || b.submitted_at || 0) - new Date(a.paid_at || a.submitted_at || 0));
           
           return (
             <div className="bg-white rounded-2xl shadow-lg p-6 mt-4">
-              <h3 className="font-bold mb-4">📁 Approved Claims ({approvedClaims.length})</h3>
-              {approvedClaims.length === 0 ? (
-                <p className="text-center text-slate-400 py-4">No approved claims yet</p>
+              <h3 className="font-bold mb-4">📁 Paid Claims ({paidClaims.length})</h3>
+              {paidClaims.length === 0 ? (
+                <p className="text-center text-slate-400 py-4">No paid claims yet</p>
               ) : (
                 <div className="space-y-2 max-h-[400px] overflow-y-auto">
-                  {approvedClaims.map(claim => (
+                  {paidClaims.map(claim => (
                     <div key={claim.id} className="flex items-center justify-between p-3 rounded-xl bg-green-50 border border-green-200">
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2 flex-wrap">
@@ -3905,12 +4071,12 @@ export default function BerkeleyExpenseSystem() {
                           <span className="bg-green-100 text-green-700 text-xs px-2 py-0.5 rounded-full">{claim.claim_number}</span>
                         </div>
                         <p className="text-xs text-slate-500 mt-0.5">
-                          {claim.level2_approved_at ? formatShortDate(claim.level2_approved_at) : formatShortDate(claim.submitted_at)} • {claim.item_count || '?'} items
+                          Paid: {formatShortDate(claim.paid_at)} • {(claim.expenses || []).length} items
                         </p>
                       </div>
-                      <div className="flex items-center gap-2 flex-shrink-0">
-                        <span className="font-bold text-green-700">{formatCurrency(claim.total_amount, claim.currency)}</span>
-                        <button onClick={() => handleDownloadPDF(claim)} className="bg-green-100 text-green-700 px-3 py-2 rounded-lg text-sm">📥</button>
+                      <div className="flex items-center gap-1.5 flex-shrink-0">
+                        <span className="font-bold text-green-700 text-sm mr-1">{formatCurrency(claim.total_amount, claim.currency)}</span>
+                        <button onClick={() => handleDownloadPDF(claim)} className="bg-green-100 text-green-700 px-2 py-1.5 rounded-lg text-xs">📥</button>
                       </div>
                     </div>
                   ))}
