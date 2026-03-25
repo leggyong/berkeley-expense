@@ -160,7 +160,8 @@ const OFFICES = [
   { code: 'MYS', name: 'Malaysia', currency: 'MYR', companyName: 'Berkeley (Singapore)' },
   { code: 'SIN', name: 'Singapore', currency: 'SGD', companyName: 'Berkeley (Singapore)' },
   { code: 'BKK', name: 'Bangkok', currency: 'THB', companyName: 'Berkeley (Thailand)' },
-  { code: 'DXB', name: 'Dubai', currency: 'AED', companyName: 'Berkeley London Residential Ltd' }
+  { code: 'DXB', name: 'Dubai', currency: 'AED', companyName: 'Berkeley London Residential Ltd' },
+  { code: 'ADM', name: 'Admin', currency: 'GBP', companyName: 'Berkeley Group', isAdmin: true }
 ];
 
 const DEVELOPMENTS = [
@@ -269,7 +270,8 @@ const EMPLOYEES = [
   { id: 1007, name: 'Olivia Wyatt', office: 'DXB', role: 'employee', reimburseCurrency: 'AED', claimName: 'Olivia', password: 'berkeley123' },
   { id: 1008, name: 'Keisha Whitehorne', office: 'DXB', role: 'employee', reimburseCurrency: 'AED', claimName: 'Keisha', password: 'berkeley123' },
   // Group Finance
-  { id: 9001, name: 'Finance', office: 'LON', role: 'group_finance', reimburseCurrency: 'GBP', claimName: 'Finance', password: 'berkeley123' }
+  { id: 9001, name: 'Finance', office: 'ADM', role: 'group_finance', reimburseCurrency: 'GBP', claimName: 'Finance', password: 'berkeley123' },
+  { id: 9002, name: 'CSC China', office: 'ADM', role: 'group_finance', reimburseCurrency: 'CNY', claimName: 'CSC', password: 'berkeley123', reportOffices: ['BEJ', 'CHE', 'SHA', 'SHE'] }
 ];
 
 // Emma Fowler's restructured categories aligned with IFS accounting (Feb 2026)
@@ -345,10 +347,15 @@ const CURRENCIES = [
 ];
 
 // Format admin notes with different colors for different reviewers (HTML for PDF)
-const formatAdminNotesHTML = (notes) => {
+// PDF version: completely removes return reason lines (they're only for app workflow)
+const formatAdminNotesHTML = (notes, forPDF = false) => {
   if (!notes) return '';
-  // Strip [R] and [RETURN] markers for clean display
-  const cleaned = notes.replace(/ \[R\]:/g, ':').replace(/ \[RETURN\]:/g, ':');
+  const lines = notes.split('\n').filter(l => l.trim());
+  // For PDF: remove return reason lines entirely
+  const filteredLines = forPDF ? lines.filter(l => !l.includes('[R]:') && !l.includes('[RETURN]:')) : lines;
+  if (filteredLines.length === 0) return '';
+  // Strip markers for display
+  const cleaned = filteredLines.join('\n').replace(/ \[R\]:/g, ':').replace(/ \[RETURN\]:/g, ':');
   const reviewerColors = { 'Ann': '#2563eb', 'John': '#059669', 'Emma': '#7c3aed', 'Cathy': '#dc2626', 'default': '#d97706' };
   const parts = cleaned.split(/(?=\b(?:Ann|John|Emma|Cathy|[A-Z][a-z]+):)/g).filter(p => p.trim());
   if (parts.length <= 1) return '<span style="color:#d97706;">' + cleaned + '</span>';
@@ -1092,6 +1099,11 @@ export default function BerkeleyExpenseSystem() {
   const [statementAnnotations, setStatementAnnotations] = useState([]);
   const [selectedClaim, setSelectedClaim] = useState(null);
   const [activeTab, setActiveTab] = useState('my_expenses');
+  
+  // Default admin accounts to appropriate tab
+  useEffect(() => {
+    if (currentUser?.role === 'group_finance') setActiveTab('finance');
+  }, [currentUser]);
   const [editingExpense, setEditingExpense] = useState(null);
   const [editingClaim, setEditingClaim] = useState(null);
   const [backchargeFromDate, setBackchargeFromDate] = useState('');
@@ -1172,6 +1184,12 @@ export default function BerkeleyExpenseSystem() {
       
       // Branch: save to claims table (returned claim) or user_drafts (current draft)
       if (editingReturnedClaimId) {
+        // SAFEGUARD: Never overwrite a returned claim with empty expenses
+        if (migratedExpenses.length === 0) {
+          console.warn('⚠️ Blocked saving empty expenses to returned claim', editingReturnedClaimId);
+          setSavingStatus('saved');
+          return true;
+        }
         // Save edits back to the returned claim in claims table
         const total = migratedExpenses.reduce((sum, e) => sum + parseFloat(e.reimbursementAmount || e.amount || 0), 0);
         const claimUpdate = {
@@ -1494,7 +1512,7 @@ export default function BerkeleyExpenseSystem() {
         const warnings = [];
         if (isOld) warnings.push('<span style="color:red;font-weight:bold;">⚠ >2 MONTHS</span>');
         if (exp.isPotentialDuplicate) warnings.push('<span style="color:orange;font-weight:bold;">⚠ DUPLICATE with ' + (exp.duplicateMatchLabel || '?') + '?</span>');
-        if (exp.adminNotes) warnings.push('<div style="background:#fff8e1;padding:2px 4px;border-radius:3px;">📝 ' + formatAdminNotesHTML(exp.adminNotes) + '</div>');
+        if (exp.adminNotes) { const pdfNotes = formatAdminNotesHTML(exp.adminNotes, true); if (pdfNotes) warnings.push('<div style="background:#fff8e1;padding:2px 4px;border-radius:3px;">📝 ' + pdfNotes + '</div>'); }
         // Add per pax info if applicable
         // Add per pax info BEFORE comments if applicable
         if (pax > 0) warnings.unshift('<span style="color:#7c3aed;">' + pax + ' pax: ' + reimburseCurrency + ' ' + fmtAmt(perPax) + ' (£' + fmtAmt(perPaxGBP) + ')/pax</span>');
@@ -1578,7 +1596,7 @@ export default function BerkeleyExpenseSystem() {
       }
       const stmtContent = matchStmtImg ? '<div style="flex:1;max-width:48%;border-left:3px solid #ff9800;padding-left:8px;"><div style="background:#ff9800;color:white;padding:5px 10px;font-weight:bold;font-size:9px;margin-bottom:8px;border-radius:4px;">💳 Matched Statement ' + (matchStmtIdx + 1) + '</div><img src="' + matchStmtImg + '" style="max-width:100%;max-height:' + (160 - heightPenalty) + 'mm;object-fit:contain;border:1px solid #ddd;" /></div>' : '';
       const contentHTML = matchStmtImg ? '<div style="display:flex;gap:10px;align-items:flex-start;"><div style="flex:1;max-width:50%;">' + receiptContent + '</div>' + stmtContent + '</div>' : receiptContent;
-      return '<div class="page receipt-page"><div class="receipt-header"><div class="receipt-ref">' + exp.seqRef + '</div><div class="receipt-info"><strong>' + exp.merchant + '</strong> | ' + formatDDMMYYYY(new Date(exp.date)) + '<br>' + cat.name + ' | ' + exp.currency + ' ' + fmtAmt(exp.amount) + (exp.isForeignCurrency ? ' → ' + reimburseCurrency + ' ' + fmtAmt(exp.reimbursementAmount) + (exp.forexRate ? ' (1 ' + exp.currency + ' = ' + exp.forexRate.toFixed(4) + ' ' + reimburseCurrency + ')' : '') : '') + '<br>' + (exp.description || '') + oldBadge + dupBadge + paxInfo + (exp.attendees ? '<br>' + exp.attendees.replace(/\n/g, ', ') : '') + (exp.adminNotes ? '<br><div style="background:#fff8e1;padding:2px 4px;border-radius:3px;">📝 ' + formatAdminNotesHTML(exp.adminNotes) + '</div>' : '') + backchargeHTML + '</div></div>' + contentHTML + '</div>';
+      return '<div class="page receipt-page"><div class="receipt-header"><div class="receipt-ref">' + exp.seqRef + '</div><div class="receipt-info"><strong>' + exp.merchant + '</strong> | ' + formatDDMMYYYY(new Date(exp.date)) + '<br>' + cat.name + ' | ' + exp.currency + ' ' + fmtAmt(exp.amount) + (exp.isForeignCurrency ? ' → ' + reimburseCurrency + ' ' + fmtAmt(exp.reimbursementAmount) + (exp.forexRate ? ' (1 ' + exp.currency + ' = ' + exp.forexRate.toFixed(4) + ' ' + reimburseCurrency + ')' : '') : '') + '<br>' + (exp.description || '') + oldBadge + dupBadge + paxInfo + (exp.attendees ? '<br>' + exp.attendees.replace(/\n/g, ', ') : '') + (() => { const _n = exp.adminNotes ? formatAdminNotesHTML(exp.adminNotes, true) : ''; return _n ? '<br><div style="background:#fff8e1;padding:2px 4px;border-radius:3px;">📝 ' + _n + '</div>' : ''; })() + backchargeHTML + '</div></div>' + contentHTML + '</div>';
     }).join('');
 
     // Statement pages - only include if there are foreign currency expenses without inline matched statements
@@ -3096,7 +3114,7 @@ export default function BerkeleyExpenseSystem() {
         </div>
         <div className="bg-white rounded-2xl shadow-lg p-6">
           <h3 className="font-bold text-slate-800 mb-4">📁 My Claims</h3>
-          {myClaims.filter(c => c.status !== 'changes_requested').length === 0 ? <p className="text-center text-slate-400 py-8">None</p> : (<div className="space-y-2">{myClaims.filter(c => c.status !== 'changes_requested').map(claim => (<div key={claim.id} className="flex items-center justify-between p-4 rounded-xl bg-slate-50 border"><div><span className="font-semibold">{claim.claim_number}</span><span className={`ml-2 text-xs px-2 py-0.5 rounded-full ${claim.status === 'approved' || claim.status === 'paid' ? 'bg-green-100 text-green-700' : claim.status === 'rejected' ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-700'}`}>{getClaimStatusText(claim)}</span></div><div className="flex items-center gap-3"><span className="font-bold">{formatCurrency(claim.total_amount, claim.currency)}</span><button onClick={() => handleDownloadPDF(claim)} className="bg-green-100 text-green-700 px-3 py-2 rounded-lg text-sm">📥</button></div></div>))}</div>)}
+          {myClaims.filter(c => c.status !== 'changes_requested').length === 0 ? <p className="text-center text-slate-400 py-8">None</p> : (<div className="space-y-2">{myClaims.filter(c => c.status !== 'changes_requested').map(claim => (<div key={claim.id} className="flex items-center justify-between p-4 rounded-xl bg-slate-50 border"><div><span className="font-semibold">{claim.claim_number}</span><span className={`ml-2 text-xs px-2 py-0.5 rounded-full ${claim.status === 'approved' || claim.status === 'paid' || claim.status === 'submitted_to_finance' ? 'bg-green-100 text-green-700' : claim.status === 'rejected' ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-700'}`}>{getClaimStatusText(claim)}</span></div><div className="flex items-center gap-3"><span className="font-bold">{formatCurrency(claim.total_amount, claim.currency)}</span><button onClick={() => handleDownloadPDF(claim)} className="bg-green-100 text-green-700 px-3 py-2 rounded-lg text-sm">📥</button></div></div>))}</div>)}
         </div>
         
         {/* Resubmit Claim Modal */}
@@ -3350,6 +3368,10 @@ export default function BerkeleyExpenseSystem() {
     // Get relevant claims based on filters
     const relevantClaims = claimsPool.filter(c => {
       if (!c) return false;
+      
+      // Office scope: CSC China only sees China offices
+      if (currentUser.reportOffices && !currentUser.reportOffices.includes(c.office_code)) return false;
+      
       const isApproved = c.status === 'approved' || c.status === 'paid' || c.status === 'submitted_to_finance';
       const isDraft = c.status === 'draft';
       // Include ALL non-rejected statuses when includePending is checked
@@ -3519,6 +3541,9 @@ export default function BerkeleyExpenseSystem() {
     
     // Export to Excel/CSV function
     const handleExport = () => {
+      // Format status for CSV
+      const fmtStatus = (s) => s === 'approved' ? 'Approved' : s === 'paid' ? 'Paid' : s === 'submitted_to_finance' ? 'With Finance' : s === 'pending_review' ? 'Pending L1' : s === 'pending_level2' ? 'Pending L2' : s === 'changes_requested' ? 'Returned' : s === 'draft' ? 'Draft' : s;
+      
       let csvContent = '';
       let filename = '';
       
@@ -3551,9 +3576,6 @@ export default function BerkeleyExpenseSystem() {
           csvContent += `"${data.name}","${data.office}","${data.lateCount}","${data.totalClaims}"\n`;
         });
       }
-      
-      // Format status for CSV
-      const fmtStatus = (s) => s === 'approved' ? 'Approved' : s === 'paid' ? 'Paid' : s === 'submitted_to_finance' ? 'With Finance' : s === 'pending_review' ? 'Pending L1' : s === 'pending_level2' ? 'Pending L2' : s === 'changes_requested' ? 'Returned' : s === 'draft' ? 'Draft' : s;
       
       // Download CSV
       const blob = new Blob(['\ufeff' + csvContent], { type: 'text/csv;charset=utf-8;' });
@@ -4018,7 +4040,7 @@ export default function BerkeleyExpenseSystem() {
         {(currentUser.role === 'admin' || currentUser.role === 'group_finance') && (() => {
           const submittedClaims = claims.filter(c => 
             c.status === 'submitted_to_finance' && 
-            (currentUser.role === 'group_finance' || c.office_code === currentUser.office)
+            (currentUser.role === 'group_finance' ? (!currentUser.reportOffices || currentUser.reportOffices.includes(c.office_code)) : c.office_code === currentUser.office)
           ).sort((a, b) => new Date(b.submitted_to_finance_at || b.submitted_at || 0) - new Date(a.submitted_to_finance_at || a.submitted_at || 0));
           
           return submittedClaims.length > 0 ? (
@@ -4039,8 +4061,8 @@ export default function BerkeleyExpenseSystem() {
                     <div className="flex items-center gap-1.5 flex-shrink-0">
                       <span className="font-bold text-amber-700 text-sm mr-1">{formatCurrency(claim.total_amount, claim.currency)}</span>
                       <button onClick={() => handleDownloadPDF(claim)} className="bg-green-100 text-green-700 px-2 py-1.5 rounded-lg text-xs">📥</button>
-                      <button onClick={() => setEditingClaim(claim)} className="bg-blue-100 text-blue-700 px-2 py-1.5 rounded-lg text-xs">✏️</button>
-                      <button onClick={() => handleMarkPaid(claim.id)} disabled={loading} className="bg-green-600 text-white px-2 py-1.5 rounded-lg text-xs font-semibold disabled:opacity-50">✓ Paid</button>
+                      {!currentUser.reportOffices && <button onClick={() => setEditingClaim(claim)} className="bg-blue-100 text-blue-700 px-2 py-1.5 rounded-lg text-xs">✏️</button>}
+                      {!currentUser.reportOffices && <button onClick={() => handleMarkPaid(claim.id)} disabled={loading} className="bg-green-600 text-white px-2 py-1.5 rounded-lg text-xs font-semibold disabled:opacity-50">✓ Paid</button>}
                     </div>
                   </div>
                 ))}
@@ -4053,7 +4075,7 @@ export default function BerkeleyExpenseSystem() {
         {(currentUser.role === 'admin' || currentUser.role === 'group_finance') && (() => {
           const paidClaims = claims.filter(c => 
             c.status === 'paid' && 
-            (currentUser.role === 'group_finance' || c.office_code === currentUser.office)
+            (currentUser.role === 'group_finance' ? (!currentUser.reportOffices || currentUser.reportOffices.includes(c.office_code)) : c.office_code === currentUser.office)
           ).sort((a, b) => new Date(b.paid_at || b.submitted_at || 0) - new Date(a.paid_at || a.submitted_at || 0));
           
           return (
@@ -4125,7 +4147,7 @@ export default function BerkeleyExpenseSystem() {
           <div className="flex items-center gap-3"><div className="text-right hidden sm:block"><div className="text-sm font-medium">{currentUser.name.split(' ').slice(0, 2).join(' ')}</div><div className="text-xs text-slate-400 capitalize">{currentUser.role}</div></div><button onClick={() => { localStorage.removeItem('berkeley_current_user'); setCurrentUser(null); setExpenses([]); setAnnotatedStatements([]); setStatementAnnotations([]); setStatementImages([]); setOriginalStatementImages([]); setActiveTab('my_expenses'); }} className="bg-white/10 px-3 py-2 rounded-lg text-xs font-medium">Logout</button></div>
         </div>
       </header>
-      {canReview && (<div className="bg-white border-b sticky top-14 z-30"><div className="max-w-3xl mx-auto flex"><button onClick={() => setActiveTab('my_expenses')} className={`flex-1 py-3 text-sm font-semibold border-b-2 ${activeTab === 'my_expenses' ? 'border-blue-600 text-blue-600' : 'border-transparent text-slate-500'}`}>📋 My Expenses</button><button onClick={() => setActiveTab('review')} className={`flex-1 py-3 text-sm font-semibold border-b-2 ${activeTab === 'review' ? 'border-blue-600 text-blue-600' : 'border-transparent text-slate-500'}`}>👀 Review{getReviewableClaims().length > 0 && <span className="ml-2 bg-amber-500 text-white text-xs px-2 py-0.5 rounded-full">{getReviewableClaims().length}</span>}</button>{currentUser?.role === 'group_finance' && <button onClick={() => setActiveTab('finance')} className={`flex-1 py-3 text-sm font-semibold border-b-2 ${activeTab === 'finance' ? 'border-purple-600 text-purple-600' : 'border-transparent text-slate-500'}`}>📊 Finance</button>}</div></div>)}
+      {canReview && (<div className="bg-white border-b sticky top-14 z-30"><div className="max-w-3xl mx-auto flex">{currentUser?.role !== 'group_finance' && <button onClick={() => setActiveTab('my_expenses')} className={`flex-1 py-3 text-sm font-semibold border-b-2 ${activeTab === 'my_expenses' ? 'border-blue-600 text-blue-600' : 'border-transparent text-slate-500'}`}>📋 My Expenses</button>}<button onClick={() => setActiveTab('review')} className={`flex-1 py-3 text-sm font-semibold border-b-2 ${activeTab === 'review' ? 'border-blue-600 text-blue-600' : 'border-transparent text-slate-500'}`}>👀 Review{getReviewableClaims().length > 0 && <span className="ml-2 bg-amber-500 text-white text-xs px-2 py-0.5 rounded-full">{getReviewableClaims().length}</span>}</button>{currentUser?.role === 'group_finance' && <button onClick={() => setActiveTab('finance')} className={`flex-1 py-3 text-sm font-semibold border-b-2 ${activeTab === 'finance' ? 'border-purple-600 text-purple-600' : 'border-transparent text-slate-500'}`}>📊 Finance</button>}</div></div>)}
       <main className="max-w-3xl mx-auto p-4 pb-20">{activeTab === 'finance' && currentUser?.role === 'group_finance' ? <FinanceDashboard /> : canReview && activeTab === 'review' ? <ReviewClaimsTab /> : <MyExpensesTab />}</main>
       {(showAddExpense || editingExpense) && <AddExpenseModal editExpense={editingExpense} existingClaims={claims} expenses={expenses} onClose={() => { setShowAddExpense(false); setEditingExpense(null); }} />}
       {showMileageModal && currentUser.mileageRate && (() => {
