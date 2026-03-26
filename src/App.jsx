@@ -1,4 +1,4 @@
-﻿import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 
 /*
  * BERKELEY INTERNATIONAL EXPENSE MANAGEMENT SYSTEM
@@ -557,7 +557,7 @@ const SENIOR_STAFF_ROUTING = {
   // Other managers → Ann → Cathy He
   801: { level1: 805, level2: 804, level1Name: 'Ann Low', level2Name: 'Cathy He' },
   803: { level1: 805, level2: 804, level1Name: 'Ann Low', level2Name: 'Cathy He' },
-  808: { level1: 812, level2: 804, level1Name: 'Kareen Ng', level2Name: 'Cathy He' },
+  808: { level1: 805, level2: 804, level1Name: 'Ann Low', level2Name: 'Cathy He' },
   // Admins → their approver (single level)
   102: { level1: 103, level2: null, level1Name: 'Even Huang', level2Name: null, singleLevel: true },
   306: { level1: 303, level2: null, level1Name: 'Elsa Huang', level2Name: null, singleLevel: true },
@@ -2356,6 +2356,8 @@ export default function BerkeleyExpenseSystem() {
     try {
       const { error } = await supabase.from('claims').delete().eq('id', claimId);
       if (error) throw error;
+      setSelectedClaim(null);
+      setEditingClaim(null);
       await loadClaims();
       alert('🗑️ Claim deleted');
     } catch (err) { console.error('Delete claim error:', err); alert('❌ Failed to delete'); }
@@ -4375,9 +4377,13 @@ export default function BerkeleyExpenseSystem() {
   const ReviewClaimsTab = () => {
     const reviewableClaims = getReviewableClaims();
     const claimsForSubmission = getClaimsForSubmission();
-    const [showDupModal, setShowDupModal] = useState(null); // claim to duplicate
-    const [dupTargets, setDupTargets] = useState([]); // selected employee IDs
+    const [showDupModal, setShowDupModal] = useState(null);
+    const [dupTargets, setDupTargets] = useState([]);
     const [dupBusy, setDupBusy] = useState(false);
+    // Country head dashboard state
+    const [selectedOffices, setSelectedOffices] = useState(currentUser.dashboardOffices || []);
+    const [dashIncludePending, setDashIncludePending] = useState(true);
+    const [dashDeductBackcharge, setDashDeductBackcharge] = useState(false);
     
     const handleDuplicate = async () => {
       if (!showDupModal || dupTargets.length === 0) return;
@@ -4475,50 +4481,69 @@ export default function BerkeleyExpenseSystem() {
         <div className="bg-white rounded-2xl shadow-lg p-6">
           {/* Country Head Dashboard */}
           {currentUser.dashboardOffices && (() => {
-            const offices = currentUser.dashboardOffices;
+            const allOffices = currentUser.dashboardOffices;
+            
             const fy = getFinancialYear();
-            const fyStart = new Date(fy, 4, 1); // May 1
+            const fyStart = new Date(fy, 4, 1);
             const now = new Date();
             const months = [];
             let d = new Date(fyStart);
             while (d <= now) { months.push(new Date(d)); d.setMonth(d.getMonth() + 1); }
             const monthNames = months.map(m => m.toLocaleDateString('en-GB', { month: 'short', year: '2-digit' }));
             
-            // Get approved claims for these offices
-            const dashClaims = claims.filter(c => offices.includes(c.office_code) && 
-              (c.status === 'approved' || c.status === 'paid' || c.status === 'submitted_to_finance' || c.status === 'pending_review' || c.status === 'pending_level2'));
+            const dashClaims = claims.filter(c => selectedOffices.includes(c.office_code) && (
+              c.status === 'approved' || c.status === 'paid' || c.status === 'submitted_to_finance' ||
+              (dashIncludePending && (c.status === 'pending_review' || c.status === 'pending_level2' || c.status === 'changes_requested'))
+            ));
             
-            // Build GL × month matrix
             const glMonthly = {};
             dashClaims.forEach(c => {
               (c.expenses || []).forEach(exp => {
                 const cat = EXPENSE_CATEGORIES[exp.category];
                 if (!cat) return;
-                const gl = cat.gl;
                 const group = cat.group;
-                const amt = parseFloat(exp.reimbursementAmount || exp.amount || 0);
+                let amt = parseFloat(exp.reimbursementAmount || exp.amount || 0);
+                
+                if (dashDeductBackcharge && exp.hasBackcharge && exp.backcharges?.length > 0) {
+                  const totalPct = exp.backcharges.reduce((s, bc) => s + (parseFloat(bc.percentage) || 0), 0);
+                  amt = amt * (1 - totalPct / 100);
+                }
+                
                 const gbp = toGBP(amt, c.currency || 'GBP');
                 const expDate = new Date(exp.date);
                 const monthIdx = months.findIndex(m => m.getMonth() === expDate.getMonth() && m.getFullYear() === expDate.getFullYear());
                 if (monthIdx < 0) return;
                 
-                if (!glMonthly[group]) glMonthly[group] = { name: group, months: new Array(months.length).fill(0) };
+                if (!glMonthly[group]) glMonthly[group] = { months: new Array(months.length).fill(0) };
                 glMonthly[group].months[monthIdx] += gbp;
               });
             });
             
             const groupNames = { 'TRAVEL': 'Travel', 'SUBSISTENCE': 'Subsistence & Welfare', 'ENTERTAINING': 'Business Entertaining', 'OFFICE': 'Office Costs', 'MARKETING': 'Marketing & Events', 'LEGAL': 'Legal & Professional' };
+            const fmtK = (v) => v > 0 ? Math.round(v).toLocaleString() : '';
+            const fmtKTotal = (v) => '£' + Math.round(v).toLocaleString();
             
             return (
               <div className="bg-white rounded-2xl shadow-lg p-4 border-2 border-blue-300">
-                <h3 className="font-bold text-blue-700 mb-2">📊 Office Dashboard — {offices.map(o => OFFICES.find(of => of.code === o)?.name).join(', ')}</h3>
-                <p className="text-xs text-slate-500 mb-3">FY{fy} • GBP equivalent • Includes pending claims</p>
+                <h3 className="font-bold text-blue-700 mb-2">📊 Office Dashboard</h3>
+                <div className="flex flex-wrap gap-2 mb-2">
+                  {allOffices.map(code => {
+                    const name = OFFICES.find(o => o.code === code)?.name || code;
+                    const isOn = selectedOffices.includes(code);
+                    return <button key={code} onClick={() => setSelectedOffices(prev => isOn ? prev.filter(o => o !== code) : [...prev, code])} className={`px-3 py-1 rounded-full text-xs font-semibold border ${isOn ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-slate-500 border-slate-300'}`}>{name}</button>;
+                  })}
+                </div>
+                <div className="flex flex-wrap gap-3 mb-3">
+                  <label className="flex items-center gap-1.5 text-xs"><input type="checkbox" checked={dashIncludePending} onChange={e => setDashIncludePending(e.target.checked)} className="rounded" />Include pending</label>
+                  <label className="flex items-center gap-1.5 text-xs"><input type="checkbox" checked={dashDeductBackcharge} onChange={e => setDashDeductBackcharge(e.target.checked)} className="rounded" />Deduct backcharge</label>
+                </div>
+                <p className="text-xs text-slate-400 mb-2">FY{fy} • GBP equivalent</p>
                 <div className="overflow-x-auto">
                   <table className="w-full text-xs border-collapse">
                     <thead>
                       <tr className="bg-blue-50">
                         <th className="text-left p-2 border">Category</th>
-                        {monthNames.map((m, i) => <th key={i} className="text-right p-2 border min-w-[70px]">{m}</th>)}
+                        {monthNames.map((m, i) => <th key={i} className="text-right p-2 border min-w-[65px]">{m}</th>)}
                         <th className="text-right p-2 border font-bold bg-blue-100">Total</th>
                       </tr>
                     </thead>
@@ -4528,8 +4553,8 @@ export default function BerkeleyExpenseSystem() {
                         return (
                           <tr key={group} className="hover:bg-slate-50">
                             <td className="p-2 border font-semibold text-slate-700">{groupNames[group] || group}</td>
-                            {data.months.map((val, i) => <td key={i} className="text-right p-2 border text-slate-600">{val > 0 ? `£${val.toFixed(0)}` : ''}</td>)}
-                            <td className="text-right p-2 border font-bold text-blue-700">£{rowTotal.toFixed(0)}</td>
+                            {data.months.map((val, i) => <td key={i} className="text-right p-2 border text-slate-600">{fmtK(val)}</td>)}
+                            <td className="text-right p-2 border font-bold text-blue-700">{fmtKTotal(rowTotal)}</td>
                           </tr>
                         );
                       })}
@@ -4537,9 +4562,9 @@ export default function BerkeleyExpenseSystem() {
                         <td className="p-2 border">TOTAL</td>
                         {months.map((_, i) => {
                           const colTotal = Object.values(glMonthly).reduce((s, d) => s + d.months[i], 0);
-                          return <td key={i} className="text-right p-2 border">£{colTotal.toFixed(0)}</td>;
+                          return <td key={i} className="text-right p-2 border">{fmtKTotal(colTotal)}</td>;
                         })}
-                        <td className="text-right p-2 border text-blue-800">£{Object.values(glMonthly).reduce((s, d) => s + d.months.reduce((a, b) => a + b, 0), 0).toFixed(0)}</td>
+                        <td className="text-right p-2 border text-blue-800">{fmtKTotal(Object.values(glMonthly).reduce((s, d) => s + d.months.reduce((a, b) => a + b, 0), 0))}</td>
                       </tr>
                     </tbody>
                   </table>
