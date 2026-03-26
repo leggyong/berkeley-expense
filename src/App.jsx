@@ -700,9 +700,9 @@ const StatementAnnotator = ({ images, initialIndex = 0, expenses, existingAnnota
       ctx.strokeStyle = '#ff6600'; ctx.lineWidth = 3;
       ctx.strokeRect(ann.x, ann.y, ann.width, ann.height);
       ctx.fillStyle = '#ff6600';
-      ctx.fillRect(ann.x, ann.y - 22, Math.max(35, ann.ref.length * 12), 22);
-      ctx.fillStyle = 'white'; ctx.font = 'bold 14px Arial';
-      ctx.fillText(ann.ref, ann.x + 5, ann.y - 6);
+      ctx.fillRect(ann.x, ann.y - 28, Math.max(45, ann.ref.length * 16), 28);
+      ctx.fillStyle = 'white'; ctx.font = 'bold 20px Arial';
+      ctx.fillText(ann.ref, ann.x + 6, ann.y - 7);
       ctx.fillStyle = '#ff6600';
       const hs = 10;
       ctx.fillRect(ann.x - hs/2, ann.y - hs/2, hs, hs);
@@ -2223,13 +2223,13 @@ export default function BerkeleyExpenseSystem() {
         
         // Orange label background
         ctx.fillStyle = '#ff6600';
-        const labelW = Math.max(35, ref.length * 12);
-        ctx.fillRect(x, y - 22, labelW, 22);
+        const labelW = Math.max(45, ref.length * 16);
+        ctx.fillRect(x, y - 28, labelW, 28);
         
         // White text
         ctx.fillStyle = 'white';
-        ctx.font = 'bold 14px Arial';
-        ctx.fillText(ref, x + 5, y - 6);
+        ctx.font = 'bold 20px Arial';
+        ctx.fillText(ref, x + 6, y - 7);
       });
       
       rendered[stmtIdx] = canvas.toDataURL('image/png');
@@ -3590,42 +3590,43 @@ export default function BerkeleyExpenseSystem() {
       });
     });
     
-    // GL Report: Group by GL code WITH office breakdown
-    const glData = {};
+    // GL Report: Hierarchical — Group → Category → Office → Employee
+    const GL_GROUP_ORDER = ['TRAVEL', 'SUBSISTENCE', 'ENTERTAINING', 'OFFICE', 'MARKETING', 'LEGAL', 'OTHER'];
+    const GL_GROUP_NAMES = { 'TRAVEL': 'Travel', 'SUBSISTENCE': 'Subsistence, Welfare & Employee Entertaining', 'ENTERTAINING': 'Business Entertaining', 'OFFICE': 'Office Costs', 'MARKETING': 'Marketing & Events', 'LEGAL': 'Legal & Professional Fees', 'OTHER': 'Other' };
+    
+    const glHierarchy = {};
+    const glFlatItems = []; // for CSV export
     relevantClaims.forEach(claim => {
       if (!claim) return;
       (claim.expenses || []).forEach(exp => {
         if (!exp) return;
         const cat = EXPENSE_CATEGORIES[exp.category];
+        const group = cat?.group || 'OTHER';
+        const catKey = exp.category || '?';
+        const catName = cat?.name || exp.category || 'Unknown';
         const gl = cat?.gl || '9999';
-        const glName = cat?.name || exp.category || 'Unknown';
         const office = claim.office_code || 'Unknown';
-        
-        if (!glData[gl]) glData[gl] = { name: glName, items: [], totalGBP: 0, byOffice: {} };
-        if (!glData[gl].byOffice[office]) glData[gl].byOffice[office] = { items: [], totalGBP: 0 };
-        
+        const empName = claim.user_name || 'Unknown';
         const amt = parseFloat(exp.reimbursementAmount || exp.amount) || 0;
-        const gbpAmt = toGBP(amt, claim.currency || 'GBP');
+        const gbp = toGBP(amt, claim.currency || 'GBP');
         
-        const itemData = {
-          claimNumber: claim.claim_number || '-',
-          claimant: claim.user_name || 'Unknown',
-          office: office,
-          date: exp.date,
-          merchant: exp.merchant || '-',
-          description: exp.description || '-',
-          amount: amt,
-          currency: claim.currency || 'GBP',
-          gbpAmount: gbpAmt,
-          status: claim.status
-        };
+        if (!glHierarchy[group]) glHierarchy[group] = { cats: {}, totalGBP: 0 };
+        if (!glHierarchy[group].cats[catKey]) glHierarchy[group].cats[catKey] = { name: catName, gl, offices: {}, totalGBP: 0, itemCount: 0 };
+        if (!glHierarchy[group].cats[catKey].offices[office]) glHierarchy[group].cats[catKey].offices[office] = { employees: {}, totalGBP: 0 };
+        if (!glHierarchy[group].cats[catKey].offices[office].employees[empName]) glHierarchy[group].cats[catKey].offices[office].employees[empName] = { totalGBP: 0, count: 0 };
         
-        glData[gl].items.push(itemData);
-        glData[gl].totalGBP += gbpAmt;
-        glData[gl].byOffice[office].items.push(itemData);
-        glData[gl].byOffice[office].totalGBP += gbpAmt;
+        glHierarchy[group].totalGBP += gbp;
+        glHierarchy[group].cats[catKey].totalGBP += gbp;
+        glHierarchy[group].cats[catKey].itemCount++;
+        glHierarchy[group].cats[catKey].offices[office].totalGBP += gbp;
+        glHierarchy[group].cats[catKey].offices[office].employees[empName].totalGBP += gbp;
+        glHierarchy[group].cats[catKey].offices[office].employees[empName].count++;
+        
+        glFlatItems.push({ group, catName, gl, claimNumber: claim.claim_number, claimant: empName, office, date: exp.date, merchant: exp.merchant, amount: amt, currency: claim.currency, gbpAmount: gbp, status: claim.status, description: exp.description });
       });
     });
+    const totalGBP = Object.values(glHierarchy).reduce((s, g) => s + g.totalGBP, 0);
+    const totalItems = glFlatItems.length;
     
     // Submissions Report: Per employee with date range totals
     const employeeData = {};
@@ -3726,11 +3727,9 @@ export default function BerkeleyExpenseSystem() {
         });
       } else if (reportType === 'gl') {
         filename = `gl_report_${dateFrom}_to_${dateTo}.csv`;
-        csvContent = 'GL Code,Category,Claim Number,Office,Claimant,Date,Merchant,Amount (Local),Amount (GBP),Status,Description\n';
-        Object.entries(glData).forEach(([gl, data]) => {
-          data.items.forEach(item => {
-            csvContent += `"${gl}","${data.name}","${item.claimNumber || ''}","${item.office}","${item.claimant}","${item.date}","${item.merchant}","${item.currency} ${item.amount.toFixed(2)}","${item.gbpAmount.toFixed(2)}","${fmtStatus(item.status)}","${(item.description || '').replace(/"/g, '""')}"\n`;
-          });
+        csvContent = 'GL Group,GL Code,Category,Claim Number,Office,Claimant,Date,Merchant,Currency,Amount (Local),Amount (GBP),Status,Description\n';
+        glFlatItems.forEach(item => {
+          csvContent += `"${GL_GROUP_NAMES[item.group] || item.group}","${item.gl}","${item.catName}","${item.claimNumber || ''}","${item.office}","${item.claimant}","${item.date}","${item.merchant}","${item.currency}","${item.amount.toFixed(2)}","${item.gbpAmount.toFixed(2)}","${fmtStatus(item.status)}","${(item.description || '').replace(/"/g, '""')}"\n`;
         });
       } else if (reportType === 'submissions') {
         filename = `submissions_report_${dateFrom}_to_${dateTo}.csv`;
@@ -3809,43 +3808,59 @@ export default function BerkeleyExpenseSystem() {
         {/* GL Report with Office Breakdown */}
         {reportType === 'gl' && (
           <div className="bg-white rounded-xl shadow-sm border overflow-hidden">
-            <div className="bg-blue-50 p-4 border-b flex justify-between items-center">
-              <div>
-                <h3 className="font-bold text-blue-800">📋 GL Account Report</h3>
-                <p className="text-xs text-blue-600">{Object.keys(glData).length} GL codes • {relevantClaims.length} claims • Total: £{Object.values(glData).reduce((s, d) => s + d.totalGBP, 0).toFixed(2)}</p>
-              </div>
+            <div className="bg-blue-50 p-4 border-b">
+              <h3 className="font-bold text-blue-800">📋 GL Account Report</h3>
+              <p className="text-xs text-blue-600">{totalItems} items • {relevantClaims.length} claims • Total: £{totalGBP.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
             </div>
-            {Object.keys(glData).length === 0 ? (
+            {totalItems === 0 ? (
               <p className="p-4 text-center text-slate-400">No expenses in selected period</p>
             ) : (
               <div className="divide-y">
-                {Object.entries(glData).sort((a, b) => b[1].totalGBP - a[1].totalGBP).map(([gl, data]) => (
-                  <div key={gl}>
-                    <div 
-                      className="p-3 flex justify-between items-center cursor-pointer hover:bg-slate-50"
-                      onClick={() => setExpandedGL(expandedGL === gl ? null : gl)}
-                    >
-                      <div className="flex items-center gap-2">
-                        <span className="text-slate-400">{expandedGL === gl ? '▼' : '▶'}</span>
-                        <span className="font-mono text-xs bg-slate-100 px-2 py-0.5 rounded">{gl}</span>
-                        <span className="text-sm font-medium">{data.name}</span>
-                        <span className="text-xs text-slate-400">({data.items.length} items)</span>
+                {GL_GROUP_ORDER.filter(g => glHierarchy[g]).map(group => {
+                  const gData = glHierarchy[group];
+                  const isGroupOpen = expandedGL === group;
+                  return (
+                    <div key={group}>
+                      <div className="p-3 flex justify-between items-center cursor-pointer hover:bg-blue-50 bg-slate-50" onClick={() => setExpandedGL(isGroupOpen ? null : group)}>
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs">{isGroupOpen ? '▼' : '▶'}</span>
+                          <span className="font-bold text-sm">{GL_GROUP_NAMES[group]}</span>
+                        </div>
+                        <span className="font-bold text-blue-700">£{gData.totalGBP.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
                       </div>
-                      <span className="font-bold text-blue-600">£{data.totalGBP.toFixed(2)}</span>
-                    </div>
-                    {expandedGL === gl && (
-                      <div className="bg-slate-50 px-4 py-2 border-t">
-                        <p className="text-xs font-semibold text-slate-600 mb-2">Breakdown by Office:</p>
-                        {Object.entries(data.byOffice).sort((a, b) => b[1].totalGBP - a[1].totalGBP).map(([office, officeData]) => (
-                          <div key={office} className="flex justify-between py-1 text-sm border-b border-slate-200 last:border-0">
-                            <span className="text-slate-700">{office}</span>
-                            <span className="font-semibold text-slate-800">£{officeData.totalGBP.toFixed(2)} <span className="text-slate-400 font-normal">({officeData.items.length})</span></span>
+                      {isGroupOpen && Object.entries(gData.cats).sort((a, b) => b[1].totalGBP - a[1].totalGBP).map(([catKey, catData]) => {
+                        const catOpen = expandedGL === group + '_' + catKey;
+                        return (
+                          <div key={catKey} className="border-t border-slate-100">
+                            <div className="pl-6 pr-3 py-2 flex justify-between items-center cursor-pointer hover:bg-slate-50" onClick={(e) => { e.stopPropagation(); setExpandedGL(catOpen ? group : group + '_' + catKey); }}>
+                              <div className="flex items-center gap-2">
+                                <span className="text-xs text-slate-400">{catOpen ? '▼' : '▶'}</span>
+                                <span className="font-mono text-xs bg-slate-100 px-1.5 py-0.5 rounded">{catData.gl}</span>
+                                <span className="text-sm">{catData.name}</span>
+                                <span className="text-xs text-slate-400">({catData.itemCount})</span>
+                              </div>
+                              <span className="font-semibold text-blue-600 text-sm">£{catData.totalGBP.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                            </div>
+                            {catOpen && Object.entries(catData.offices).sort((a, b) => b[1].totalGBP - a[1].totalGBP).map(([office, offData]) => (
+                              <div key={office} className="pl-10 pr-3 border-t border-slate-50">
+                                <div className="py-1.5 flex justify-between items-center">
+                                  <span className="text-xs font-semibold text-slate-500">{OFFICES.find(o => o.code === office)?.name || office}</span>
+                                  <span className="text-xs font-semibold">£{offData.totalGBP.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                                </div>
+                                {Object.entries(offData.employees).sort((a, b) => b[1].totalGBP - a[1].totalGBP).map(([emp, empData]) => (
+                                  <div key={emp} className="pl-4 py-0.5 flex justify-between text-xs text-slate-600">
+                                    <span>{emp} <span className="text-slate-400">({empData.count})</span></span>
+                                    <span>£{empData.totalGBP.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                                  </div>
+                                ))}
+                              </div>
+                            ))}
                           </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                ))}
+                        );
+                      })}
+                    </div>
+                  );
+                })}
               </div>
             )}
           </div>
@@ -4394,9 +4409,14 @@ export default function BerkeleyExpenseSystem() {
     const defaultTo = new Date().toISOString().split('T')[0];
     const [dateFrom, setDateFrom] = useState(defaultFrom);
     const [dateTo, setDateTo] = useState(defaultTo);
+    const [reportType, setReportType] = useState('gl');
     const [expandedGL, setExpandedGL] = useState(null);
     
-    // Filter claims
+    const GL_GROUP_ORDER = ['TRAVEL', 'SUBSISTENCE', 'ENTERTAINING', 'OFFICE', 'MARKETING', 'LEGAL', 'OTHER'];
+    const GL_GROUP_NAMES = { 'TRAVEL': 'Travel', 'SUBSISTENCE': 'Subsistence, Welfare & Employee Entertaining', 'ENTERTAINING': 'Business Entertaining', 'OFFICE': 'Office Costs', 'MARKETING': 'Marketing & Events', 'LEGAL': 'Legal & Professional Fees', 'OTHER': 'Other' };
+    const ALL_GROUPS_MONTHLY = { 'TRAVEL': 'Travel', 'SUBSISTENCE': 'Subsistence, Welfare & Employee Entertaining', 'ENTERTAINING': 'Business Entertaining', 'OFFICE': 'Office Costs', 'MARKETING': 'Marketing & Events', 'LEGAL': 'Legal & Professional Fees' };
+
+    // Filter claims for selected offices and date range
     const filteredClaims = claims.filter(c => {
       if (!selectedOffices.includes(c.office_code)) return false;
       const isApproved = c.status === 'approved' || c.status === 'paid' || c.status === 'submitted_to_finance';
@@ -4408,71 +4428,147 @@ export default function BerkeleyExpenseSystem() {
       return true;
     });
     
-    // GL Report
-    const glData = {};
-    filteredClaims.forEach(claim => {
-      (claim.expenses || []).forEach(exp => {
-        const cat = EXPENSE_CATEGORIES[exp.category];
-        if (!cat) return;
-        const gl = cat.gl;
-        let amt = parseFloat(exp.reimbursementAmount || exp.amount || 0);
-        const gbp = toGBP(amt, claim.currency || 'GBP');
-        if (!glData[gl]) glData[gl] = { name: cat.name, items: [], total: 0, gbpTotal: 0 };
-        glData[gl].items.push({ claimant: claim.user_name, office: claim.office_code, date: exp.date, merchant: exp.merchant, amount: amt, gbpAmount: gbp, currency: exp.currency || claim.currency, claimNumber: claim.claim_number, status: claim.status, description: exp.description });
-        glData[gl].total += amt;
-        glData[gl].gbpTotal += gbp;
-      });
-    });
-    const totalGBP = Object.values(glData).reduce((s, d) => s + d.gbpTotal, 0);
-    
-    // GL × Month table
-    const fy = getFinancialYear();
-    const fyStart = new Date(fy, 4, 1);
-    const now = new Date();
-    const months = [];
-    let d = new Date(fyStart);
-    while (d <= now) { months.push(new Date(d)); d.setMonth(d.getMonth() + 1); }
-    const monthNames = months.map(m => m.toLocaleDateString('en-GB', { month: 'short', year: '2-digit' }));
-    
-    // All claims in FY for the monthly table (no date filter)
-    const fyClaims = claims.filter(c => {
-      if (!selectedOffices.includes(c.office_code)) return false;
+    // All claims for these offices (no date filter, for monthly table)
+    const allOfficeClaims = claims.filter(c => selectedOffices.includes(c.office_code));
+    const fyClaims = allOfficeClaims.filter(c => {
       const isApproved = c.status === 'approved' || c.status === 'paid' || c.status === 'submitted_to_finance';
       const isPending = c.status === 'pending_review' || c.status === 'pending_level2' || c.status === 'changes_requested';
       return isApproved || (includePending && isPending);
     });
-    
-    const ALL_GROUPS = { 'TRAVEL': 'Travel', 'SUBSISTENCE': 'Subsistence, Welfare & Employee Entertaining', 'ENTERTAINING': 'Business Entertaining', 'OFFICE': 'Office Costs', 'MARKETING': 'Marketing & Events', 'LEGAL': 'Legal & Professional' };
+
+    // === GL Hierarchy ===
+    const glHierarchy = {};
+    const glFlatItems = [];
+    filteredClaims.forEach(claim => {
+      (claim.expenses || []).forEach(exp => {
+        const cat = EXPENSE_CATEGORIES[exp.category];
+        const group = cat?.group || 'OTHER';
+        const catKey = exp.category || '?';
+        const catName = cat?.name || 'Unknown';
+        const gl = cat?.gl || '9999';
+        const office = claim.office_code || '?';
+        const empName = claim.user_name || 'Unknown';
+        const amt = parseFloat(exp.reimbursementAmount || exp.amount) || 0;
+        const gbp = toGBP(amt, claim.currency || 'GBP');
+        if (!glHierarchy[group]) glHierarchy[group] = { cats: {}, totalGBP: 0 };
+        if (!glHierarchy[group].cats[catKey]) glHierarchy[group].cats[catKey] = { name: catName, gl, offices: {}, totalGBP: 0, itemCount: 0 };
+        if (!glHierarchy[group].cats[catKey].offices[office]) glHierarchy[group].cats[catKey].offices[office] = { employees: {}, totalGBP: 0 };
+        if (!glHierarchy[group].cats[catKey].offices[office].employees[empName]) glHierarchy[group].cats[catKey].offices[office].employees[empName] = { totalGBP: 0, count: 0 };
+        glHierarchy[group].totalGBP += gbp;
+        glHierarchy[group].cats[catKey].totalGBP += gbp;
+        glHierarchy[group].cats[catKey].itemCount++;
+        glHierarchy[group].cats[catKey].offices[office].totalGBP += gbp;
+        glHierarchy[group].cats[catKey].offices[office].employees[empName].totalGBP += gbp;
+        glHierarchy[group].cats[catKey].offices[office].employees[empName].count++;
+        glFlatItems.push({ group, catName, gl, claimNumber: claim.claim_number, claimant: empName, office, date: exp.date, merchant: exp.merchant, amount: amt, currency: claim.currency, gbpAmount: gbp, status: claim.status, description: exp.description });
+      });
+    });
+    const totalGBP = Object.values(glHierarchy).reduce((s, g) => s + g.totalGBP, 0);
+
+    // === Backcharge data ===
+    const backchargeData = {};
+    filteredClaims.forEach(claim => {
+      (claim.expenses || []).forEach(exp => {
+        if (!exp.hasBackcharge || !exp.backcharges?.length) return;
+        const amt = parseFloat(exp.reimbursementAmount || exp.amount) || 0;
+        exp.backcharges.forEach(bc => {
+          const dev = bc.development;
+          const pct = parseFloat(bc.percentage) || 0;
+          const bcAmt = amt * pct / 100;
+          const gbp = toGBP(bcAmt, claim.currency || 'GBP');
+          if (!backchargeData[dev]) backchargeData[dev] = { total: 0, gbpTotal: 0, items: [] };
+          backchargeData[dev].total += bcAmt;
+          backchargeData[dev].gbpTotal += gbp;
+          backchargeData[dev].items.push({ claimant: claim.user_name, office: claim.office_code, date: exp.date, merchant: exp.merchant, amount: bcAmt, currency: claim.currency, gbpAmount: gbp, percentage: pct, claimNumber: claim.claim_number });
+        });
+      });
+    });
+    const totalBackcharge = Object.values(backchargeData).reduce((s, d) => s + d.gbpTotal, 0);
+
+    // === Submissions data ===
+    const employeeData = {};
+    allOfficeClaims.forEach(claim => {
+      const empId = claim.user_id;
+      if (!empId) return;
+      if (!employeeData[empId]) employeeData[empId] = { name: claim.user_name, office: claim.office_code, lastSubmission: null, lastExpenseDate: null, totalClaims: 0, claimsInRange: 0 };
+      employeeData[empId].totalClaims++;
+      const subDate = claim.submitted_at?.split('T')[0];
+      if (subDate && dateFrom && subDate >= dateFrom && subDate <= dateTo) employeeData[empId].claimsInRange++;
+      if (!employeeData[empId].lastSubmission || claim.submitted_at > employeeData[empId].lastSubmission) employeeData[empId].lastSubmission = claim.submitted_at;
+      (claim.expenses || []).forEach(exp => {
+        if (!employeeData[empId].lastExpenseDate || exp.date > employeeData[empId].lastExpenseDate) employeeData[empId].lastExpenseDate = exp.date;
+      });
+    });
+
+    // === Late submitters ===
+    const lateSubmitters = Object.entries(employeeData).filter(([_, d]) => {
+      return allOfficeClaims.some(c => c.user_id === parseInt(_) && (c.expenses || []).some(e => isOlderThan2Months(e.date)));
+    }).map(([id, d]) => {
+      const lateCount = allOfficeClaims.filter(c => c.user_id === parseInt(id)).reduce((s, c) => s + (c.expenses || []).filter(e => isOlderThan2Months(e.date)).length, 0);
+      return [id, { ...d, lateCount }];
+    }).filter(([_, d]) => d.lateCount > 0).sort((a, b) => b[1].lateCount - a[1].lateCount);
+
+    // === Monthly table ===
+    const fy = getFinancialYear();
+    const fyStart = new Date(fy, 4, 1);
+    const now = new Date();
+    const months = [];
+    let md = new Date(fyStart);
+    while (md <= now) { months.push(new Date(md)); md.setMonth(md.getMonth() + 1); }
+    const monthNames = months.map(m => m.toLocaleDateString('en-GB', { month: 'short', year: '2-digit' }));
     const glMonthly = {};
-    Object.keys(ALL_GROUPS).forEach(g => { glMonthly[g] = { months: new Array(months.length).fill(0) }; });
-    
+    Object.keys(ALL_GROUPS_MONTHLY).forEach(g => { glMonthly[g] = { months: new Array(months.length).fill(0) }; });
     fyClaims.forEach(c => {
       (c.expenses || []).forEach(exp => {
         const cat = EXPENSE_CATEGORIES[exp.category];
         if (!cat) return;
         let amt = parseFloat(exp.reimbursementAmount || exp.amount || 0);
         if (deductBackcharge && exp.hasBackcharge && exp.backcharges?.length > 0) {
-          const totalPct = exp.backcharges.reduce((s, bc) => s + (parseFloat(bc.percentage) || 0), 0);
-          amt = amt * (1 - totalPct / 100);
+          amt *= (1 - exp.backcharges.reduce((s, bc) => s + (parseFloat(bc.percentage) || 0), 0) / 100);
         }
         const gbp = toGBP(amt, c.currency || 'GBP');
         const expDate = new Date(exp.date);
-        const monthIdx = months.findIndex(m => m.getMonth() === expDate.getMonth() && m.getFullYear() === expDate.getFullYear());
-        if (monthIdx < 0) return;
+        const mi = months.findIndex(m => m.getMonth() === expDate.getMonth() && m.getFullYear() === expDate.getFullYear());
+        if (mi < 0) return;
         if (!glMonthly[cat.group]) glMonthly[cat.group] = { months: new Array(months.length).fill(0) };
-        glMonthly[cat.group].months[monthIdx] += gbp;
+        glMonthly[cat.group].months[mi] += gbp;
       });
     });
-    
     const fmtK = (v) => v > 0 ? Math.round(v).toLocaleString() : '';
     const fmtKT = (v) => '£' + Math.round(v).toLocaleString();
-    
+
+    // === CSV Export ===
+    const handleExport = () => {
+      const fmtStatus = (s) => s === 'approved' ? 'Approved' : s === 'paid' ? 'Paid' : s === 'submitted_to_finance' ? 'Submitted for Payment' : s === 'pending_review' ? 'Pending L1' : s === 'pending_level2' ? 'Pending L2' : s === 'changes_requested' ? 'Returned' : s;
+      let csvContent = '', filename = '';
+      if (reportType === 'gl') {
+        filename = `gl_report_${dateFrom}_to_${dateTo}.csv`;
+        csvContent = 'GL Group,GL Code,Category,Claim Number,Office,Claimant,Date,Merchant,Currency,Amount (Local),Amount (GBP),Status,Description\n';
+        glFlatItems.forEach(item => { csvContent += `"${GL_GROUP_NAMES[item.group] || item.group}","${item.gl}","${item.catName}","${item.claimNumber || ''}","${item.office}","${item.claimant}","${item.date}","${item.merchant}","${item.currency}","${item.amount.toFixed(2)}","${item.gbpAmount.toFixed(2)}","${fmtStatus(item.status)}","${(item.description || '').replace(/"/g, '""')}"\n`; });
+      } else if (reportType === 'backcharge') {
+        filename = `backcharge_report_${dateFrom}_to_${dateTo}.csv`;
+        csvContent = 'Development,Claimant,Office,Date,Merchant,Percentage,Currency,Amount,Amount (GBP),Claim Number\n';
+        Object.entries(backchargeData).forEach(([dev, data]) => { data.items.forEach(item => { csvContent += `"${dev}","${item.claimant}","${item.office}","${item.date}","${item.merchant}","${item.percentage}%","${item.currency}","${item.amount.toFixed(2)}","${item.gbpAmount.toFixed(2)}","${item.claimNumber}"\n`; }); });
+      } else if (reportType === 'submissions') {
+        filename = `submissions_report_${dateFrom}_to_${dateTo}.csv`;
+        csvContent = 'Employee,Office,Claims in Range,Total Claims,Last Submission,Last Expense Date\n';
+        Object.values(employeeData).forEach(d => { csvContent += `"${d.name}","${d.office}","${d.claimsInRange}","${d.totalClaims}","${formatShortDate(d.lastSubmission)}","${formatShortDate(d.lastExpenseDate)}"\n`; });
+      } else if (reportType === 'late') {
+        filename = `late_submitters_${dateFrom}_to_${dateTo}.csv`;
+        csvContent = 'Employee,Office,Late Expenses,Total Claims\n';
+        lateSubmitters.forEach(([_, d]) => { csvContent += `"${d.name}","${d.office}","${d.lateCount}","${d.totalClaims}"\n`; });
+      }
+      if (csvContent) {
+        const blob = new Blob(['\ufeff' + csvContent], { type: 'text/csv;charset=utf-8;' });
+        const link = document.createElement('a'); link.href = URL.createObjectURL(blob); link.download = filename; link.click();
+      }
+    };
+
     return (
       <div className="space-y-4">
-        {/* Header */}
-        <div className="bg-gradient-to-r from-blue-600 to-indigo-600 rounded-2xl p-6 text-white">
+        <div className="bg-gradient-to-r from-blue-600 to-indigo-600 rounded-2xl p-6 text-white flex justify-between items-start">
           <h2 className="text-xl font-bold">📊 Office Reports</h2>
-          <p className="text-blue-200 text-sm">Office performance and expense analysis</p>
+          <button onClick={handleExport} className="bg-white/20 hover:bg-white/30 px-4 py-2 rounded-lg text-sm font-semibold">📥 Export CSV</button>
         </div>
         
         {/* Controls */}
@@ -4488,76 +4584,131 @@ export default function BerkeleyExpenseSystem() {
             <div><label className="block text-xs text-slate-500 mb-1">From</label><input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} className="border-2 rounded-lg px-3 py-2 text-sm" /></div>
             <div><label className="block text-xs text-slate-500 mb-1">To</label><input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} className="border-2 rounded-lg px-3 py-2 text-sm" /></div>
           </div>
-          <div className="flex flex-wrap gap-4">
-            <label className="flex items-center gap-1.5 text-sm"><input type="checkbox" checked={includePending} onChange={e => setIncludePending(e.target.checked)} className="rounded" />Include pending claims</label>
+          <div className="flex flex-wrap gap-4 mb-3">
+            <label className="flex items-center gap-1.5 text-sm"><input type="checkbox" checked={includePending} onChange={e => setIncludePending(e.target.checked)} className="rounded" />Include pending</label>
             <label className="flex items-center gap-1.5 text-sm"><input type="checkbox" checked={deductBackcharge} onChange={e => setDeductBackcharge(e.target.checked)} className="rounded" />Deduct backcharge</label>
           </div>
-        </div>
-        
-        {/* GL Report */}
-        <div className="bg-white rounded-2xl shadow-lg p-4">
-          <h3 className="font-bold mb-1">📋 GL Account Report</h3>
-          <p className="text-xs text-slate-500 mb-3">{Object.keys(glData).length} GL codes • {filteredClaims.length} claims • Total: £{totalGBP.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
-          <div className="space-y-1">
-            {Object.entries(glData).sort((a, b) => b[1].gbpTotal - a[1].gbpTotal).map(([gl, data]) => (
-              <div key={gl}>
-                <button onClick={() => setExpandedGL(expandedGL === gl ? null : gl)} className="w-full flex items-center justify-between p-3 rounded-lg hover:bg-slate-50 text-sm">
-                  <div className="flex items-center gap-3">
-                    <span className={`text-xs transition-transform ${expandedGL === gl ? 'rotate-90' : ''}`}>▶</span>
-                    <span className="font-mono text-slate-500">{gl}</span>
-                    <span className="font-semibold">{data.name}</span>
-                    <span className="text-xs text-slate-400">({data.items.length} items)</span>
-                  </div>
-                  <span className="font-bold text-blue-700">£{data.gbpTotal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
-                </button>
-                {expandedGL === gl && (
-                  <div className="ml-8 mb-2 space-y-1">
-                    {data.items.map((item, i) => (
-                      <div key={i} className="flex justify-between items-center text-xs p-2 rounded bg-slate-50">
-                        <div><span className="font-semibold">{item.claimant}</span> <span className="text-slate-400">{item.office}</span> • {item.merchant} • {new Date(item.date).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' })}</div>
-                        <span className="font-semibold">£{item.gbpAmount.toFixed(2)}</span>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
+          <div className="flex gap-2 flex-wrap">
+            {['gl', 'backcharge', 'submissions', 'late'].map(type => (
+              <button key={type} onClick={() => setReportType(type)} className={`px-4 py-2 rounded-lg text-sm font-semibold ${reportType === type ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-600'}`}>
+                {type === 'gl' ? '📋 GL Report' : type === 'backcharge' ? '📊 Backcharges' : type === 'submissions' ? '📅 Submissions' : '⚠️ Late Submitters'}
+              </button>
             ))}
           </div>
         </div>
-        
-        {/* GL × Month Table */}
+
+        {/* GL Report */}
+        {reportType === 'gl' && (
+          <div className="bg-white rounded-xl shadow-sm border overflow-hidden">
+            <div className="bg-blue-50 p-4 border-b">
+              <h3 className="font-bold text-blue-800">📋 GL Account Report</h3>
+              <p className="text-xs text-blue-600">{glFlatItems.length} items • {filteredClaims.length} claims • Total: £{totalGBP.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
+            </div>
+            {glFlatItems.length === 0 ? <p className="p-4 text-center text-slate-400">No expenses</p> : (
+              <div className="divide-y">
+                {GL_GROUP_ORDER.filter(g => glHierarchy[g]).map(group => {
+                  const gData = glHierarchy[group];
+                  const isGroupOpen = expandedGL === group;
+                  return (
+                    <div key={group}>
+                      <div className="p-3 flex justify-between items-center cursor-pointer hover:bg-blue-50 bg-slate-50" onClick={() => setExpandedGL(isGroupOpen ? null : group)}>
+                        <div className="flex items-center gap-2"><span className="text-xs">{isGroupOpen ? '▼' : '▶'}</span><span className="font-bold text-sm">{GL_GROUP_NAMES[group]}</span></div>
+                        <span className="font-bold text-blue-700">£{gData.totalGBP.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                      </div>
+                      {isGroupOpen && Object.entries(gData.cats).sort((a, b) => b[1].totalGBP - a[1].totalGBP).map(([catKey, catData]) => {
+                        const catOpen = expandedGL === group + '_' + catKey;
+                        return (
+                          <div key={catKey} className="border-t border-slate-100">
+                            <div className="pl-6 pr-3 py-2 flex justify-between items-center cursor-pointer hover:bg-slate-50" onClick={(e) => { e.stopPropagation(); setExpandedGL(catOpen ? group : group + '_' + catKey); }}>
+                              <div className="flex items-center gap-2"><span className="text-xs text-slate-400">{catOpen ? '▼' : '▶'}</span><span className="font-mono text-xs bg-slate-100 px-1.5 py-0.5 rounded">{catData.gl}</span><span className="text-sm">{catData.name}</span><span className="text-xs text-slate-400">({catData.itemCount})</span></div>
+                              <span className="font-semibold text-blue-600 text-sm">£{catData.totalGBP.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                            </div>
+                            {catOpen && Object.entries(catData.offices).sort((a, b) => b[1].totalGBP - a[1].totalGBP).map(([office, offData]) => (
+                              <div key={office} className="pl-10 pr-3 border-t border-slate-50">
+                                <div className="py-1.5 flex justify-between"><span className="text-xs font-semibold text-slate-500">{OFFICES.find(o => o.code === office)?.name || office}</span><span className="text-xs font-semibold">£{offData.totalGBP.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></div>
+                                {Object.entries(offData.employees).sort((a, b) => b[1].totalGBP - a[1].totalGBP).map(([emp, empData]) => (
+                                  <div key={emp} className="pl-4 py-0.5 flex justify-between text-xs text-slate-600"><span>{emp} <span className="text-slate-400">({empData.count})</span></span><span>£{empData.totalGBP.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></div>
+                                ))}
+                              </div>
+                            ))}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Backcharge Report */}
+        {reportType === 'backcharge' && (
+          <div className="bg-white rounded-xl shadow-sm border overflow-hidden">
+            <div className="bg-purple-50 p-4 border-b"><h3 className="font-bold text-purple-800">📊 Backcharge Report</h3><p className="text-xs text-purple-600">{Object.keys(backchargeData).length} developments • £{totalBackcharge.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p></div>
+            {Object.keys(backchargeData).length === 0 ? <p className="p-4 text-center text-slate-400">No backcharges</p> : (
+              <div className="divide-y">
+                {Object.entries(backchargeData).sort((a, b) => b[1].gbpTotal - a[1].gbpTotal).map(([dev, data]) => (
+                  <div key={dev} className="p-3 flex justify-between items-center"><span className="font-semibold text-sm">{dev} <span className="text-xs text-slate-400">({data.items.length})</span></span><span className="font-bold text-purple-700">£{data.gbpTotal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Submissions Report */}
+        {reportType === 'submissions' && (
+          <div className="bg-white rounded-xl shadow-sm border overflow-hidden">
+            <div className="bg-green-50 p-4 border-b"><h3 className="font-bold text-green-800">📅 Submissions Report</h3><p className="text-xs text-green-600">{Object.keys(employeeData).length} employees</p></div>
+            <div className="divide-y">
+              {Object.entries(employeeData).sort((a, b) => b[1].claimsInRange - a[1].claimsInRange).map(([id, d]) => (
+                <div key={id} className="p-3 flex justify-between items-center text-sm">
+                  <div><span className="font-semibold">{d.name}</span> <span className="text-xs text-slate-400">{d.office}</span></div>
+                  <div className="text-right text-xs"><span className="font-bold">{d.claimsInRange}</span> in range • {d.totalClaims} total</div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Late Submitters */}
+        {reportType === 'late' && (
+          <div className="bg-white rounded-xl shadow-sm border overflow-hidden">
+            <div className="bg-amber-50 p-4 border-b"><h3 className="font-bold text-amber-800">⚠️ Late Submitters</h3><p className="text-xs text-amber-600">Expenses &gt;2 months from receipt date</p></div>
+            {lateSubmitters.length === 0 ? <p className="p-4 text-center text-slate-400">No late submissions</p> : (
+              <div className="divide-y">
+                {lateSubmitters.map(([id, d]) => (
+                  <div key={id} className="p-3 flex justify-between items-center text-sm">
+                    <div><span className="font-semibold">{d.name}</span> <span className="text-xs text-slate-400">{d.office}</span></div>
+                    <span className="bg-red-100 text-red-600 text-xs font-bold px-2 py-0.5 rounded-full">{d.lateCount} late</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Summary stats */}
+        <div className="flex gap-3">
+          <div className="flex-1 bg-white rounded-xl shadow-sm p-4 text-center"><div className="text-2xl font-bold">{filteredClaims.length}</div><div className="text-xs text-slate-500">Claims</div></div>
+          <div className="flex-1 bg-white rounded-xl shadow-sm p-4 text-center"><div className="text-lg font-bold text-green-600">£{Math.round(totalGBP).toLocaleString()}</div><div className="text-xs text-slate-500">Total (GBP)</div></div>
+          <div className="flex-1 bg-white rounded-xl shadow-sm p-4 text-center"><div className="text-lg font-bold text-purple-600">£{Math.round(totalBackcharge).toLocaleString()}</div><div className="text-xs text-slate-500">Backcharges</div></div>
+        </div>
+
+        {/* Monthly Breakdown Table */}
         <div className="bg-white rounded-2xl shadow-lg p-4">
           <h3 className="font-bold mb-1">📊 Monthly Breakdown</h3>
           <p className="text-xs text-slate-400 mb-3">FY{fy} • GBP equivalent{deductBackcharge ? ' • Net of backcharge' : ''}</p>
           <div className="overflow-x-auto">
             <table className="w-full text-xs border-collapse">
-              <thead>
-                <tr className="bg-blue-50">
-                  <th className="text-left p-2 border">Category</th>
-                  {monthNames.map((m, i) => <th key={i} className="text-right p-2 border min-w-[65px]">{m}</th>)}
-                  <th className="text-right p-2 border font-bold bg-blue-100">Total</th>
-                </tr>
-              </thead>
+              <thead><tr className="bg-blue-50"><th className="text-left p-2 border">Category</th>{monthNames.map((m, i) => <th key={i} className="text-right p-2 border min-w-[65px]">{m}</th>)}<th className="text-right p-2 border font-bold bg-blue-100">Total</th></tr></thead>
               <tbody>
-                {Object.entries(ALL_GROUPS).map(([group, label]) => {
+                {Object.entries(ALL_GROUPS_MONTHLY).map(([group, label]) => {
                   const data = glMonthly[group] || { months: new Array(months.length).fill(0) };
                   const rowTotal = data.months.reduce((s, v) => s + v, 0);
-                  return (
-                    <tr key={group} className="hover:bg-slate-50">
-                      <td className="p-2 border font-semibold text-slate-700">{label}</td>
-                      {data.months.map((val, i) => <td key={i} className="text-right p-2 border text-slate-600">{fmtK(val)}</td>)}
-                      <td className="text-right p-2 border font-bold text-blue-700">{fmtKT(rowTotal)}</td>
-                    </tr>
-                  );
+                  return (<tr key={group} className="hover:bg-slate-50"><td className="p-2 border font-semibold text-slate-700">{label}</td>{data.months.map((val, i) => <td key={i} className="text-right p-2 border text-slate-600">{fmtK(val)}</td>)}<td className="text-right p-2 border font-bold text-blue-700">{fmtKT(rowTotal)}</td></tr>);
                 })}
-                <tr className="bg-blue-100 font-bold">
-                  <td className="p-2 border">TOTAL</td>
-                  {months.map((_, i) => {
-                    const colTotal = Object.values(glMonthly).reduce((s, d) => s + d.months[i], 0);
-                    return <td key={i} className="text-right p-2 border">{fmtKT(colTotal)}</td>;
-                  })}
-                  <td className="text-right p-2 border text-blue-800">{fmtKT(Object.values(glMonthly).reduce((s, d) => s + d.months.reduce((a, b) => a + b, 0), 0))}</td>
-                </tr>
+                <tr className="bg-blue-100 font-bold"><td className="p-2 border">TOTAL</td>{months.map((_, i) => { const ct = Object.values(glMonthly).reduce((s, d) => s + d.months[i], 0); return <td key={i} className="text-right p-2 border">{fmtKT(ct)}</td>; })}<td className="text-right p-2 border text-blue-800">{fmtKT(Object.values(glMonthly).reduce((s, d) => s + d.months.reduce((a, b) => a + b, 0), 0))}</td></tr>
               </tbody>
             </table>
           </div>
