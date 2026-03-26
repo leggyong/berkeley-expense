@@ -4105,6 +4105,7 @@ export default function BerkeleyExpenseSystem() {
     const handleDuplicate = async () => {
       if (!showDupModal || dupTargets.length === 0) return;
       setDupBusy(true);
+      console.log("📋 Dup source:", showDupModal.claim_number, "stmts:", !!showDupModal.annotated_statements, "sing:", !!showDupModal.annotated_statement, "orig:", !!showDupModal.original_statements, "ann:", !!showDupModal.statement_annotations);
       let ok = 0;
       for (const tid of dupTargets) {
         try {
@@ -4118,14 +4119,17 @@ export default function BerkeleyExpenseSystem() {
           const exps = (showDupModal.expenses || []).map((e, i) => ({ ...e, id: Date.now() + i, adminNotes: null, isPotentialDuplicate: false, duplicateMatchLabel: null, duplicateMatchRef: null, ref: String(i + 1) }));
           const total = exps.reduce((s, e) => s + parseFloat(e.reimbursementAmount || e.amount || 0), 0);
           const ins = { claim_number: num, user_id: tid, user_name: emp.name, office: OFFICES.find(o => o.code === emp.office)?.name, office_code: emp.office, currency: showDupModal.currency, total_amount: total, item_count: exps.length, status: 'pending_review', approval_level: 1, level1_approver: wf?.level1, level2_approver: wf?.level2, expenses: exps, submitted_at: new Date().toISOString() };
-          // Include statement data
-          if (showDupModal.annotated_statements) ins.annotated_statements = showDupModal.annotated_statements;
-          if (showDupModal.annotated_statement) ins.annotated_statement = showDupModal.annotated_statement;
+          // Include statement data — ensure both singular and plural are populated
+          const stmts = showDupModal.annotated_statements || (showDupModal.annotated_statement ? [showDupModal.annotated_statement] : null);
+          if (stmts) { ins.annotated_statements = stmts; ins.annotated_statement = stmts[0]; }
           if (showDupModal.original_statements) ins.original_statements = showDupModal.original_statements;
           if (showDupModal.statement_annotations) ins.statement_annotations = showDupModal.statement_annotations;
           let r = await supabase.from('claims').insert([ins]);
-          // Fallback without optional columns
-          if (r.error) { delete ins.statement_annotations; delete ins.original_statements; delete ins.annotated_statements; delete ins.annotated_statement; r = await supabase.from('claims').insert([ins]); }
+          // Progressive fallback: try removing one column at a time
+          if (r.error && ins.statement_annotations) { console.log('Duplicate insert failed, trying without statement_annotations:', r.error.message); delete ins.statement_annotations; r = await supabase.from('claims').insert([ins]); }
+          if (r.error && ins.original_statements) { console.log('Still failing, trying without original_statements:', r.error.message); delete ins.original_statements; r = await supabase.from('claims').insert([ins]); }
+          if (r.error && ins.annotated_statements) { console.log('Still failing, trying without annotated_statements:', r.error.message); delete ins.annotated_statements; delete ins.annotated_statement; r = await supabase.from('claims').insert([ins]); }
+          if (r.error) console.error('All insert attempts failed:', r.error.message);
           if (!r.error) ok++;
         } catch (err) { console.error(err); }
       }
@@ -4399,14 +4403,17 @@ export default function BerkeleyExpenseSystem() {
             currency: showDupModal.currency, total_amount: total, item_count: exps.length,
             status: 'pending_review', approval_level: 1,
             level1_approver: wf?.level1, level2_approver: wf?.level2,
-            expenses: exps, submitted_at: new Date().toISOString(),
-            annotated_statements: showDupModal.annotated_statements,
-            annotated_statement: showDupModal.annotated_statement,
-            original_statements: showDupModal.original_statements,
-            statement_annotations: showDupModal.statement_annotations
+            expenses: exps, submitted_at: new Date().toISOString()
           };
+          if (showDupModal.annotated_statements) ins.annotated_statements = showDupModal.annotated_statements;
+          else if (showDupModal.annotated_statement) ins.annotated_statements = [showDupModal.annotated_statement];
+          if (ins.annotated_statements) ins.annotated_statement = ins.annotated_statements[0];
+          if (showDupModal.original_statements) ins.original_statements = showDupModal.original_statements;
+          if (showDupModal.statement_annotations) ins.statement_annotations = showDupModal.statement_annotations;
           let r = await supabase.from('claims').insert([ins]);
-          if (r.error) { delete ins.statement_annotations; delete ins.original_statements; delete ins.annotated_statements; delete ins.annotated_statement; r = await supabase.from('claims').insert([ins]); }
+          if (r.error && ins.statement_annotations) { console.log('Dup failed, without statement_annotations:', r.error.message); delete ins.statement_annotations; r = await supabase.from('claims').insert([ins]); }
+          if (r.error && ins.original_statements) { console.log('Dup failed, without original_statements:', r.error.message); delete ins.original_statements; r = await supabase.from('claims').insert([ins]); }
+          if (r.error && ins.annotated_statements) { console.log('Dup failed, without annotated_statements:', r.error.message); delete ins.annotated_statements; delete ins.annotated_statement; r = await supabase.from('claims').insert([ins]); }
           if (!r.error) ok++;
         } catch (err) { console.error(err); }
       }
