@@ -2173,6 +2173,71 @@ export default function BerkeleyExpenseSystem() {
     setLoading(false);
   };
 
+  // Re-render annotation boxes on clean statement images with updated ref numbers
+  const reRenderStatementAnnotations = async (originalImages, annotations) => {
+    if (!originalImages || !annotations || originalImages.length === 0) return null;
+    
+    const rendered = {};
+    
+    for (let stmtIdx = 0; stmtIdx < originalImages.length; stmtIdx++) {
+      const imgSrc = originalImages[stmtIdx];
+      if (!imgSrc) continue;
+      
+      const stmtAnnotations = annotations.filter(a => (a.statementIndex || 0) === stmtIdx);
+      if (stmtAnnotations.length === 0) {
+        // No annotations on this statement - keep original
+        rendered[stmtIdx] = imgSrc;
+        continue;
+      }
+      
+      // Load image
+      const img = await new Promise((resolve, reject) => {
+        const i = new Image();
+        i.crossOrigin = 'anonymous';
+        i.onload = () => resolve(i);
+        i.onerror = () => reject(new Error('Image load failed'));
+        i.src = imgSrc;
+      }).catch(() => null);
+      
+      if (!img) { rendered[stmtIdx] = imgSrc; continue; }
+      
+      // Draw on canvas
+      const canvas = document.createElement('canvas');
+      canvas.width = img.naturalWidth;
+      canvas.height = img.naturalHeight;
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(img, 0, 0);
+      
+      // Draw each annotation box
+      stmtAnnotations.forEach(ann => {
+        const x = (ann.xPct || 0) * canvas.width;
+        const y = (ann.yPct || 0) * canvas.height;
+        const w = (ann.widthPct || 0.1) * canvas.width;
+        const h = (ann.heightPct || 0.05) * canvas.height;
+        const ref = String(ann.ref || '');
+        
+        // Orange border
+        ctx.strokeStyle = '#ff6600';
+        ctx.lineWidth = 3;
+        ctx.strokeRect(x, y, w, h);
+        
+        // Orange label background
+        ctx.fillStyle = '#ff6600';
+        const labelW = Math.max(35, ref.length * 12);
+        ctx.fillRect(x, y - 22, labelW, 22);
+        
+        // White text
+        ctx.fillStyle = 'white';
+        ctx.font = 'bold 14px Arial';
+        ctx.fillText(ref, x + 5, y - 6);
+      });
+      
+      rendered[stmtIdx] = canvas.toDataURL('image/png');
+    }
+    
+    return rendered;
+  };
+
   const handleSaveAdminEdits = async (claim, editedExpenses, hasDeletedItems = false) => {
     setLoading(true);
     try {
@@ -2189,12 +2254,11 @@ export default function BerkeleyExpenseSystem() {
         edited_by: currentUser.name 
       };
       
-      // If items were deleted, remap statement annotations to new ref numbers
+      // If items were deleted, remap statement annotations to new ref numbers AND re-render images
       if (hasDeletedItems && claim.statement_annotations) {
         // Build mapping: old ref → new ref based on expense id matching
         const refMap = {};
         renumbered.forEach(exp => {
-          // Find original expense by id to get old ref
           const original = (claim.expenses || []).find(e => e.id === exp.id);
           if (original && original.ref !== exp.ref) {
             refMap[original.ref] = exp.ref;
@@ -2205,7 +2269,6 @@ export default function BerkeleyExpenseSystem() {
         const survivingIds = new Set(renumbered.map(e => e.id));
         const updatedAnnotations = claim.statement_annotations
           .filter(a => {
-            // Keep annotation if its expense still exists
             const origExp = (claim.expenses || []).find(e => e.ref === a.ref || String(e.ref) === String(a.ref));
             return origExp && survivingIds.has(origExp.id);
           })
@@ -2215,18 +2278,34 @@ export default function BerkeleyExpenseSystem() {
           });
         
         updateData.statement_annotations = updatedAnnotations;
+        
+        // Re-render annotated images with updated ref numbers
+        const originals = claim.original_statements || claim.annotated_statements || [];
+        if (originals.length > 0 && updatedAnnotations.length > 0) {
+          try {
+            const reRendered = await reRenderStatementAnnotations(originals, updatedAnnotations);
+            if (reRendered) {
+              const newAnnotatedArr = originals.map((orig, idx) => reRendered[idx] || orig);
+              updateData.annotated_statements = newAnnotatedArr;
+              updateData.annotated_statement = newAnnotatedArr[0] || null;
+            }
+          } catch (renderErr) {
+            console.warn('Annotation re-render failed, keeping old images:', renderErr);
+          }
+        }
       }
       
       const { data, error } = await supabase.from('claims').update(updateData).eq('id', claim.id);
       if (error) {
-        // Fallback without annotations if column doesn't exist
-        if (updateData.statement_annotations) {
+        // Progressive fallback: remove optional columns one by one
+        console.log('Save failed, trying fallbacks:', error.message);
+        if (updateData.annotated_statements) { delete updateData.annotated_statements; delete updateData.annotated_statement; }
+        let retry = await supabase.from('claims').update(updateData).eq('id', claim.id);
+        if (retry.error && updateData.statement_annotations) {
           delete updateData.statement_annotations;
-          const retry = await supabase.from('claims').update(updateData).eq('id', claim.id);
-          if (retry.error) throw new Error(retry.error.message || 'Database error');
-        } else {
-          throw new Error(error.message || 'Database error');
+          retry = await supabase.from('claims').update(updateData).eq('id', claim.id);
         }
+        if (retry.error) throw new Error(retry.error.message || 'Database error');
       }
       await loadClaims();
       setSelectedClaim(prev => prev ? { ...prev, expenses: renumbered, total_amount: newTotal, edited_by: currentUser.name } : null);
@@ -2266,6 +2345,20 @@ export default function BerkeleyExpenseSystem() {
       await loadClaims();
       alert('✅ Marked as paid');
     } catch (err) { console.error('Mark paid error:', err); alert('❌ Failed'); }
+    setLoading(false);
+  };
+
+  const handleDeleteClaim = async (claimId) => {
+    const claim = claims.find(c => c.id === claimId);
+    if (!claim) return;
+    if (!window.confirm(`⚠️ Permanently delete "${claim.claim_number}" (${claim.user_name})?\n\nThis cannot be undone.`)) return;
+    setLoading(true);
+    try {
+      const { error } = await supabase.from('claims').delete().eq('id', claimId);
+      if (error) throw error;
+      await loadClaims();
+      alert('🗑️ Claim deleted');
+    } catch (err) { console.error('Delete claim error:', err); alert('❌ Failed to delete'); }
     setLoading(false);
   };
 
@@ -4110,6 +4203,7 @@ export default function BerkeleyExpenseSystem() {
           {!currentUser.reportOffices && claim.status === 'submitted_to_finance' && <button onClick={() => setEditingClaim(claim)} className="bg-blue-100 text-blue-700 px-2 py-1 rounded text-xs">✏️</button>}
           {!currentUser.reportOffices && claim.status === 'submitted_to_finance' && <button onClick={() => handleMarkPaid(claim.id)} disabled={loading} className="bg-green-600 text-white px-2 py-1 rounded text-xs font-semibold disabled:opacity-50">✓</button>}
           {!currentUser.reportOffices && currentUser.id === 9001 && showDup && <button onClick={() => { setShowDupModal(claim); setDupTargets([]); }} className="bg-purple-100 text-purple-700 px-2 py-1 rounded text-xs">📋</button>}
+          {currentUser.id === 9001 && <button onClick={() => handleDeleteClaim(claim.id)} className="bg-red-100 text-red-600 px-2 py-1 rounded text-xs">🗑️</button>}
         </div>
       </div>
     );
@@ -4513,6 +4607,7 @@ export default function BerkeleyExpenseSystem() {
                       {!currentUser.reportOffices && <button onClick={() => setEditingClaim(claim)} className="bg-blue-100 text-blue-700 px-2 py-1.5 rounded-lg text-xs">✏️</button>}
                       {!currentUser.reportOffices && <button onClick={() => handleMarkPaid(claim.id)} disabled={loading} className="bg-green-600 text-white px-2 py-1.5 rounded-lg text-xs font-semibold disabled:opacity-50">✓ Paid</button>}
                       {currentUser.id === 9001 && <button onClick={() => { setShowDupModal(claim); setDupTargets([]); }} className="bg-purple-100 text-purple-700 px-2 py-1.5 rounded-lg text-xs">📋</button>}
+                      {currentUser.id === 9001 && <button onClick={() => handleDeleteClaim(claim.id)} className="bg-red-100 text-red-600 px-2 py-1.5 rounded-lg text-xs">🗑️</button>}
                     </div>
                   </div>
                 ))}
@@ -4550,6 +4645,7 @@ export default function BerkeleyExpenseSystem() {
                         <span className="font-bold text-green-700 text-sm mr-1">{formatCurrency(claim.total_amount, claim.currency)}</span>
                         <button onClick={() => handleDownloadPDF(claim)} className="bg-green-100 text-green-700 px-2 py-1.5 rounded-lg text-xs">📥</button>
                         {currentUser.id === 9001 && <button onClick={() => { setShowDupModal(claim); setDupTargets([]); }} className="bg-purple-100 text-purple-700 px-2 py-1.5 rounded-lg text-xs">📋</button>}
+                      {currentUser.id === 9001 && <button onClick={() => handleDeleteClaim(claim.id)} className="bg-red-100 text-red-600 px-2 py-1.5 rounded-lg text-xs">🗑️</button>}
                       </div>
                     </div>
                   ))}
