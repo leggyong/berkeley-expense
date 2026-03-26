@@ -2366,7 +2366,11 @@ export default function BerkeleyExpenseSystem() {
 
   const getClaimsForSubmission = () => {
     if (!currentUser) return [];
-    return claims.filter(c => c.status === 'approved' && c.level1_approver === currentUser.id);
+    // Only office admins handle submission — show approved claims from their office
+    if (currentUser.role === 'admin') {
+      return claims.filter(c => c.status === 'approved' && c.office_code === currentUser.office);
+    }
+    return [];
   };
 
   // --- UI RENDER ---
@@ -3096,6 +3100,12 @@ export default function BerkeleyExpenseSystem() {
     
     // Look up returned claim for banner/flagged info
     const activeReturnedClaim = returnedClaims.find(c => c.id === activeClaimTab);
+    // Reset to current tab if returned claim no longer exists (was resubmitted/approved)
+    useEffect(() => {
+      if (activeClaimTab !== 'current' && !returnedClaims.find(c => c.id === activeClaimTab)) {
+        setActiveClaimTab('current');
+      }
+    }, [activeClaimTab, returnedClaims]);
     
     return (
       <div className="space-y-4">
@@ -3202,7 +3212,7 @@ export default function BerkeleyExpenseSystem() {
         <div className="grid grid-cols-2 gap-4"><div className="bg-white rounded-2xl shadow-lg p-6 text-center"><div className="text-4xl font-bold text-slate-800">{sortedExpenses.length}</div><div className="text-sm text-slate-500">{activeClaimTab === 'current' ? 'Pending' : 'In Claim'}</div></div><div className="bg-white rounded-2xl shadow-lg p-6 text-center"><div className="text-2xl font-bold text-green-600">{formatCurrency(reimbursementTotal, userReimburseCurrency)}</div><div className="text-sm text-slate-500">To Reimburse</div></div></div>
         <div className="bg-white rounded-2xl shadow-lg p-6"><div className="flex flex-wrap gap-3"><button onClick={() => setShowAddExpense(true)} className="bg-blue-600 text-white px-6 py-3 rounded-xl font-semibold shadow-lg">📸 Add Receipt</button>{currentUser.mileageRate && <button onClick={() => setShowMileageModal(true)} className="bg-green-600 text-white px-6 py-3 rounded-xl font-semibold shadow-lg">📍 Mileage</button>}{pendingExpenses.length > 0 && (<button onClick={() => setShowPreview(true)} className="border-2 border-green-500 text-green-600 px-6 py-3 rounded-xl font-semibold">📋 Preview ({pendingExpenses.length})</button>)}{activeClaimTab === 'current' && <button onClick={handleManualSync} disabled={loading} className="border-2 border-slate-300 text-slate-600 px-4 py-3 rounded-xl font-semibold">{loading ? '⏳' : '🔄'} Sync</button>}</div></div>
         <div className="bg-white rounded-2xl shadow-lg p-6">
-          <h3 className="font-bold text-slate-800 mb-4">{activeClaimTab === 'current' ? '📋 Pending Expenses (sorted by date)' : `📋 ${activeReturnedClaim?.claim_number} Expenses`}</h3>
+          <h3 className="font-bold text-slate-800 mb-4">{activeClaimTab === 'current' ? '📋 Pending Expenses (sorted by date)' : `📋 ${activeReturnedClaim?.claim_number || 'Returned'} Expenses`}</h3>
           {sortedExpenses.some(exp => isOlderThan2Months(exp.date)) && (
             <div className="bg-red-100 border-2 border-red-400 rounded-xl p-3 mb-4">
               <p className="text-red-700 font-semibold text-sm">🚨 Some receipts are over 2 months old and may not be reimbursable!</p>
@@ -4374,16 +4384,194 @@ export default function BerkeleyExpenseSystem() {
     );
   };
   
+  // ============ COUNTRY HEAD REPORTS TAB ============
+  const CountryHeadReportsTab = () => {
+    const allOffices = currentUser.dashboardOffices || [];
+    const [selectedOffices, setSelectedOffices] = useState(allOffices);
+    const [includePending, setIncludePending] = useState(true);
+    const [deductBackcharge, setDeductBackcharge] = useState(false);
+    const defaultFrom = (() => { const d = new Date(); d.setMonth(d.getMonth() - 3); return d.toISOString().split('T')[0]; })();
+    const defaultTo = new Date().toISOString().split('T')[0];
+    const [dateFrom, setDateFrom] = useState(defaultFrom);
+    const [dateTo, setDateTo] = useState(defaultTo);
+    const [expandedGL, setExpandedGL] = useState(null);
+    
+    // Filter claims
+    const filteredClaims = claims.filter(c => {
+      if (!selectedOffices.includes(c.office_code)) return false;
+      const isApproved = c.status === 'approved' || c.status === 'paid' || c.status === 'submitted_to_finance';
+      const isPending = c.status === 'pending_review' || c.status === 'pending_level2' || c.status === 'changes_requested';
+      if (!isApproved && !(includePending && isPending)) return false;
+      const subDate = c.submitted_at?.split('T')[0];
+      if (subDate && dateFrom && subDate < dateFrom) return false;
+      if (subDate && dateTo && subDate > dateTo) return false;
+      return true;
+    });
+    
+    // GL Report
+    const glData = {};
+    filteredClaims.forEach(claim => {
+      (claim.expenses || []).forEach(exp => {
+        const cat = EXPENSE_CATEGORIES[exp.category];
+        if (!cat) return;
+        const gl = cat.gl;
+        let amt = parseFloat(exp.reimbursementAmount || exp.amount || 0);
+        const gbp = toGBP(amt, claim.currency || 'GBP');
+        if (!glData[gl]) glData[gl] = { name: cat.name, items: [], total: 0, gbpTotal: 0 };
+        glData[gl].items.push({ claimant: claim.user_name, office: claim.office_code, date: exp.date, merchant: exp.merchant, amount: amt, gbpAmount: gbp, currency: exp.currency || claim.currency, claimNumber: claim.claim_number, status: claim.status, description: exp.description });
+        glData[gl].total += amt;
+        glData[gl].gbpTotal += gbp;
+      });
+    });
+    const totalGBP = Object.values(glData).reduce((s, d) => s + d.gbpTotal, 0);
+    
+    // GL × Month table
+    const fy = getFinancialYear();
+    const fyStart = new Date(fy, 4, 1);
+    const now = new Date();
+    const months = [];
+    let d = new Date(fyStart);
+    while (d <= now) { months.push(new Date(d)); d.setMonth(d.getMonth() + 1); }
+    const monthNames = months.map(m => m.toLocaleDateString('en-GB', { month: 'short', year: '2-digit' }));
+    
+    // All claims in FY for the monthly table (no date filter)
+    const fyClaims = claims.filter(c => {
+      if (!selectedOffices.includes(c.office_code)) return false;
+      const isApproved = c.status === 'approved' || c.status === 'paid' || c.status === 'submitted_to_finance';
+      const isPending = c.status === 'pending_review' || c.status === 'pending_level2' || c.status === 'changes_requested';
+      return isApproved || (includePending && isPending);
+    });
+    
+    const ALL_GROUPS = { 'TRAVEL': 'Travel', 'SUBSISTENCE': 'Subsistence, Welfare & Employee Entertaining', 'ENTERTAINING': 'Business Entertaining', 'OFFICE': 'Office Costs', 'MARKETING': 'Marketing & Events', 'LEGAL': 'Legal & Professional' };
+    const glMonthly = {};
+    Object.keys(ALL_GROUPS).forEach(g => { glMonthly[g] = { months: new Array(months.length).fill(0) }; });
+    
+    fyClaims.forEach(c => {
+      (c.expenses || []).forEach(exp => {
+        const cat = EXPENSE_CATEGORIES[exp.category];
+        if (!cat) return;
+        let amt = parseFloat(exp.reimbursementAmount || exp.amount || 0);
+        if (deductBackcharge && exp.hasBackcharge && exp.backcharges?.length > 0) {
+          const totalPct = exp.backcharges.reduce((s, bc) => s + (parseFloat(bc.percentage) || 0), 0);
+          amt = amt * (1 - totalPct / 100);
+        }
+        const gbp = toGBP(amt, c.currency || 'GBP');
+        const expDate = new Date(exp.date);
+        const monthIdx = months.findIndex(m => m.getMonth() === expDate.getMonth() && m.getFullYear() === expDate.getFullYear());
+        if (monthIdx < 0) return;
+        if (!glMonthly[cat.group]) glMonthly[cat.group] = { months: new Array(months.length).fill(0) };
+        glMonthly[cat.group].months[monthIdx] += gbp;
+      });
+    });
+    
+    const fmtK = (v) => v > 0 ? Math.round(v).toLocaleString() : '';
+    const fmtKT = (v) => '£' + Math.round(v).toLocaleString();
+    
+    return (
+      <div className="space-y-4">
+        {/* Header */}
+        <div className="bg-gradient-to-r from-blue-600 to-indigo-600 rounded-2xl p-6 text-white">
+          <h2 className="text-xl font-bold">📊 Office Reports</h2>
+          <p className="text-blue-200 text-sm">Office performance and expense analysis</p>
+        </div>
+        
+        {/* Controls */}
+        <div className="bg-white rounded-2xl shadow-lg p-4">
+          <div className="flex flex-wrap gap-2 mb-3">
+            {allOffices.map(code => {
+              const name = OFFICES.find(o => o.code === code)?.name || code;
+              const isOn = selectedOffices.includes(code);
+              return <button key={code} onClick={() => setSelectedOffices(prev => isOn && prev.length > 1 ? prev.filter(o => o !== code) : isOn ? prev : [...prev, code])} className={`px-3 py-1.5 rounded-full text-xs font-semibold border ${isOn ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-slate-500 border-slate-300'}`}>{name}</button>;
+            })}
+          </div>
+          <div className="flex flex-wrap gap-4 items-end mb-3">
+            <div><label className="block text-xs text-slate-500 mb-1">From</label><input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} className="border-2 rounded-lg px-3 py-2 text-sm" /></div>
+            <div><label className="block text-xs text-slate-500 mb-1">To</label><input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} className="border-2 rounded-lg px-3 py-2 text-sm" /></div>
+          </div>
+          <div className="flex flex-wrap gap-4">
+            <label className="flex items-center gap-1.5 text-sm"><input type="checkbox" checked={includePending} onChange={e => setIncludePending(e.target.checked)} className="rounded" />Include pending claims</label>
+            <label className="flex items-center gap-1.5 text-sm"><input type="checkbox" checked={deductBackcharge} onChange={e => setDeductBackcharge(e.target.checked)} className="rounded" />Deduct backcharge</label>
+          </div>
+        </div>
+        
+        {/* GL Report */}
+        <div className="bg-white rounded-2xl shadow-lg p-4">
+          <h3 className="font-bold mb-1">📋 GL Account Report</h3>
+          <p className="text-xs text-slate-500 mb-3">{Object.keys(glData).length} GL codes • {filteredClaims.length} claims • Total: £{totalGBP.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
+          <div className="space-y-1">
+            {Object.entries(glData).sort((a, b) => b[1].gbpTotal - a[1].gbpTotal).map(([gl, data]) => (
+              <div key={gl}>
+                <button onClick={() => setExpandedGL(expandedGL === gl ? null : gl)} className="w-full flex items-center justify-between p-3 rounded-lg hover:bg-slate-50 text-sm">
+                  <div className="flex items-center gap-3">
+                    <span className={`text-xs transition-transform ${expandedGL === gl ? 'rotate-90' : ''}`}>▶</span>
+                    <span className="font-mono text-slate-500">{gl}</span>
+                    <span className="font-semibold">{data.name}</span>
+                    <span className="text-xs text-slate-400">({data.items.length} items)</span>
+                  </div>
+                  <span className="font-bold text-blue-700">£{data.gbpTotal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                </button>
+                {expandedGL === gl && (
+                  <div className="ml-8 mb-2 space-y-1">
+                    {data.items.map((item, i) => (
+                      <div key={i} className="flex justify-between items-center text-xs p-2 rounded bg-slate-50">
+                        <div><span className="font-semibold">{item.claimant}</span> <span className="text-slate-400">{item.office}</span> • {item.merchant} • {new Date(item.date).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' })}</div>
+                        <span className="font-semibold">£{item.gbpAmount.toFixed(2)}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+        
+        {/* GL × Month Table */}
+        <div className="bg-white rounded-2xl shadow-lg p-4">
+          <h3 className="font-bold mb-1">📊 Monthly Breakdown</h3>
+          <p className="text-xs text-slate-400 mb-3">FY{fy} • GBP equivalent{deductBackcharge ? ' • Net of backcharge' : ''}</p>
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs border-collapse">
+              <thead>
+                <tr className="bg-blue-50">
+                  <th className="text-left p-2 border">Category</th>
+                  {monthNames.map((m, i) => <th key={i} className="text-right p-2 border min-w-[65px]">{m}</th>)}
+                  <th className="text-right p-2 border font-bold bg-blue-100">Total</th>
+                </tr>
+              </thead>
+              <tbody>
+                {Object.entries(ALL_GROUPS).map(([group, label]) => {
+                  const data = glMonthly[group] || { months: new Array(months.length).fill(0) };
+                  const rowTotal = data.months.reduce((s, v) => s + v, 0);
+                  return (
+                    <tr key={group} className="hover:bg-slate-50">
+                      <td className="p-2 border font-semibold text-slate-700">{label}</td>
+                      {data.months.map((val, i) => <td key={i} className="text-right p-2 border text-slate-600">{fmtK(val)}</td>)}
+                      <td className="text-right p-2 border font-bold text-blue-700">{fmtKT(rowTotal)}</td>
+                    </tr>
+                  );
+                })}
+                <tr className="bg-blue-100 font-bold">
+                  <td className="p-2 border">TOTAL</td>
+                  {months.map((_, i) => {
+                    const colTotal = Object.values(glMonthly).reduce((s, d) => s + d.months[i], 0);
+                    return <td key={i} className="text-right p-2 border">{fmtKT(colTotal)}</td>;
+                  })}
+                  <td className="text-right p-2 border text-blue-800">{fmtKT(Object.values(glMonthly).reduce((s, d) => s + d.months.reduce((a, b) => a + b, 0), 0))}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    );
+  };
+  
   const ReviewClaimsTab = () => {
     const reviewableClaims = getReviewableClaims();
     const claimsForSubmission = getClaimsForSubmission();
     const [showDupModal, setShowDupModal] = useState(null);
     const [dupTargets, setDupTargets] = useState([]);
     const [dupBusy, setDupBusy] = useState(false);
-    // Country head dashboard state
-    const [selectedOffices, setSelectedOffices] = useState(currentUser.dashboardOffices || []);
-    const [dashIncludePending, setDashIncludePending] = useState(true);
-    const [dashDeductBackcharge, setDashDeductBackcharge] = useState(false);
     
     const handleDuplicate = async () => {
       if (!showDupModal || dupTargets.length === 0) return;
@@ -4479,100 +4667,6 @@ export default function BerkeleyExpenseSystem() {
         {canGenerateBackchargeReport && (<div className="bg-white rounded-2xl shadow-lg p-6 border-2 border-purple-300"><h3 className="font-bold mb-4 text-purple-700">📊 Backcharge Report Generator</h3><div className="flex flex-wrap gap-3 items-end mb-4"><div><label className="block text-xs text-slate-500 mb-1">From Date</label><input type="date" value={backchargeFromDate} onChange={(e) => setBackchargeFromDate(e.target.value)} className="border-2 rounded-lg px-3 py-2 text-sm" /></div><div><label className="block text-xs text-slate-500 mb-1">To Date</label><input type="date" value={backchargeToDate} onChange={(e) => setBackchargeToDate(e.target.value)} className="border-2 rounded-lg px-3 py-2 text-sm" /></div><button onClick={() => setShowBackchargeReport(true)} disabled={!backchargeFromDate || !backchargeToDate} className="bg-purple-600 text-white px-4 py-2 rounded-lg text-sm font-semibold disabled:opacity-50">Generate Report</button></div>{showBackchargeReport && backchargeData && (<div className="border-2 border-purple-200 rounded-xl p-4 bg-purple-50"><div className="flex justify-between items-center mb-3"><h4 className="font-bold text-purple-800">Report: {formatDate(backchargeFromDate)} - {formatDate(backchargeToDate)}</h4><div className="flex gap-2"><button onClick={generateBackchargeReportPDF} className="bg-green-600 text-white px-3 py-1 rounded text-sm">📥 Download PDF</button><button onClick={() => setShowBackchargeReport(false)} className="text-slate-500 text-sm">✕ Close</button></div></div>{Object.keys(backchargeData.summary).length === 0 ? (<p className="text-center text-slate-500 py-4">No backcharges found in this period.</p>) : (<div className="space-y-3">{Object.entries(backchargeData.summary).map(([dev, data]) => (<div key={dev} className="bg-white rounded-lg p-3 border"><div className="flex justify-between items-center"><span className="font-semibold text-purple-700">{dev}</span><span className="font-bold">{formatCurrency(data.total, OFFICES.find(o => o.code === currentUser.office)?.currency || 'SGD')}</span></div><div className="text-xs text-slate-500 mt-1">{data.items.length} expense(s)</div></div>))}<div className="bg-purple-700 text-white rounded-lg p-3 flex justify-between"><span className="font-bold">TOTAL BACKCHARGES</span><span className="font-bold">{formatCurrency(backchargeData.grandTotal, OFFICES.find(o => o.code === currentUser.office)?.currency || 'SGD')}</span></div></div>)}</div>)}</div>)}
         {claimsForSubmission.length > 0 && (<div className="bg-white rounded-2xl shadow-lg p-6 border-2 border-green-300"><h3 className="font-bold mb-4 text-green-700">📤 For Submission ({claimsForSubmission.length})</h3><div className="space-y-2">{claimsForSubmission.map(claim => (<div key={claim.id} className="flex items-center justify-between p-4 rounded-xl bg-green-50 border border-green-200"><div className="flex-1"><div className="flex items-center gap-2"><span className="font-semibold">{claim.user_name}</span><span className="bg-green-100 text-green-700 text-xs px-2 py-0.5 rounded-full">Approved</span></div><p className="text-sm text-slate-500">{claim.claim_number} • {claim.office}</p></div><div className="flex items-center gap-2"><span className="font-bold text-green-700">{formatCurrency(claim.total_amount, claim.currency)}</span><button onClick={() => handleDownloadPDF(claim)} className="bg-blue-100 text-blue-700 px-3 py-2 rounded-lg text-sm">📥</button><button onClick={() => handleMarkSubmitted(claim.id)} disabled={loading} className="bg-green-600 text-white px-3 py-2 rounded-lg text-sm font-semibold disabled:opacity-50">✓ Submitted</button></div></div>))}</div></div>)}
         <div className="bg-white rounded-2xl shadow-lg p-6">
-          {/* Country Head Dashboard */}
-          {currentUser.dashboardOffices && (() => {
-            const allOffices = currentUser.dashboardOffices;
-            
-            const fy = getFinancialYear();
-            const fyStart = new Date(fy, 4, 1);
-            const now = new Date();
-            const months = [];
-            let d = new Date(fyStart);
-            while (d <= now) { months.push(new Date(d)); d.setMonth(d.getMonth() + 1); }
-            const monthNames = months.map(m => m.toLocaleDateString('en-GB', { month: 'short', year: '2-digit' }));
-            
-            const dashClaims = claims.filter(c => selectedOffices.includes(c.office_code) && (
-              c.status === 'approved' || c.status === 'paid' || c.status === 'submitted_to_finance' ||
-              (dashIncludePending && (c.status === 'pending_review' || c.status === 'pending_level2' || c.status === 'changes_requested'))
-            ));
-            
-            const glMonthly = {};
-            dashClaims.forEach(c => {
-              (c.expenses || []).forEach(exp => {
-                const cat = EXPENSE_CATEGORIES[exp.category];
-                if (!cat) return;
-                const group = cat.group;
-                let amt = parseFloat(exp.reimbursementAmount || exp.amount || 0);
-                
-                if (dashDeductBackcharge && exp.hasBackcharge && exp.backcharges?.length > 0) {
-                  const totalPct = exp.backcharges.reduce((s, bc) => s + (parseFloat(bc.percentage) || 0), 0);
-                  amt = amt * (1 - totalPct / 100);
-                }
-                
-                const gbp = toGBP(amt, c.currency || 'GBP');
-                const expDate = new Date(exp.date);
-                const monthIdx = months.findIndex(m => m.getMonth() === expDate.getMonth() && m.getFullYear() === expDate.getFullYear());
-                if (monthIdx < 0) return;
-                
-                if (!glMonthly[group]) glMonthly[group] = { months: new Array(months.length).fill(0) };
-                glMonthly[group].months[monthIdx] += gbp;
-              });
-            });
-            
-            const groupNames = { 'TRAVEL': 'Travel', 'SUBSISTENCE': 'Subsistence & Welfare', 'ENTERTAINING': 'Business Entertaining', 'OFFICE': 'Office Costs', 'MARKETING': 'Marketing & Events', 'LEGAL': 'Legal & Professional' };
-            const fmtK = (v) => v > 0 ? Math.round(v).toLocaleString() : '';
-            const fmtKTotal = (v) => '£' + Math.round(v).toLocaleString();
-            
-            return (
-              <div className="bg-white rounded-2xl shadow-lg p-4 border-2 border-blue-300">
-                <h3 className="font-bold text-blue-700 mb-2">📊 Office Dashboard</h3>
-                <div className="flex flex-wrap gap-2 mb-2">
-                  {allOffices.map(code => {
-                    const name = OFFICES.find(o => o.code === code)?.name || code;
-                    const isOn = selectedOffices.includes(code);
-                    return <button key={code} onClick={() => setSelectedOffices(prev => isOn ? prev.filter(o => o !== code) : [...prev, code])} className={`px-3 py-1 rounded-full text-xs font-semibold border ${isOn ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-slate-500 border-slate-300'}`}>{name}</button>;
-                  })}
-                </div>
-                <div className="flex flex-wrap gap-3 mb-3">
-                  <label className="flex items-center gap-1.5 text-xs"><input type="checkbox" checked={dashIncludePending} onChange={e => setDashIncludePending(e.target.checked)} className="rounded" />Include pending</label>
-                  <label className="flex items-center gap-1.5 text-xs"><input type="checkbox" checked={dashDeductBackcharge} onChange={e => setDashDeductBackcharge(e.target.checked)} className="rounded" />Deduct backcharge</label>
-                </div>
-                <p className="text-xs text-slate-400 mb-2">FY{fy} • GBP equivalent</p>
-                <div className="overflow-x-auto">
-                  <table className="w-full text-xs border-collapse">
-                    <thead>
-                      <tr className="bg-blue-50">
-                        <th className="text-left p-2 border">Category</th>
-                        {monthNames.map((m, i) => <th key={i} className="text-right p-2 border min-w-[65px]">{m}</th>)}
-                        <th className="text-right p-2 border font-bold bg-blue-100">Total</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {Object.entries(glMonthly).sort((a, b) => a[0].localeCompare(b[0])).map(([group, data]) => {
-                        const rowTotal = data.months.reduce((s, v) => s + v, 0);
-                        return (
-                          <tr key={group} className="hover:bg-slate-50">
-                            <td className="p-2 border font-semibold text-slate-700">{groupNames[group] || group}</td>
-                            {data.months.map((val, i) => <td key={i} className="text-right p-2 border text-slate-600">{fmtK(val)}</td>)}
-                            <td className="text-right p-2 border font-bold text-blue-700">{fmtKTotal(rowTotal)}</td>
-                          </tr>
-                        );
-                      })}
-                      <tr className="bg-blue-100 font-bold">
-                        <td className="p-2 border">TOTAL</td>
-                        {months.map((_, i) => {
-                          const colTotal = Object.values(glMonthly).reduce((s, d) => s + d.months[i], 0);
-                          return <td key={i} className="text-right p-2 border">{fmtKTotal(colTotal)}</td>;
-                        })}
-                        <td className="text-right p-2 border text-blue-800">{fmtKTotal(Object.values(glMonthly).reduce((s, d) => s + d.months.reduce((a, b) => a + b, 0), 0))}</td>
-                      </tr>
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-            );
-          })()}
-          
           <h3 className="font-bold mb-4">📊 To Review ({reviewableClaims.length})</h3>
           {reviewableClaims.length === 0 ? <div className="text-center py-12 text-slate-400">✅ Nothing to review</div> : (<div className="space-y-2">{reviewableClaims.map(claim => {
             // Show "Resubmission" badge whenever claim has been returned, regardless of who's viewing
@@ -4741,6 +4835,7 @@ export default function BerkeleyExpenseSystem() {
   };
 
   const canReview = currentUser.role === 'admin' || currentUser.role === 'manager' || currentUser.role === 'finance' || currentUser.role === 'group_finance' || getReviewableClaims().length > 0 || getClaimsForSubmission().length > 0;
+  const canSeeReports = !!currentUser.dashboardOffices;
   
   const handleStatementAnnotationSave = async (annotatedImagesObj, newAnnotations) => { 
     // annotatedImagesObj is an object with keys being statement indices
@@ -4774,8 +4869,8 @@ export default function BerkeleyExpenseSystem() {
           <div className="flex items-center gap-3"><div className="text-right hidden sm:block"><div className="text-sm font-medium">{currentUser.name.split(' ').slice(0, 2).join(' ')}</div><div className="text-xs text-slate-400 capitalize">{currentUser.role}</div></div><button onClick={() => { localStorage.removeItem('berkeley_current_user'); setCurrentUser(null); setExpenses([]); setAnnotatedStatements([]); setStatementAnnotations([]); setStatementImages([]); setOriginalStatementImages([]); setActiveTab('my_expenses'); }} className="bg-white/10 px-3 py-2 rounded-lg text-xs font-medium">Logout</button></div>
         </div>
       </header>
-      {canReview && (<div className="bg-white border-b sticky top-14 z-30"><div className="max-w-3xl mx-auto flex">{currentUser?.role !== 'group_finance' && <button onClick={() => setActiveTab('my_expenses')} className={`flex-1 py-3 text-sm font-semibold border-b-2 ${activeTab === 'my_expenses' ? 'border-blue-600 text-blue-600' : 'border-transparent text-slate-500'}`}>📋 My Expenses</button>}<button onClick={() => setActiveTab('review')} className={`flex-1 py-3 text-sm font-semibold border-b-2 ${activeTab === 'review' ? 'border-blue-600 text-blue-600' : 'border-transparent text-slate-500'}`}>👀 Review{getReviewableClaims().length > 0 && <span className="ml-2 bg-amber-500 text-white text-xs px-2 py-0.5 rounded-full">{getReviewableClaims().length}</span>}</button>{currentUser?.role === 'group_finance' && <button onClick={() => setActiveTab('finance')} className={`flex-1 py-3 text-sm font-semibold border-b-2 ${activeTab === 'finance' ? 'border-purple-600 text-purple-600' : 'border-transparent text-slate-500'}`}>📊 Finance</button>}</div></div>)}
-      <main className="max-w-3xl mx-auto p-4 pb-20">{activeTab === 'finance' && currentUser?.role === 'group_finance' ? <FinanceDashboard /> : activeTab === 'review' && currentUser?.role === 'group_finance' ? <FinanceReviewTab /> : canReview && activeTab === 'review' ? <ReviewClaimsTab /> : <MyExpensesTab />}</main>
+      {(canReview || canSeeReports) && (<div className="bg-white border-b sticky top-14 z-30"><div className="max-w-3xl mx-auto flex">{currentUser?.role !== 'group_finance' && <button onClick={() => setActiveTab('my_expenses')} className={`flex-1 py-3 text-sm font-semibold border-b-2 ${activeTab === 'my_expenses' ? 'border-blue-600 text-blue-600' : 'border-transparent text-slate-500'}`}>📋 My Expenses</button>}<button onClick={() => setActiveTab('review')} className={`flex-1 py-3 text-sm font-semibold border-b-2 ${activeTab === 'review' ? 'border-blue-600 text-blue-600' : 'border-transparent text-slate-500'}`}>👀 Review{getReviewableClaims().length > 0 && <span className="ml-2 bg-amber-500 text-white text-xs px-2 py-0.5 rounded-full">{getReviewableClaims().length}</span>}</button>{currentUser?.role === 'group_finance' && <button onClick={() => setActiveTab('finance')} className={`flex-1 py-3 text-sm font-semibold border-b-2 ${activeTab === 'finance' ? 'border-purple-600 text-purple-600' : 'border-transparent text-slate-500'}`}>📊 Finance</button>}{canSeeReports && <button onClick={() => setActiveTab('reports')} className={`flex-1 py-3 text-sm font-semibold border-b-2 ${activeTab === 'reports' ? 'border-blue-600 text-blue-600' : 'border-transparent text-slate-500'}`}>📊 Reports</button>}</div></div>)}
+      <main className="max-w-3xl mx-auto p-4 pb-20">{activeTab === 'finance' && currentUser?.role === 'group_finance' ? <FinanceDashboard /> : activeTab === 'reports' && canSeeReports ? <CountryHeadReportsTab /> : activeTab === 'review' && currentUser?.role === 'group_finance' ? <FinanceReviewTab /> : canReview && activeTab === 'review' ? <ReviewClaimsTab /> : <MyExpensesTab />}</main>
       {(showAddExpense || editingExpense) && <AddExpenseModal editExpense={editingExpense} existingClaims={claims} expenses={expenses} onClose={() => { setShowAddExpense(false); setEditingExpense(null); }} />}
       {showMileageModal && currentUser.mileageRate && (() => {
         const MileageModalInner = () => {
