@@ -188,6 +188,20 @@ const getFinancialYear = () => {
   return now.getMonth() >= 4 ? now.getFullYear() : now.getFullYear() - 1;
 };
 
+// Get next claim sequence number by finding max existing, not counting
+const getNextClaimSeq = (allClaims, userId, claimName, year) => {
+  const pattern = `${claimName} - ${year} - `;
+  let maxSeq = 0;
+  allClaims.forEach(c => {
+    if (c.user_id === userId && c.claim_number?.includes(pattern)) {
+      const seqStr = c.claim_number.split(pattern)[1]?.replace(' (Draft)', '').trim();
+      const seq = parseInt(seqStr);
+      if (!isNaN(seq) && seq > maxSeq) maxSeq = seq;
+    }
+  });
+  return maxSeq + 1;
+};
+
 const calculateForexRate = (foreignAmount, reimbursementAmount) => {
   const foreign = parseFloat(foreignAmount);
   const reimburse = parseFloat(reimbursementAmount);
@@ -1717,12 +1731,7 @@ export default function BerkeleyExpenseSystem() {
       // Generate draft claim number: ClaimName - YYYY - XX (what it will be on submit)
       const year = getFinancialYear();
       const claimName = currentUser.claimName || currentUser.name.trim().split(' ').pop();
-      const userClaimsThisYear = claims.filter(c => 
-        c.user_id === currentUser.id && 
-        c.claim_number && 
-        c.claim_number.includes(`${claimName} - ${year} -`)
-      );
-      const nextSeq = userClaimsThisYear.length + 1;
+      const nextSeq = getNextClaimSeq(claims, currentUser.id, claimName, year);
       const draftClaimNumber = `${claimName} - ${year} - ${String(nextSeq).padStart(2, '0')} (Draft)`;
       await generatePDFFromHTML(pendingExpenses, currentUser.name, currentUser.office, draftClaimNumber, new Date().toISOString(), annotatedStatements, getUserReimburseCurrency(currentUser), null, null, statementAnnotations);
     } catch (err) { alert('❌ Failed'); }
@@ -1915,16 +1924,7 @@ export default function BerkeleyExpenseSystem() {
         // Generate claim number: ClaimName - YYYY - XX (sequential per employee per year)
         const year = getFinancialYear();
         const claimName = currentUser.claimName || currentUser.name.trim().split(' ').pop();
-        
-        // Count existing claims for this user in this year
-        const userClaimsThisYear = claims.filter(c => 
-          c.user_id === currentUser.id && 
-          c.claim_number && 
-          c.claim_number.includes(`${claimName} - ${year} -`)
-        );
-        
-        // Next sequence number (1-based)
-        const nextSeq = userClaimsThisYear.length + 1;
+        const nextSeq = getNextClaimSeq(claims, currentUser.id, claimName, year);
         const claimNumber = `${claimName} - ${year} - ${String(nextSeq).padStart(2, '0')}`;
 
         const insertData = {
@@ -4112,13 +4112,20 @@ export default function BerkeleyExpenseSystem() {
           if (!emp) continue;
           const year = getFinancialYear();
           const cn = emp.claimName || emp.name.trim().split(' ').pop();
-          const existing = claims.filter(c => c.user_id === tid && c.claim_number?.includes(`${cn} - ${year} -`));
-          const num = `${cn} - ${year} - ${String(existing.length + 1).padStart(2, '0')}`;
+          const nextSeq = getNextClaimSeq(claims, tid, cn, year);
+          const num = `${cn} - ${year} - ${String(nextSeq).padStart(2, '0')}`;
           const wf = getApprovalWorkflow(tid, emp.office);
           const exps = (showDupModal.expenses || []).map((e, i) => ({ ...e, id: Date.now() + i, adminNotes: null, isPotentialDuplicate: false, duplicateMatchLabel: null, duplicateMatchRef: null, ref: String(i + 1) }));
           const total = exps.reduce((s, e) => s + parseFloat(e.reimbursementAmount || e.amount || 0), 0);
           const ins = { claim_number: num, user_id: tid, user_name: emp.name, office: OFFICES.find(o => o.code === emp.office)?.name, office_code: emp.office, currency: showDupModal.currency, total_amount: total, item_count: exps.length, status: 'pending_review', approval_level: 1, level1_approver: wf?.level1, level2_approver: wf?.level2, expenses: exps, submitted_at: new Date().toISOString() };
+          // Include statement data
+          if (showDupModal.annotated_statements) ins.annotated_statements = showDupModal.annotated_statements;
+          if (showDupModal.annotated_statement) ins.annotated_statement = showDupModal.annotated_statement;
+          if (showDupModal.original_statements) ins.original_statements = showDupModal.original_statements;
+          if (showDupModal.statement_annotations) ins.statement_annotations = showDupModal.statement_annotations;
           let r = await supabase.from('claims').insert([ins]);
+          // Fallback without optional columns
+          if (r.error) { delete ins.statement_annotations; delete ins.original_statements; delete ins.annotated_statements; delete ins.annotated_statement; r = await supabase.from('claims').insert([ins]); }
           if (!r.error) ok++;
         } catch (err) { console.error(err); }
       }
@@ -4378,8 +4385,8 @@ export default function BerkeleyExpenseSystem() {
           if (!emp) continue;
           const year = getFinancialYear();
           const cn = emp.claimName || emp.name.trim().split(' ').pop();
-          const existing = claims.filter(c => c.user_id === tid && c.claim_number?.includes(`${cn} - ${year} -`));
-          const num = `${cn} - ${year} - ${String(existing.length + 1).padStart(2, '0')}`;
+          const nextSeq = getNextClaimSeq(claims, tid, cn, year);
+          const num = `${cn} - ${year} - ${String(nextSeq).padStart(2, '0')}`;
           const wf = getApprovalWorkflow(tid, emp.office);
           const exps = (showDupModal.expenses || []).map((e, i) => ({
             ...e, id: Date.now() + i, adminNotes: null, isPotentialDuplicate: false,
