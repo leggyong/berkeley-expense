@@ -208,7 +208,7 @@ const EMPLOYEES = [
   { id: 203, name: 'Dora Ji', office: 'CHE', role: 'employee', reimburseCurrency: 'CNY', claimName: 'Dora', password: 'berkeley123' },
   // Shanghai
   { id: 301, name: 'Ariel Tang', office: 'SHA', role: 'employee', reimburseCurrency: 'CNY', claimName: 'Ariel', password: 'berkeley123' },
-  { id: 302, name: 'Eddy Tao', office: 'SHA', role: 'manager', reimburseCurrency: 'CNY', claimName: 'Eddy', password: 'berkeley123' },
+  { id: 302, name: 'Eddy Tao', office: 'SHA', role: 'manager', reimburseCurrency: 'CNY', claimName: 'Eddy', password: 'berkeley123', dashboardOffices: ['BEJ', 'CHE', 'SHA', 'SHE'] },
   { id: 303, name: 'Elsa Huang', office: 'SHA', role: 'employee', reimburseCurrency: 'CNY', claimName: 'Elsa', password: 'berkeley123' },
   { id: 304, name: 'Terence Li', office: 'SHA', role: 'employee', reimburseCurrency: 'CNY', claimName: 'Terence', password: 'berkeley123' },
   { id: 305, name: 'Johnnie Huang', office: 'SHA', role: 'employee', reimburseCurrency: 'CNY', claimName: 'Johnnie', password: 'berkeley123' },
@@ -216,13 +216,13 @@ const EMPLOYEES = [
   { id: 307, name: 'Amy Wang', office: 'SHA', role: 'employee', reimburseCurrency: 'CNY', claimName: 'Amy', password: 'berkeley123' },
   { id: 308, name: 'Echo Yu', office: 'SHA', role: 'employee', reimburseCurrency: 'CNY', claimName: 'Echo', password: 'berkeley123' },
   // Shenzhen
-  { id: 401, name: 'Ryan Lee', office: 'SHE', role: 'employee', reimburseCurrency: 'CNY', claimName: 'Ryan', password: 'berkeley123' },
+  { id: 401, name: 'Ryan Lee', office: 'SHE', role: 'employee', reimburseCurrency: 'CNY', claimName: 'Ryan', password: 'berkeley123', dashboardOffices: ['CHE', 'SHE'] },
   { id: 402, name: 'Simon Wong', office: 'SHE', role: 'employee', reimburseCurrency: 'CNY', claimName: 'Simon', password: 'berkeley123' },
   { id: 403, name: 'Zayn Huang', office: 'SHE', role: 'employee', reimburseCurrency: 'CNY', claimName: 'Zayn', password: 'berkeley123' },
   { id: 404, name: 'Jade Shen', office: 'SHE', role: 'employee', reimburseCurrency: 'CNY', claimName: 'Jade', password: 'berkeley123' },
   // Hong Kong
   { id: 501, name: 'Kate Tai', office: 'HKG', role: 'employee', reimburseCurrency: 'HKD', claimName: 'Kate', password: 'berkeley123' },
-  { id: 502, name: 'Anthony Jurenko', office: 'HKG', role: 'manager', reimburseCurrency: 'HKD', claimName: 'Anthony', password: 'berkeley123' },
+  { id: 502, name: 'Anthony Jurenko', office: 'HKG', role: 'manager', reimburseCurrency: 'HKD', claimName: 'Anthony', password: 'berkeley123', dashboardOffices: ['HKG'] },
   { id: 503, name: 'Suki Fong', office: 'HKG', role: 'employee', reimburseCurrency: 'HKD', claimName: 'Suki Fong', password: 'berkeley123' },
   { id: 504, name: 'Ron Chung', office: 'HKG', role: 'employee', reimburseCurrency: 'HKD', claimName: 'Ron', password: 'berkeley123' },
   { id: 505, name: 'Cherry Lai', office: 'HKG', role: 'admin', reimburseCurrency: 'HKD', claimName: 'Cherry', password: 'berkeley123' },
@@ -238,7 +238,7 @@ const EMPLOYEES = [
   // Singapore
   { id: 801, name: 'John Yan', office: 'SIN', role: 'manager', reimburseCurrency: 'SGD', claimName: 'John', password: 'berkeley123' },
   { id: 802, name: 'Janice Zhu', office: 'SIN', role: 'employee', reimburseCurrency: 'SGD', claimName: 'Janice', password: 'berkeley123' },
-  { id: 803, name: 'Karen Chia', office: 'SIN', role: 'manager', reimburseCurrency: 'SGD', claimName: 'Karen', password: 'berkeley123' },
+  { id: 803, name: 'Karen Chia', office: 'SIN', role: 'manager', reimburseCurrency: 'SGD', claimName: 'Karen', password: 'berkeley123', dashboardOffices: ['SIN', 'BKK', 'MYS'] },
   { id: 804, name: 'Cathy He', office: 'SIN', role: 'manager', reimburseCurrency: 'SGD', claimName: 'Cathy He', password: 'berkeley123' },
   { id: 805, name: 'Ann Low', office: 'SIN', role: 'admin', reimburseCurrency: 'SGD', claimName: 'Ann', password: 'berkeley123' },
   { id: 806, name: 'Praba', office: 'SIN', role: 'employee', reimburseCurrency: 'SGD', claimName: 'Praba', password: 'berkeley123' },
@@ -261,7 +261,7 @@ const EMPLOYEES = [
   { id: 904, name: 'Norakamol Seninvinin', office: 'BKK', role: 'employee', reimburseCurrency: 'THB', claimName: 'Nora', password: 'berkeley123' },
   { id: 905, name: 'Warahnooch Achariyapradit', office: 'BKK', role: 'admin', reimburseCurrency: 'THB', claimName: 'Bow', password: 'berkeley123' },
   // Dubai / MENA
-  { id: 1001, name: 'Christopher Frame', office: 'DXB', role: 'manager', reimburseCurrency: 'AED', claimName: 'Christopher', password: 'berkeley123' },
+  { id: 1001, name: 'Christopher Frame', office: 'DXB', role: 'manager', reimburseCurrency: 'AED', claimName: 'Christopher', password: 'berkeley123', dashboardOffices: ['DXB', 'LON'] },
   { id: 1002, name: 'Christine Dimaranan', office: 'DXB', role: 'admin', reimburseCurrency: 'AED', claimName: 'Christine', password: 'berkeley123' },
   { id: 1003, name: 'Nathan Abrahams', office: 'DXB', role: 'employee', reimburseCurrency: 'AED', claimName: 'Nathan', password: 'berkeley123' },
   { id: 1004, name: 'Leila Kadiri', office: 'DXB', role: 'employee', reimburseCurrency: 'AED', claimName: 'Leila', password: 'berkeley123' },
@@ -580,7 +580,7 @@ const getApproverName = (approverId) => {
 
 const getClaimStatusText = (claim) => {
   if (claim.status === 'approved') return '✅ Approved';
-  if (claim.status === 'submitted_to_finance') return '📤 Submitted to Finance';
+  if (claim.status === 'submitted_to_finance') return '📤 Submitted for Payment';
   if (claim.status === 'paid') return '💰 Paid';
   if (claim.status === 'rejected') return 'Rejected';
   if (claim.status === 'changes_requested') return 'Changes Requested';
@@ -2173,21 +2173,63 @@ export default function BerkeleyExpenseSystem() {
     setLoading(false);
   };
 
-  const handleSaveAdminEdits = async (claim, editedExpenses) => {
+  const handleSaveAdminEdits = async (claim, editedExpenses, hasDeletedItems = false) => {
     setLoading(true);
     try {
-      const newTotal = editedExpenses.reduce((sum, e) => sum + parseFloat(e.reimbursementAmount || e.amount || 0), 0);
-      const { data, error } = await supabase.from('claims').update({ 
-        expenses: editedExpenses, 
-        total_amount: newTotal, 
+      // Sort by date and reassign sequential refs
+      const sorted = [...editedExpenses].sort((a, b) => new Date(a.date) - new Date(b.date));
+      const renumbered = sorted.map((exp, idx) => ({ ...exp, ref: String(idx + 1) }));
+      
+      const newTotal = renumbered.reduce((sum, e) => sum + parseFloat(e.reimbursementAmount || e.amount || 0), 0);
+      
+      const updateData = { 
+        expenses: renumbered, 
+        total_amount: newTotal,
+        item_count: renumbered.length,
         edited_by: currentUser.name 
-      }).eq('id', claim.id);
+      };
+      
+      // If items were deleted, remap statement annotations to new ref numbers
+      if (hasDeletedItems && claim.statement_annotations) {
+        // Build mapping: old ref → new ref based on expense id matching
+        const refMap = {};
+        renumbered.forEach(exp => {
+          // Find original expense by id to get old ref
+          const original = (claim.expenses || []).find(e => e.id === exp.id);
+          if (original && original.ref !== exp.ref) {
+            refMap[original.ref] = exp.ref;
+          }
+        });
+        
+        // Update annotations: remap refs, remove annotations for deleted expenses
+        const survivingIds = new Set(renumbered.map(e => e.id));
+        const updatedAnnotations = claim.statement_annotations
+          .filter(a => {
+            // Keep annotation if its expense still exists
+            const origExp = (claim.expenses || []).find(e => e.ref === a.ref || String(e.ref) === String(a.ref));
+            return origExp && survivingIds.has(origExp.id);
+          })
+          .map(a => {
+            const newRef = refMap[a.ref] || refMap[String(a.ref)];
+            return newRef ? { ...a, ref: newRef } : a;
+          });
+        
+        updateData.statement_annotations = updatedAnnotations;
+      }
+      
+      const { data, error } = await supabase.from('claims').update(updateData).eq('id', claim.id);
       if (error) {
-        console.error('Supabase error:', error);
-        throw new Error(error.message || 'Database error');
+        // Fallback without annotations if column doesn't exist
+        if (updateData.statement_annotations) {
+          delete updateData.statement_annotations;
+          const retry = await supabase.from('claims').update(updateData).eq('id', claim.id);
+          if (retry.error) throw new Error(retry.error.message || 'Database error');
+        } else {
+          throw new Error(error.message || 'Database error');
+        }
       }
       await loadClaims();
-      setSelectedClaim(prev => prev ? { ...prev, expenses: editedExpenses, total_amount: newTotal, edited_by: currentUser.name } : null);
+      setSelectedClaim(prev => prev ? { ...prev, expenses: renumbered, total_amount: newTotal, edited_by: currentUser.name } : null);
       setLoading(false);
       return { success: true };
     } catch (err) { 
@@ -2207,7 +2249,7 @@ export default function BerkeleyExpenseSystem() {
       }).eq('id', claimId);
       if (error) throw error;
       await loadClaims();
-      alert('✅ Marked as submitted to finance');
+      alert('✅ Marked as submitted for payment');
     } catch (err) { console.error('Mark submitted error:', err); alert('❌ Failed'); }
     setLoading(false);
   };
@@ -2704,7 +2746,7 @@ export default function BerkeleyExpenseSystem() {
     const handleSaveAndApprove = async () => {
       setSaving(true);
       const updatedExpenses = buildUpdatedExpenses();
-      await handleSaveAdminEdits(claim, updatedExpenses);
+      await handleSaveAdminEdits(claim, updatedExpenses, deletedExpenses.size > 0);
       if (!isAlreadyApproved) {
         await handleApprove(claim);
       } else {
@@ -2727,9 +2769,7 @@ export default function BerkeleyExpenseSystem() {
         }
         return exp;
       });
-      await handleSaveAdminEdits(claim, updatedExpenses);
-      
-      // Build return comment from all return reasons
+      await handleSaveAdminEdits(claim, updatedExpenses, deletedExpenses.size > 0);
       const allReasons = Object.entries(returnReasons)
         .filter(([_, v]) => v?.trim())
         .map(([idx, v]) => `Item ${sortedExpenses[parseInt(idx)]?.ref}: ${v.trim()}`)
@@ -2753,7 +2793,7 @@ export default function BerkeleyExpenseSystem() {
           <div className="p-4 overflow-y-auto max-h-[calc(90vh-200px)]">
             {isAlreadyApproved && (
               <div className="bg-amber-50 border border-amber-300 rounded-xl p-3 mb-3 text-sm text-amber-800">
-                {isEditable ? '✏️ This claim is submitted to finance. You can edit expenses, add notes, or return it.' : '📁 This claim is finalized. You can add notes or return it for changes.'}
+                {isEditable ? '✏️ This claim is submitted for payment. You can edit expenses, add notes, or return it.' : '📁 This claim is finalized. You can add notes or return it for changes.'}
               </div>
             )}
             {sortedExpenses.map((exp, idx) => {
@@ -3113,6 +3153,28 @@ export default function BerkeleyExpenseSystem() {
           )}
         </div>
         <div className="bg-white rounded-2xl shadow-lg p-6">
+          {(() => {
+            const fy = getFinancialYear();
+            const fyClaims = myClaims.filter(c => c.status !== 'changes_requested' && c.claim_number?.includes(`- ${fy} -`));
+            const fyTotal = fyClaims.reduce((s, c) => s + parseFloat(c.total_amount || 0), 0);
+            const fyPaid = fyClaims.filter(c => c.status === 'paid' || c.status === 'approved' || c.status === 'submitted_to_finance').reduce((s, c) => s + parseFloat(c.total_amount || 0), 0);
+            return (
+              <div className="flex gap-3 mb-4">
+                <div className="flex-1 bg-blue-50 rounded-xl p-3 text-center">
+                  <div className="text-2xl font-bold text-blue-700">{fyClaims.length}</div>
+                  <div className="text-xs text-blue-500">Claims FY{fy}</div>
+                </div>
+                <div className="flex-1 bg-green-50 rounded-xl p-3 text-center">
+                  <div className="text-lg font-bold text-green-700">{formatCurrency(fyTotal, getUserReimburseCurrency(currentUser))}</div>
+                  <div className="text-xs text-green-500">Total FY{fy}</div>
+                </div>
+                <div className="flex-1 bg-purple-50 rounded-xl p-3 text-center">
+                  <div className="text-lg font-bold text-purple-700">{formatCurrency(fyPaid, getUserReimburseCurrency(currentUser))}</div>
+                  <div className="text-xs text-purple-500">Approved/Paid</div>
+                </div>
+              </div>
+            );
+          })()}
           <h3 className="font-bold text-slate-800 mb-4">📁 My Claims</h3>
           {myClaims.filter(c => c.status !== 'changes_requested').length === 0 ? <p className="text-center text-slate-400 py-8">None</p> : (<div className="space-y-2">{myClaims.filter(c => c.status !== 'changes_requested').map(claim => (<div key={claim.id} className="flex items-center justify-between p-4 rounded-xl bg-slate-50 border"><div><span className="font-semibold">{claim.claim_number}</span><span className={`ml-2 text-xs px-2 py-0.5 rounded-full ${claim.status === 'approved' || claim.status === 'paid' || claim.status === 'submitted_to_finance' ? 'bg-green-100 text-green-700' : claim.status === 'rejected' ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-700'}`}>{getClaimStatusText(claim)}</span></div><div className="flex items-center gap-3"><span className="font-bold">{formatCurrency(claim.total_amount, claim.currency)}</span><button onClick={() => handleDownloadPDF(claim)} className="bg-green-100 text-green-700 px-3 py-2 rounded-lg text-sm">📥</button></div></div>))}</div>)}
         </div>
@@ -3466,6 +3528,7 @@ export default function BerkeleyExpenseSystem() {
     
     allClaims.forEach(claim => {
       if (!claim) return;
+      if (currentUser.reportOffices && !currentUser.reportOffices.includes(claim.office_code)) return;
       const empId = claim.user_id;
       if (!empId) return;
       if (!employeeData[empId]) {
@@ -3540,9 +3603,10 @@ export default function BerkeleyExpenseSystem() {
     const formatDateShort = (d) => d ? new Date(d).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: '2-digit' }) : '-';
     
     // Export to Excel/CSV function
+    
     const handleExport = () => {
       // Format status for CSV
-      const fmtStatus = (s) => s === 'approved' ? 'Approved' : s === 'paid' ? 'Paid' : s === 'submitted_to_finance' ? 'With Finance' : s === 'pending_review' ? 'Pending L1' : s === 'pending_level2' ? 'Pending L2' : s === 'changes_requested' ? 'Returned' : s === 'draft' ? 'Draft' : s;
+      const fmtStatus = (s) => s === 'approved' ? 'Approved' : s === 'paid' ? 'Paid' : s === 'submitted_to_finance' ? 'Submitted for Payment' : s === 'pending_review' ? 'Pending L1' : s === 'pending_level2' ? 'Pending L2' : s === 'changes_requested' ? 'Returned' : s === 'draft' ? 'Draft' : s;
       
       let csvContent = '';
       let filename = '';
@@ -3625,7 +3689,7 @@ export default function BerkeleyExpenseSystem() {
             </label>
           </div>
           <div className="flex gap-2 flex-wrap">
-            {['gl', 'backcharge', 'submissions', 'late', 'migrate'].map(type => (
+            {(currentUser.reportOffices ? ['gl', 'submissions'] : ['gl', 'backcharge', 'submissions', 'late', 'migrate']).map(type => (
               <button 
                 key={type}
                 onClick={() => setReportType(type)}
@@ -3768,7 +3832,7 @@ export default function BerkeleyExpenseSystem() {
                               }`}>{
                                 cl.status === 'approved' ? '✅ Approved' : 
                                 cl.status === 'paid' ? '💰 Paid' : 
-                                cl.status === 'submitted_to_finance' ? '📤 With Finance' : 
+                                cl.status === 'submitted_to_finance' ? '📤 Submitted' : 
                                 cl.status === 'pending_review' ? '⏳ Pending L1' : 
                                 cl.status === 'pending_level2' ? '⏳ Pending L2' : 
                                 cl.status === 'changes_requested' ? '🔄 Returned' :
@@ -3937,9 +4001,319 @@ export default function BerkeleyExpenseSystem() {
     );
   };
 
+  // ============ FINANCE REVIEW TAB ============
+  const FinanceReviewTab = () => {
+    const [expandedSection, setExpandedSection] = useState('submitted'); // drafts, review, submitted, paid
+    const [expandedOffice, setExpandedOffice] = useState(null);
+    const [showDupModal, setShowDupModal] = useState(null);
+    const [dupTargets, setDupTargets] = useState([]);
+    const [dupBusy, setDupBusy] = useState(false);
+    
+    const handleDuplicate = async () => {
+      if (!showDupModal || dupTargets.length === 0) return;
+      setDupBusy(true);
+      let ok = 0;
+      for (const tid of dupTargets) {
+        try {
+          const emp = EMPLOYEES.find(e => e.id === tid);
+          if (!emp) continue;
+          const year = getFinancialYear();
+          const cn = emp.claimName || emp.name.trim().split(' ').pop();
+          const existing = claims.filter(c => c.user_id === tid && c.claim_number?.includes(`${cn} - ${year} -`));
+          const num = `${cn} - ${year} - ${String(existing.length + 1).padStart(2, '0')}`;
+          const wf = getApprovalWorkflow(tid, emp.office);
+          const exps = (showDupModal.expenses || []).map((e, i) => ({ ...e, id: Date.now() + i, adminNotes: null, isPotentialDuplicate: false, duplicateMatchLabel: null, duplicateMatchRef: null, ref: String(i + 1) }));
+          const total = exps.reduce((s, e) => s + parseFloat(e.reimbursementAmount || e.amount || 0), 0);
+          const ins = { claim_number: num, user_id: tid, user_name: emp.name, office: OFFICES.find(o => o.code === emp.office)?.name, office_code: emp.office, currency: showDupModal.currency, total_amount: total, item_count: exps.length, status: 'pending_review', approval_level: 1, level1_approver: wf?.level1, level2_approver: wf?.level2, expenses: exps, submitted_at: new Date().toISOString() };
+          let r = await supabase.from('claims').insert([ins]);
+          if (!r.error) ok++;
+        } catch (err) { console.error(err); }
+      }
+      await loadClaims();
+      setDupBusy(false); setShowDupModal(null); setDupTargets([]);
+      alert(`✅ Duplicated to ${ok}/${dupTargets.length} employee(s)`);
+    };
+    
+    // Fetch all user drafts
+    const [draftUsers, setDraftUsers] = useState([]);
+    const [loadingDrafts, setLoadingDrafts] = useState(true);
+    useEffect(() => {
+      const fetchDrafts = async () => {
+        setLoadingDrafts(true);
+        try {
+          const { data, error } = await supabase.from('user_drafts').select('*');
+          if (!error && data) {
+            const parsed = data.filter(d => d.expenses).map(d => {
+              const emp = EMPLOYEES.find(e => e.id === d.user_id);
+              if (!emp) return null;
+              try {
+                const expenses = JSON.parse(d.expenses);
+                if (!Array.isArray(expenses) || expenses.length === 0) return null;
+                const total = expenses.reduce((sum, e) => sum + parseFloat(e.reimbursementAmount || e.amount || 0), 0);
+                return { user_id: d.user_id, name: emp.name, office_code: emp.office, office: OFFICES.find(o => o.code === emp.office)?.name, currency: emp.reimburseCurrency, count: expenses.length, total, updatedAt: d.updated_at };
+              } catch { return null; }
+            }).filter(Boolean);
+            // Apply office scope for CSC China
+            const scoped = currentUser.reportOffices ? parsed.filter(d => currentUser.reportOffices.includes(d.office_code)) : parsed;
+            setDraftUsers(scoped);
+          }
+        } catch (err) { console.error(err); }
+        setLoadingDrafts(false);
+      };
+      fetchDrafts();
+    }, []);
+    
+    const officeFilter = (c) => !currentUser.reportOffices || currentUser.reportOffices.includes(c.office_code);
+    const pendingClaims = claims.filter(c => (c.status === 'pending_review' || c.status === 'pending_level2' || c.status === 'changes_requested') && officeFilter(c));
+    const submittedClaims = claims.filter(c => (c.status === 'submitted_to_finance' || c.status === 'approved') && officeFilter(c));
+    const paidClaims = claims.filter(c => c.status === 'paid' && officeFilter(c));
+    
+    // Group by office
+    const groupByOffice = (claimList) => {
+      const grouped = {};
+      claimList.forEach(c => {
+        const office = c.office_code || 'Unknown';
+        if (!grouped[office]) grouped[office] = [];
+        grouped[office].push(c);
+      });
+      return Object.entries(grouped).sort((a, b) => a[0].localeCompare(b[0]));
+    };
+    
+    const renderClaimRow = (claim, showDup = true) => (
+      <div key={claim.id} className="flex items-center justify-between p-2 rounded-lg hover:bg-slate-50 text-sm">
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="font-semibold">{claim.user_name}</span>
+            <span className="text-xs text-slate-400">{claim.claim_number}</span>
+            <span className={`text-xs px-1.5 py-0.5 rounded-full font-medium ${
+              claim.status === 'pending_review' ? 'bg-amber-100 text-amber-700' :
+              claim.status === 'pending_level2' ? 'bg-blue-100 text-blue-700' :
+              claim.status === 'changes_requested' ? 'bg-red-100 text-red-700' :
+              claim.status === 'approved' ? 'bg-green-100 text-green-700' :
+              claim.status === 'submitted_to_finance' ? 'bg-purple-100 text-purple-700' :
+              claim.status === 'paid' ? 'bg-green-200 text-green-800' :
+              'bg-slate-100 text-slate-600'
+            }`}>{
+              claim.status === 'pending_review' ? 'L1' :
+              claim.status === 'pending_level2' ? 'L2' :
+              claim.status === 'changes_requested' ? 'Returned' :
+              claim.status === 'approved' ? 'Approved' :
+              claim.status === 'submitted_to_finance' ? 'Submitted' :
+              claim.status === 'paid' ? 'Paid' : claim.status
+            }</span>
+          </div>
+          <p className="text-xs text-slate-400">{(claim.expenses || []).length} items • {formatShortDate(claim.submitted_at)}</p>
+        </div>
+        <div className="flex items-center gap-1.5 flex-shrink-0">
+          <span className="font-bold text-sm">{formatCurrency(claim.total_amount, claim.currency)}</span>
+          <button onClick={() => handleDownloadPDF(claim)} className="bg-green-100 text-green-700 px-2 py-1 rounded text-xs">📥</button>
+          {!currentUser.reportOffices && claim.status === 'submitted_to_finance' && <button onClick={() => setEditingClaim(claim)} className="bg-blue-100 text-blue-700 px-2 py-1 rounded text-xs">✏️</button>}
+          {!currentUser.reportOffices && claim.status === 'submitted_to_finance' && <button onClick={() => handleMarkPaid(claim.id)} disabled={loading} className="bg-green-600 text-white px-2 py-1 rounded text-xs font-semibold disabled:opacity-50">✓</button>}
+          {!currentUser.reportOffices && currentUser.id === 9001 && showDup && <button onClick={() => { setShowDupModal(claim); setDupTargets([]); }} className="bg-purple-100 text-purple-700 px-2 py-1 rounded text-xs">📋</button>}
+        </div>
+      </div>
+    );
+    
+    const renderSection = (title, icon, color, claimList, key) => {
+      const isOpen = expandedSection === key;
+      const grouped = groupByOffice(claimList);
+      return (
+        <div className={`bg-white rounded-2xl shadow-sm border-2 ${isOpen ? `border-${color}-300` : 'border-slate-200'}`}>
+          <button onClick={() => setExpandedSection(isOpen ? null : key)} className="w-full p-4 flex justify-between items-center text-left">
+            <div className="flex items-center gap-2">
+              <span className={`text-sm transition-transform ${isOpen ? 'rotate-90' : ''}`}>▶</span>
+              <span className="text-lg">{icon}</span>
+              <span className="font-bold">{title}</span>
+              <span className={`bg-${color}-100 text-${color}-700 text-xs px-2 py-0.5 rounded-full font-bold`}>{claimList.length}</span>
+            </div>
+            <span className="font-bold text-slate-500 text-sm">
+              {formatCurrency(claimList.reduce((s, c) => s + parseFloat(c.total_amount || 0), 0), 'GBP')}
+            </span>
+          </button>
+          {isOpen && (
+            <div className="px-4 pb-4">
+              {grouped.length === 0 ? (
+                <p className="text-center text-slate-400 py-4 text-sm">None</p>
+              ) : grouped.map(([office, officeClaims]) => {
+                const officeName = OFFICES.find(o => o.code === office)?.name || office;
+                const officeKey = `${key}_${office}`;
+                return (
+                  <div key={office} className="mb-2">
+                    <button onClick={() => setExpandedOffice(expandedOffice === officeKey ? null : officeKey)} className="w-full flex justify-between items-center py-2 px-3 bg-slate-50 rounded-lg text-sm font-semibold text-slate-600 hover:bg-slate-100">
+                      <div className="flex items-center gap-2">
+                        <span className={`text-xs transition-transform ${expandedOffice === officeKey ? 'rotate-90' : ''}`}>▶</span>
+                        <span>{officeName}</span>
+                        <span className="text-xs font-normal text-slate-400">({officeClaims.length})</span>
+                      </div>
+                      <span className="text-xs">{formatCurrency(officeClaims.reduce((s, c) => s + parseFloat(c.total_amount || 0), 0), officeClaims[0]?.currency || 'SGD')}</span>
+                    </button>
+                    {expandedOffice === officeKey && (
+                      <div className="mt-1 ml-4 space-y-1">
+                        {officeClaims.sort((a, b) => (b.submitted_at || '').localeCompare(a.submitted_at || '')).map(claim => renderClaimRow(claim))}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      );
+    };
+    
+    return (
+      <div className="space-y-3">
+        {/* Pending Drafts - users with unsaved expenses */}
+        <div className={`bg-white rounded-2xl shadow-sm border-2 ${expandedSection === 'drafts' ? 'border-slate-300' : 'border-slate-200'}`}>
+          <button onClick={() => setExpandedSection(expandedSection === 'drafts' ? null : 'drafts')} className="w-full p-4 flex justify-between items-center text-left">
+            <div className="flex items-center gap-2">
+              <span className={`text-sm transition-transform ${expandedSection === 'drafts' ? 'rotate-90' : ''}`}>▶</span>
+              <span className="text-lg">📝</span>
+              <span className="font-bold">Pending Drafts</span>
+              <span className="bg-slate-100 text-slate-700 text-xs px-2 py-0.5 rounded-full font-bold">{loadingDrafts ? '...' : draftUsers.length}</span>
+            </div>
+            <span className="text-xs text-slate-400">Saved but not submitted</span>
+          </button>
+          {expandedSection === 'drafts' && (
+            <div className="px-4 pb-4">
+              {loadingDrafts ? <p className="text-center text-slate-400 py-4 text-sm">Loading...</p> : draftUsers.length === 0 ? <p className="text-center text-slate-400 py-4 text-sm">No pending drafts</p> : (
+                (() => {
+                  const grouped = {};
+                  draftUsers.forEach(d => { if (!grouped[d.office_code]) grouped[d.office_code] = []; grouped[d.office_code].push(d); });
+                  return Object.entries(grouped).sort((a, b) => a[0].localeCompare(b[0])).map(([office, users]) => {
+                    const officeName = OFFICES.find(o => o.code === office)?.name || office;
+                    const officeKey = `drafts_${office}`;
+                    return (
+                      <div key={office} className="mb-2">
+                        <button onClick={() => setExpandedOffice(expandedOffice === officeKey ? null : officeKey)} className="w-full flex justify-between items-center py-2 px-3 bg-slate-50 rounded-lg text-sm font-semibold text-slate-600 hover:bg-slate-100">
+                          <div className="flex items-center gap-2">
+                            <span className={`text-xs transition-transform ${expandedOffice === officeKey ? 'rotate-90' : ''}`}>▶</span>
+                            <span>{officeName}</span>
+                            <span className="text-xs font-normal text-slate-400">({users.length})</span>
+                          </div>
+                        </button>
+                        {expandedOffice === officeKey && (
+                          <div className="mt-1 ml-4 space-y-1">
+                            {users.sort((a, b) => a.name.localeCompare(b.name)).map(u => (
+                              <div key={u.user_id} className="flex items-center justify-between p-2 rounded-lg hover:bg-slate-50 text-sm">
+                                <div>
+                                  <span className="font-semibold">{u.name}</span>
+                                  <span className="text-xs text-slate-400 ml-2">{u.count} item{u.count !== 1 ? 's' : ''}</span>
+                                </div>
+                                <div className="text-right">
+                                  <span className="font-bold text-sm">{formatCurrency(u.total, u.currency)}</span>
+                                  <p className="text-xs text-slate-400">{formatShortDate(u.updatedAt)}</p>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  });
+                })()
+              )}
+            </div>
+          )}
+        </div>
+        
+        {renderSection('Under Review', '⏳', 'amber', pendingClaims, 'review')}
+        {renderSection('Submitted for Payment', '📤', 'purple', submittedClaims, 'submitted')}
+        {renderSection('Paid Claims', '💰', 'green', paidClaims, 'paid')}
+        
+        {/* Duplicate Modal */}
+        {showDupModal && (
+          <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50" onClick={() => setShowDupModal(null)}>
+            <div className="bg-white rounded-2xl max-w-md w-full max-h-[80vh] overflow-hidden" onClick={e => e.stopPropagation()}>
+              <div className="bg-purple-600 text-white p-4">
+                <h3 className="font-bold">📋 Duplicate Claim</h3>
+                <p className="text-purple-200 text-sm">{showDupModal.claim_number} • {showDupModal.user_name}</p>
+              </div>
+              <div className="p-4 overflow-y-auto max-h-[50vh]">
+                <p className="text-sm text-slate-600 mb-3">Select employees to copy this claim to:</p>
+                <div className="space-y-1">
+                  {OFFICES.filter(o => !o.isAdmin).map(office => {
+                    const emps = EMPLOYEES.filter(e => e.office === office.code && e.role !== 'group_finance');
+                    if (!emps.length) return null;
+                    return (
+                      <div key={office.code}>
+                        <p className="text-xs font-bold text-slate-400 mt-2 mb-1">{office.name}</p>
+                        {emps.sort((a,b) => a.name.localeCompare(b.name)).map(emp => (
+                          <label key={emp.id} className="flex items-center gap-2 p-1.5 rounded hover:bg-purple-50 cursor-pointer text-sm">
+                            <input type="checkbox" checked={dupTargets.includes(emp.id)} onChange={e => {
+                              if (e.target.checked) setDupTargets(prev => [...prev, emp.id]);
+                              else setDupTargets(prev => prev.filter(id => id !== emp.id));
+                            }} className="rounded" />
+                            <span>{emp.name}</span>
+                          </label>
+                        ))}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+              <div className="p-4 border-t flex gap-3">
+                <button onClick={() => setShowDupModal(null)} className="flex-1 py-2 rounded-lg border-2 font-semibold text-sm">Cancel</button>
+                <button onClick={handleDuplicate} disabled={dupTargets.length === 0 || dupBusy} className={`flex-[2] py-2 rounded-lg font-semibold text-sm ${dupTargets.length > 0 && !dupBusy ? 'bg-purple-600 text-white' : 'bg-slate-200 text-slate-400'}`}>
+                  {dupBusy ? '⏳...' : `Duplicate to ${dupTargets.length}`}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+        
+        {editingClaim && <ReviewModal claim={editingClaim} onClose={() => { setEditingClaim(null); loadClaims(); }} />}
+      </div>
+    );
+  };
+  
   const ReviewClaimsTab = () => {
     const reviewableClaims = getReviewableClaims();
     const claimsForSubmission = getClaimsForSubmission();
+    const [showDupModal, setShowDupModal] = useState(null); // claim to duplicate
+    const [dupTargets, setDupTargets] = useState([]); // selected employee IDs
+    const [dupBusy, setDupBusy] = useState(false);
+    
+    const handleDuplicate = async () => {
+      if (!showDupModal || dupTargets.length === 0) return;
+      setDupBusy(true);
+      let ok = 0;
+      for (const tid of dupTargets) {
+        try {
+          const emp = EMPLOYEES.find(e => e.id === tid);
+          if (!emp) continue;
+          const year = getFinancialYear();
+          const cn = emp.claimName || emp.name.trim().split(' ').pop();
+          const existing = claims.filter(c => c.user_id === tid && c.claim_number?.includes(`${cn} - ${year} -`));
+          const num = `${cn} - ${year} - ${String(existing.length + 1).padStart(2, '0')}`;
+          const wf = getApprovalWorkflow(tid, emp.office);
+          const exps = (showDupModal.expenses || []).map((e, i) => ({
+            ...e, id: Date.now() + i, adminNotes: null, isPotentialDuplicate: false,
+            duplicateMatchLabel: null, duplicateMatchRef: null, ref: String(i + 1)
+          }));
+          const total = exps.reduce((s, e) => s + parseFloat(e.reimbursementAmount || e.amount || 0), 0);
+          const ins = {
+            claim_number: num, user_id: tid, user_name: emp.name,
+            office: OFFICES.find(o => o.code === emp.office)?.name, office_code: emp.office,
+            currency: showDupModal.currency, total_amount: total, item_count: exps.length,
+            status: 'pending_review', approval_level: 1,
+            level1_approver: wf?.level1, level2_approver: wf?.level2,
+            expenses: exps, submitted_at: new Date().toISOString(),
+            annotated_statements: showDupModal.annotated_statements,
+            annotated_statement: showDupModal.annotated_statement,
+            original_statements: showDupModal.original_statements,
+            statement_annotations: showDupModal.statement_annotations
+          };
+          let r = await supabase.from('claims').insert([ins]);
+          if (r.error) { delete ins.statement_annotations; delete ins.original_statements; delete ins.annotated_statements; delete ins.annotated_statement; r = await supabase.from('claims').insert([ins]); }
+          if (!r.error) ok++;
+        } catch (err) { console.error(err); }
+      }
+      await loadClaims();
+      setDupBusy(false); setShowDupModal(null); setDupTargets([]);
+      alert(`✅ Duplicated to ${ok}/${dupTargets.length} employee(s)`);
+    };
+    
     const getBackchargeReport = () => {
       if (!backchargeFromDate || !backchargeToDate) return null;
       const fromDate = new Date(backchargeFromDate);
@@ -3991,6 +4365,81 @@ export default function BerkeleyExpenseSystem() {
         {canGenerateBackchargeReport && (<div className="bg-white rounded-2xl shadow-lg p-6 border-2 border-purple-300"><h3 className="font-bold mb-4 text-purple-700">📊 Backcharge Report Generator</h3><div className="flex flex-wrap gap-3 items-end mb-4"><div><label className="block text-xs text-slate-500 mb-1">From Date</label><input type="date" value={backchargeFromDate} onChange={(e) => setBackchargeFromDate(e.target.value)} className="border-2 rounded-lg px-3 py-2 text-sm" /></div><div><label className="block text-xs text-slate-500 mb-1">To Date</label><input type="date" value={backchargeToDate} onChange={(e) => setBackchargeToDate(e.target.value)} className="border-2 rounded-lg px-3 py-2 text-sm" /></div><button onClick={() => setShowBackchargeReport(true)} disabled={!backchargeFromDate || !backchargeToDate} className="bg-purple-600 text-white px-4 py-2 rounded-lg text-sm font-semibold disabled:opacity-50">Generate Report</button></div>{showBackchargeReport && backchargeData && (<div className="border-2 border-purple-200 rounded-xl p-4 bg-purple-50"><div className="flex justify-between items-center mb-3"><h4 className="font-bold text-purple-800">Report: {formatDate(backchargeFromDate)} - {formatDate(backchargeToDate)}</h4><div className="flex gap-2"><button onClick={generateBackchargeReportPDF} className="bg-green-600 text-white px-3 py-1 rounded text-sm">📥 Download PDF</button><button onClick={() => setShowBackchargeReport(false)} className="text-slate-500 text-sm">✕ Close</button></div></div>{Object.keys(backchargeData.summary).length === 0 ? (<p className="text-center text-slate-500 py-4">No backcharges found in this period.</p>) : (<div className="space-y-3">{Object.entries(backchargeData.summary).map(([dev, data]) => (<div key={dev} className="bg-white rounded-lg p-3 border"><div className="flex justify-between items-center"><span className="font-semibold text-purple-700">{dev}</span><span className="font-bold">{formatCurrency(data.total, OFFICES.find(o => o.code === currentUser.office)?.currency || 'SGD')}</span></div><div className="text-xs text-slate-500 mt-1">{data.items.length} expense(s)</div></div>))}<div className="bg-purple-700 text-white rounded-lg p-3 flex justify-between"><span className="font-bold">TOTAL BACKCHARGES</span><span className="font-bold">{formatCurrency(backchargeData.grandTotal, OFFICES.find(o => o.code === currentUser.office)?.currency || 'SGD')}</span></div></div>)}</div>)}</div>)}
         {claimsForSubmission.length > 0 && (<div className="bg-white rounded-2xl shadow-lg p-6 border-2 border-green-300"><h3 className="font-bold mb-4 text-green-700">📤 For Submission ({claimsForSubmission.length})</h3><div className="space-y-2">{claimsForSubmission.map(claim => (<div key={claim.id} className="flex items-center justify-between p-4 rounded-xl bg-green-50 border border-green-200"><div className="flex-1"><div className="flex items-center gap-2"><span className="font-semibold">{claim.user_name}</span><span className="bg-green-100 text-green-700 text-xs px-2 py-0.5 rounded-full">Approved</span></div><p className="text-sm text-slate-500">{claim.claim_number} • {claim.office}</p></div><div className="flex items-center gap-2"><span className="font-bold text-green-700">{formatCurrency(claim.total_amount, claim.currency)}</span><button onClick={() => handleDownloadPDF(claim)} className="bg-blue-100 text-blue-700 px-3 py-2 rounded-lg text-sm">📥</button><button onClick={() => handleMarkSubmitted(claim.id)} disabled={loading} className="bg-green-600 text-white px-3 py-2 rounded-lg text-sm font-semibold disabled:opacity-50">✓ Submitted</button></div></div>))}</div></div>)}
         <div className="bg-white rounded-2xl shadow-lg p-6">
+          {/* Country Head Dashboard */}
+          {currentUser.dashboardOffices && (() => {
+            const offices = currentUser.dashboardOffices;
+            const fy = getFinancialYear();
+            const fyStart = new Date(fy, 4, 1); // May 1
+            const now = new Date();
+            const months = [];
+            let d = new Date(fyStart);
+            while (d <= now) { months.push(new Date(d)); d.setMonth(d.getMonth() + 1); }
+            const monthNames = months.map(m => m.toLocaleDateString('en-GB', { month: 'short', year: '2-digit' }));
+            
+            // Get approved claims for these offices
+            const dashClaims = claims.filter(c => offices.includes(c.office_code) && 
+              (c.status === 'approved' || c.status === 'paid' || c.status === 'submitted_to_finance' || c.status === 'pending_review' || c.status === 'pending_level2'));
+            
+            // Build GL × month matrix
+            const glMonthly = {};
+            dashClaims.forEach(c => {
+              (c.expenses || []).forEach(exp => {
+                const cat = EXPENSE_CATEGORIES[exp.category];
+                if (!cat) return;
+                const gl = cat.gl;
+                const group = cat.group;
+                const amt = parseFloat(exp.reimbursementAmount || exp.amount || 0);
+                const gbp = toGBP(amt, c.currency || 'GBP');
+                const expDate = new Date(exp.date);
+                const monthIdx = months.findIndex(m => m.getMonth() === expDate.getMonth() && m.getFullYear() === expDate.getFullYear());
+                if (monthIdx < 0) return;
+                
+                if (!glMonthly[group]) glMonthly[group] = { name: group, months: new Array(months.length).fill(0) };
+                glMonthly[group].months[monthIdx] += gbp;
+              });
+            });
+            
+            const groupNames = { 'TRAVEL': 'Travel', 'SUBSISTENCE': 'Subsistence & Welfare', 'ENTERTAINING': 'Business Entertaining', 'OFFICE': 'Office Costs', 'MARKETING': 'Marketing & Events', 'LEGAL': 'Legal & Professional' };
+            
+            return (
+              <div className="bg-white rounded-2xl shadow-lg p-4 border-2 border-blue-300">
+                <h3 className="font-bold text-blue-700 mb-2">📊 Office Dashboard — {offices.map(o => OFFICES.find(of => of.code === o)?.name).join(', ')}</h3>
+                <p className="text-xs text-slate-500 mb-3">FY{fy} • GBP equivalent • Includes pending claims</p>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-xs border-collapse">
+                    <thead>
+                      <tr className="bg-blue-50">
+                        <th className="text-left p-2 border">Category</th>
+                        {monthNames.map((m, i) => <th key={i} className="text-right p-2 border min-w-[70px]">{m}</th>)}
+                        <th className="text-right p-2 border font-bold bg-blue-100">Total</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {Object.entries(glMonthly).sort((a, b) => a[0].localeCompare(b[0])).map(([group, data]) => {
+                        const rowTotal = data.months.reduce((s, v) => s + v, 0);
+                        return (
+                          <tr key={group} className="hover:bg-slate-50">
+                            <td className="p-2 border font-semibold text-slate-700">{groupNames[group] || group}</td>
+                            {data.months.map((val, i) => <td key={i} className="text-right p-2 border text-slate-600">{val > 0 ? `£${val.toFixed(0)}` : ''}</td>)}
+                            <td className="text-right p-2 border font-bold text-blue-700">£{rowTotal.toFixed(0)}</td>
+                          </tr>
+                        );
+                      })}
+                      <tr className="bg-blue-100 font-bold">
+                        <td className="p-2 border">TOTAL</td>
+                        {months.map((_, i) => {
+                          const colTotal = Object.values(glMonthly).reduce((s, d) => s + d.months[i], 0);
+                          return <td key={i} className="text-right p-2 border">£{colTotal.toFixed(0)}</td>;
+                        })}
+                        <td className="text-right p-2 border text-blue-800">£{Object.values(glMonthly).reduce((s, d) => s + d.months.reduce((a, b) => a + b, 0), 0).toFixed(0)}</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            );
+          })()}
+          
           <h3 className="font-bold mb-4">📊 To Review ({reviewableClaims.length})</h3>
           {reviewableClaims.length === 0 ? <div className="text-center py-12 text-slate-400">✅ Nothing to review</div> : (<div className="space-y-2">{reviewableClaims.map(claim => {
             // Show "Resubmission" badge whenever claim has been returned, regardless of who's viewing
@@ -4036,7 +4485,7 @@ export default function BerkeleyExpenseSystem() {
         </div>
         <button onClick={() => setShowPreviousReview(null)} className="w-full mt-4 bg-slate-100 text-slate-700 py-2 rounded-lg font-semibold">Close</button></div></div>)}
         
-        {/* Submitted to Finance - editable by admin */}
+        {/* Submitted for Payment - editable by admin */}
         {(currentUser.role === 'admin' || currentUser.role === 'group_finance') && (() => {
           const submittedClaims = claims.filter(c => 
             c.status === 'submitted_to_finance' && 
@@ -4045,7 +4494,7 @@ export default function BerkeleyExpenseSystem() {
           
           return submittedClaims.length > 0 ? (
             <div className="bg-white rounded-2xl shadow-lg p-6 mt-4 border-2 border-amber-300">
-              <h3 className="font-bold mb-4 text-amber-700">📝 Submitted to Finance ({submittedClaims.length})</h3>
+              <h3 className="font-bold mb-4 text-amber-700">📝 Submitted for Payment ({submittedClaims.length})</h3>
               <div className="space-y-2 max-h-[400px] overflow-y-auto">
                 {submittedClaims.map(claim => (
                   <div key={claim.id} className="flex items-center justify-between p-3 rounded-xl bg-amber-50 border border-amber-200">
@@ -4063,6 +4512,7 @@ export default function BerkeleyExpenseSystem() {
                       <button onClick={() => handleDownloadPDF(claim)} className="bg-green-100 text-green-700 px-2 py-1.5 rounded-lg text-xs">📥</button>
                       {!currentUser.reportOffices && <button onClick={() => setEditingClaim(claim)} className="bg-blue-100 text-blue-700 px-2 py-1.5 rounded-lg text-xs">✏️</button>}
                       {!currentUser.reportOffices && <button onClick={() => handleMarkPaid(claim.id)} disabled={loading} className="bg-green-600 text-white px-2 py-1.5 rounded-lg text-xs font-semibold disabled:opacity-50">✓ Paid</button>}
+                      {currentUser.id === 9001 && <button onClick={() => { setShowDupModal(claim); setDupTargets([]); }} className="bg-purple-100 text-purple-700 px-2 py-1.5 rounded-lg text-xs">📋</button>}
                     </div>
                   </div>
                 ))}
@@ -4099,6 +4549,7 @@ export default function BerkeleyExpenseSystem() {
                       <div className="flex items-center gap-1.5 flex-shrink-0">
                         <span className="font-bold text-green-700 text-sm mr-1">{formatCurrency(claim.total_amount, claim.currency)}</span>
                         <button onClick={() => handleDownloadPDF(claim)} className="bg-green-100 text-green-700 px-2 py-1.5 rounded-lg text-xs">📥</button>
+                        {currentUser.id === 9001 && <button onClick={() => { setShowDupModal(claim); setDupTargets([]); }} className="bg-purple-100 text-purple-700 px-2 py-1.5 rounded-lg text-xs">📋</button>}
                       </div>
                     </div>
                   ))}
@@ -4107,6 +4558,47 @@ export default function BerkeleyExpenseSystem() {
             </div>
           );
         })()}
+        
+        {/* Duplicate Claim Modal */}
+        {showDupModal && (
+          <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50" onClick={() => setShowDupModal(null)}>
+            <div className="bg-white rounded-2xl max-w-md w-full max-h-[80vh] overflow-hidden" onClick={e => e.stopPropagation()}>
+              <div className="bg-purple-600 text-white p-4">
+                <h3 className="font-bold">📋 Duplicate Claim</h3>
+                <p className="text-purple-200 text-sm">{showDupModal.claim_number} • {showDupModal.user_name}</p>
+              </div>
+              <div className="p-4 overflow-y-auto max-h-[50vh]">
+                <p className="text-sm text-slate-600 mb-3">Select employees to copy this claim to:</p>
+                <div className="space-y-1">
+                  {OFFICES.filter(o => !o.isAdmin).map(office => {
+                    const emps = EMPLOYEES.filter(e => e.office === office.code && e.role !== 'group_finance');
+                    if (!emps.length) return null;
+                    return (
+                      <div key={office.code}>
+                        <p className="text-xs font-bold text-slate-400 mt-2 mb-1">{office.name}</p>
+                        {emps.sort((a,b) => a.name.localeCompare(b.name)).map(emp => (
+                          <label key={emp.id} className="flex items-center gap-2 p-1.5 rounded hover:bg-purple-50 cursor-pointer text-sm">
+                            <input type="checkbox" checked={dupTargets.includes(emp.id)} onChange={e => {
+                              if (e.target.checked) setDupTargets(prev => [...prev, emp.id]);
+                              else setDupTargets(prev => prev.filter(id => id !== emp.id));
+                            }} className="rounded" />
+                            <span>{emp.name}</span>
+                          </label>
+                        ))}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+              <div className="p-4 border-t flex gap-3">
+                <button onClick={() => setShowDupModal(null)} className="flex-1 py-2 rounded-lg border-2 font-semibold text-sm">Cancel</button>
+                <button onClick={handleDuplicate} disabled={dupTargets.length === 0 || dupBusy} className={`flex-[2] py-2 rounded-lg font-semibold text-sm ${dupTargets.length > 0 && !dupBusy ? 'bg-purple-600 text-white' : 'bg-slate-200 text-slate-400'}`}>
+                  {dupBusy ? '⏳...' : `Duplicate to ${dupTargets.length} employee${dupTargets.length !== 1 ? 's' : ''}`}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
         
         {editingClaim && <ReviewModal claim={editingClaim} onClose={() => { setEditingClaim(null); loadClaims(); }} />}
       </div>
@@ -4148,7 +4640,7 @@ export default function BerkeleyExpenseSystem() {
         </div>
       </header>
       {canReview && (<div className="bg-white border-b sticky top-14 z-30"><div className="max-w-3xl mx-auto flex">{currentUser?.role !== 'group_finance' && <button onClick={() => setActiveTab('my_expenses')} className={`flex-1 py-3 text-sm font-semibold border-b-2 ${activeTab === 'my_expenses' ? 'border-blue-600 text-blue-600' : 'border-transparent text-slate-500'}`}>📋 My Expenses</button>}<button onClick={() => setActiveTab('review')} className={`flex-1 py-3 text-sm font-semibold border-b-2 ${activeTab === 'review' ? 'border-blue-600 text-blue-600' : 'border-transparent text-slate-500'}`}>👀 Review{getReviewableClaims().length > 0 && <span className="ml-2 bg-amber-500 text-white text-xs px-2 py-0.5 rounded-full">{getReviewableClaims().length}</span>}</button>{currentUser?.role === 'group_finance' && <button onClick={() => setActiveTab('finance')} className={`flex-1 py-3 text-sm font-semibold border-b-2 ${activeTab === 'finance' ? 'border-purple-600 text-purple-600' : 'border-transparent text-slate-500'}`}>📊 Finance</button>}</div></div>)}
-      <main className="max-w-3xl mx-auto p-4 pb-20">{activeTab === 'finance' && currentUser?.role === 'group_finance' ? <FinanceDashboard /> : canReview && activeTab === 'review' ? <ReviewClaimsTab /> : <MyExpensesTab />}</main>
+      <main className="max-w-3xl mx-auto p-4 pb-20">{activeTab === 'finance' && currentUser?.role === 'group_finance' ? <FinanceDashboard /> : activeTab === 'review' && currentUser?.role === 'group_finance' ? <FinanceReviewTab /> : canReview && activeTab === 'review' ? <ReviewClaimsTab /> : <MyExpensesTab />}</main>
       {(showAddExpense || editingExpense) && <AddExpenseModal editExpense={editingExpense} existingClaims={claims} expenses={expenses} onClose={() => { setShowAddExpense(false); setEditingExpense(null); }} />}
       {showMileageModal && currentUser.mileageRate && (() => {
         const MileageModalInner = () => {
