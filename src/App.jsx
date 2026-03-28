@@ -217,13 +217,13 @@ const EMPLOYEES = [
   { id: 104, name: 'Charrisa Xia', office: 'BEJ', role: 'employee', reimburseCurrency: 'CNY', claimName: 'Charrisa', password: 'berkeley123' },
   { id: 105, name: 'Alice Kong', office: 'BEJ', role: 'employee', reimburseCurrency: 'CNY', claimName: 'Alice', password: 'berkeley123' },
   // Chengdu
-  { id: 201, name: 'Suki Li', office: 'CHE', role: 'employee', reimburseCurrency: 'CNY', claimName: 'Suki Li', password: 'berkeley123' },
+  { id: 201, name: 'Suki Li', office: 'CHE', role: 'employee', reimburseCurrency: 'CNY', claimName: 'Suki Li', password: 'berkeley123', dashboardOffices: ['CHE'] },
   { id: 202, name: 'Icey Zuo', office: 'CHE', role: 'employee', reimburseCurrency: 'CNY', claimName: 'Icey', password: 'berkeley123' },
   { id: 203, name: 'Dora Ji', office: 'CHE', role: 'employee', reimburseCurrency: 'CNY', claimName: 'Dora', password: 'berkeley123' },
   // Shanghai
   { id: 301, name: 'Ariel Tang', office: 'SHA', role: 'employee', reimburseCurrency: 'CNY', claimName: 'Ariel', password: 'berkeley123' },
   { id: 302, name: 'Eddy Tao', office: 'SHA', role: 'manager', reimburseCurrency: 'CNY', claimName: 'Eddy', password: 'berkeley123', dashboardOffices: ['BEJ', 'CHE', 'SHA', 'SHE'] },
-  { id: 303, name: 'Elsa Huang', office: 'SHA', role: 'employee', reimburseCurrency: 'CNY', claimName: 'Elsa', password: 'berkeley123' },
+  { id: 303, name: 'Elsa Huang', office: 'SHA', role: 'employee', reimburseCurrency: 'CNY', claimName: 'Elsa', password: 'berkeley123', dashboardOffices: ['SHA'] },
   { id: 304, name: 'Terence Li', office: 'SHA', role: 'employee', reimburseCurrency: 'CNY', claimName: 'Terence', password: 'berkeley123' },
   { id: 305, name: 'Johnnie Huang', office: 'SHA', role: 'employee', reimburseCurrency: 'CNY', claimName: 'Johnnie', password: 'berkeley123' },
   { id: 306, name: 'Cathy Liu', office: 'SHA', role: 'admin', reimburseCurrency: 'CNY', claimName: 'Cathy Liu', password: 'berkeley123' },
@@ -1588,12 +1588,12 @@ export default function BerkeleyExpenseSystem() {
       // Auto-resize: reduce heights when there's long content
       const notesLen = (exp.adminNotes || '').length;
       const attendeesLen = (exp.attendees || '').length;
-      const heightPenalty = Math.min(50, Math.floor(notesLen / 50) * 10 + Math.floor(attendeesLen / 100) * 10 + (exp.hasBackcharge ? 10 : 0));
+      const heightPenalty = Math.min(30, Math.floor(notesLen / 80) * 8 + Math.floor(attendeesLen / 150) * 8 + (exp.hasBackcharge ? 8 : 0));
       
       // Receipt sizing - handle up to 4 receipts
       const receipts = [exp.receiptPreview, exp.receiptPreview2, exp.receiptPreview3, exp.receiptPreview4].filter(Boolean);
       const receiptCount = receipts.length;
-      const baseHeight = matchStmtImg ? 160 : 240;
+      const baseHeight = matchStmtImg ? 200 : 255;
       const availableHeight = baseHeight - heightPenalty;
       
       let receiptContent = '';
@@ -1610,7 +1610,7 @@ export default function BerkeleyExpenseSystem() {
         const perH = Math.floor(availableHeight * 0.47);
         receiptContent = '<div style="display:grid;grid-template-columns:1fr 1fr;gap:4px;">' + receipts.map(img => '<div><img src="' + img + '" style="max-width:100%;max-height:' + perH + 'mm;object-fit:contain;display:block;" /></div>').join('') + '</div>';
       }
-      const stmtContent = matchStmtImg ? '<div style="flex:1;max-width:48%;border-left:3px solid #ff9800;padding-left:8px;"><div style="background:#ff9800;color:white;padding:5px 10px;font-weight:bold;font-size:9px;margin-bottom:8px;border-radius:4px;">💳 Matched Statement ' + (matchStmtIdx + 1) + '</div><img src="' + matchStmtImg + '" style="max-width:100%;max-height:' + (190 - heightPenalty) + 'mm;object-fit:contain;border:1px solid #ddd;" /></div>' : '';
+      const stmtContent = matchStmtImg ? '<div style="flex:1;max-width:48%;border-left:3px solid #ff9800;padding-left:8px;"><div style="background:#ff9800;color:white;padding:5px 10px;font-weight:bold;font-size:9px;margin-bottom:6px;border-radius:4px;">💳 Matched Statement ' + (matchStmtIdx + 1) + '</div><img src="' + matchStmtImg + '" style="max-width:100%;max-height:' + (210 - heightPenalty) + 'mm;object-fit:contain;border:1px solid #ddd;" /></div>' : '';
       const contentHTML = matchStmtImg ? '<div style="display:flex;gap:10px;align-items:flex-start;"><div style="flex:1;max-width:50%;">' + receiptContent + '</div>' + stmtContent + '</div>' : receiptContent;
       return '<div class="page receipt-page"><div class="receipt-header"><div class="receipt-ref">' + exp.seqRef + '</div><div class="receipt-info"><strong>' + exp.merchant + '</strong> | ' + formatDDMMYYYY(new Date(exp.date)) + '<br>' + cat.name + ' | ' + exp.currency + ' ' + fmtAmt(exp.amount) + (exp.isForeignCurrency ? ' → ' + reimburseCurrency + ' ' + fmtAmt(exp.reimbursementAmount) + (exp.forexRate ? ' (1 ' + exp.currency + ' = ' + exp.forexRate.toFixed(4) + ' ' + reimburseCurrency + ')' : '') : '') + '<br>' + (exp.description || '') + oldBadge + dupBadge + paxInfo + (exp.attendees ? '<br>' + exp.attendees.replace(/\n/g, ', ') : '') + (() => { const _n = exp.adminNotes ? formatAdminNotesHTML(exp.adminNotes, true) : ''; return _n ? '<br><div style="background:#fff8e1;padding:2px 4px;border-radius:3px;">📝 ' + _n + '</div>' : ''; })() + backchargeHTML + '</div></div>' + contentHTML + '</div>';
     }).join('');
@@ -1646,11 +1646,11 @@ export default function BerkeleyExpenseSystem() {
       '.detail-table{width:100%;border-collapse:collapse;font-size:8px;}' +
       '.detail-table th,.detail-table td{border:1px solid #ccc;padding:3px;}' +
       '.detail-table th{background:#e8eaf6;text-align:left;}' +
-      '.receipt-page{padding:5mm;}' +
-      '.receipt-header{background:#1565c0;color:#fff;padding:12px;display:flex;align-items:flex-start;border-radius:4px;margin-bottom:10px;}' +
+      '.receipt-page{padding:3mm;}' +
+      '.receipt-header{background:#1565c0;color:#fff;padding:8px;display:flex;align-items:flex-start;border-radius:4px;margin-bottom:6px;}' +
       '.receipt-ref{font-size:28px;font-weight:bold;margin-right:15px;}' +
       '.receipt-info{font-size:13px;line-height:1.7;}' +
-      '.receipt-img{max-width:100%;max-height:220mm;object-fit:contain;display:block;margin:0 auto;}' +
+      '.receipt-img{max-width:100%;max-height:250mm;object-fit:contain;display:block;margin:0 auto;}' +
       '.no-receipt{background:#f5f5f5;padding:40px;text-align:center;color:#999;}' +
       '.statement-page{padding:5mm;}' +
       '.statement-header{background:#ff9800;color:#fff;padding:8px;text-align:center;font-weight:bold;}' +
@@ -3395,6 +3395,8 @@ export default function BerkeleyExpenseSystem() {
 
   // ============ EMMA'S FINANCE DASHBOARD ============
   const FinanceDashboard = () => {
+    const allFinOffices = currentUser.reportOffices || OFFICES.filter(o => !o.isAdmin).map(o => o.code);
+    const [selectedFinOffices, setSelectedFinOffices] = useState(allFinOffices);
     const [dateFrom, setDateFrom] = useState(() => {
       const d = new Date();
       d.setMonth(d.getMonth() - 3); // Default 3 months back
@@ -3538,8 +3540,8 @@ export default function BerkeleyExpenseSystem() {
     const relevantClaims = claimsPool.filter(c => {
       if (!c) return false;
       
-      // Office scope: CSC China only sees China offices
-      if (currentUser.reportOffices && !currentUser.reportOffices.includes(c.office_code)) return false;
+      // Office scope filter
+      if (!selectedFinOffices.includes(c.office_code)) return false;
       
       const isApproved = c.status === 'approved' || c.status === 'paid' || c.status === 'submitted_to_finance';
       const isDraft = c.status === 'draft';
@@ -3570,13 +3572,15 @@ export default function BerkeleyExpenseSystem() {
           exp.backcharges.forEach(bc => {
             if (!bc) return;
             const dev = bc.development || 'Unassigned';
-            if (!backchargeData[dev]) backchargeData[dev] = { items: [], total: 0 };
+            if (!backchargeData[dev]) backchargeData[dev] = { items: [], total: 0, byOffice: {} };
             const amt = (parseFloat(exp.reimbursementAmount || exp.amount) || 0) * ((parseFloat(bc.percentage) || 0) / 100);
             const gbpAmt = toGBP(amt, claim.currency || 'GBP');
-            backchargeData[dev].items.push({
+            const office = claim.office_code || '-';
+            if (!backchargeData[dev].byOffice[office]) backchargeData[dev].byOffice[office] = { items: [], total: 0 };
+            const item = {
               claimNumber: claim.claim_number || '-',
               claimant: claim.user_name || 'Unknown',
-              office: claim.office_code || '-',
+              office: office,
               date: exp.date,
               merchant: exp.merchant || '-',
               category: exp.category,
@@ -3588,8 +3592,11 @@ export default function BerkeleyExpenseSystem() {
               currency: claim.currency || 'GBP',
               status: claim.status || 'unknown',
               description: exp.description || '-'
-            });
+            };
+            backchargeData[dev].items.push(item);
             backchargeData[dev].total += gbpAmt;
+            backchargeData[dev].byOffice[office].items.push(item);
+            backchargeData[dev].byOffice[office].total += gbpAmt;
           });
         }
       });
@@ -3639,7 +3646,7 @@ export default function BerkeleyExpenseSystem() {
     
     allClaims.forEach(claim => {
       if (!claim) return;
-      if (currentUser.reportOffices && !currentUser.reportOffices.includes(claim.office_code)) return;
+      if (!selectedFinOffices.includes(claim.office_code)) return;
       const empId = claim.user_id;
       if (!empId) return;
       if (!employeeData[empId]) {
@@ -3777,6 +3784,13 @@ export default function BerkeleyExpenseSystem() {
         
         {/* Date Range & Filters */}
         <div className="bg-white rounded-xl p-4 shadow-sm border space-y-3">
+          <div className="flex flex-wrap gap-2">
+            {allFinOffices.map(code => {
+              const name = OFFICES.find(o => o.code === code)?.name || code;
+              const isOn = selectedFinOffices.includes(code);
+              return <button key={code} onClick={() => setSelectedFinOffices(prev => isOn && prev.length > 1 ? prev.filter(o => o !== code) : isOn ? prev : [...prev, code])} className={`px-3 py-1 rounded-full text-xs font-semibold border ${isOn ? 'bg-purple-600 text-white border-purple-600' : 'bg-white text-slate-500 border-slate-300'}`}>{name}</button>;
+            })}
+          </div>
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="text-xs font-semibold text-slate-500">From</label>
@@ -3846,20 +3860,34 @@ export default function BerkeleyExpenseSystem() {
                               </div>
                               <span className="font-semibold text-blue-600 text-sm">£{catData.totalGBP.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
                             </div>
-                            {catOpen && Object.entries(catData.offices).sort((a, b) => b[1].totalGBP - a[1].totalGBP).map(([office, offData]) => (
-                              <div key={office} className="pl-10 pr-3 border-t border-slate-50">
-                                <div className="py-1.5 flex justify-between items-center">
-                                  <span className="text-xs font-semibold text-slate-500">{OFFICES.find(o => o.code === office)?.name || office}</span>
-                                  <span className="text-xs font-semibold">£{offData.totalGBP.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
-                                </div>
-                                {Object.entries(offData.employees).sort((a, b) => b[1].totalGBP - a[1].totalGBP).map(([emp, empData]) => (
-                                  <div key={emp} className="pl-4 py-0.5 flex justify-between text-xs text-slate-600">
-                                    <span>{emp} <span className="text-slate-400">({empData.count})</span></span>
-                                    <span>£{empData.totalGBP.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                            {catOpen && (() => {
+                              const officeEntries = Object.entries(catData.offices).sort((a, b) => b[1].totalGBP - a[1].totalGBP);
+                              const singleOffice = selectedFinOffices.length === 1;
+                              return singleOffice ? (
+                                officeEntries.map(([office, offData]) => (
+                                  <div key={office} className="pl-10 pr-3 border-t border-slate-50">
+                                    {Object.entries(offData.employees).sort((a, b) => b[1].totalGBP - a[1].totalGBP).map(([emp, empData]) => (
+                                      <div key={emp} className="py-0.5 flex justify-between text-xs text-slate-600"><span>{emp} <span className="text-slate-400">({empData.count})</span></span><span>£{empData.totalGBP.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></div>
+                                    ))}
                                   </div>
-                                ))}
-                              </div>
-                            ))}
+                                ))
+                              ) : (
+                                officeEntries.map(([office, offData]) => (
+                                  <div key={office} className="pl-10 pr-3 border-t border-slate-50">
+                                    <div className="py-1.5 flex justify-between items-center">
+                                      <span className="text-xs font-semibold text-slate-500">{OFFICES.find(o => o.code === office)?.name || office}</span>
+                                      <span className="text-xs font-semibold">£{offData.totalGBP.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                                    </div>
+                                    {Object.entries(offData.employees).sort((a, b) => b[1].totalGBP - a[1].totalGBP).map(([emp, empData]) => (
+                                      <div key={emp} className="pl-4 py-0.5 flex justify-between text-xs text-slate-600">
+                                        <span>{emp} <span className="text-slate-400">({empData.count})</span></span>
+                                        <span>£{empData.totalGBP.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                                      </div>
+                                    ))}
+                                  </div>
+                                ))
+                              );
+                            })()}
                           </div>
                         );
                       })}
@@ -3883,25 +3911,37 @@ export default function BerkeleyExpenseSystem() {
             ) : (
               <div className="divide-y">
                 {Object.entries(backchargeData).sort((a, b) => b[1].total - a[1].total).map(([dev, data]) => {
-                  const isOpen = expandedGL.has('bc_' + dev);
+                  const isDevOpen = expandedGL.has('bc_' + dev);
                   return (
                     <div key={dev}>
-                      <div className="p-3 flex justify-between items-center cursor-pointer hover:bg-purple-50" onClick={() => setExpandedGL(prev => { const n = new Set(prev); if (n.has('bc_' + dev)) n.delete('bc_' + dev); else n.add('bc_' + dev); return n; })}>
-                        <div className="flex items-center gap-2"><span className="text-xs">{isOpen ? '▼' : '▶'}</span><span className="font-bold text-sm">{dev}</span><span className="text-xs text-slate-400">({data.items.length})</span></div>
+                      <div className="p-3 flex justify-between items-center cursor-pointer hover:bg-purple-50 bg-slate-50" onClick={() => setExpandedGL(prev => { const n = new Set(prev); if (n.has('bc_' + dev)) n.delete('bc_' + dev); else n.add('bc_' + dev); return n; })}>
+                        <div className="flex items-center gap-2"><span className="text-xs">{isDevOpen ? '▼' : '▶'}</span><span className="font-bold text-sm">{dev}</span><span className="text-xs text-slate-400">({data.items.length})</span></div>
                         <span className="font-bold text-purple-600">£{data.total.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
                       </div>
-                      {isOpen && (
-                        <div className="px-4 pb-3 text-xs space-y-1">
-                          {data.items.map((item, i) => (
-                            <div key={i} className="flex justify-between py-1 border-b border-slate-100 last:border-0">
-                              <span>{item.claimant} • {item.merchant} ({item.percentage}%)</span>
-                              <span className={item.status === 'approved' || item.status === 'paid' || item.status === 'submitted_to_finance' ? 'text-green-600' : 'text-amber-600'}>
-                                £{item.gbpAmount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} {item.status === 'pending_review' ? '(L1)' : item.status === 'pending_level2' ? '(L2)' : item.status === 'draft' ? '(draft)' : ''}
-                              </span>
+                      {isDevOpen && Object.entries(data.byOffice).sort((a, b) => b[1].total - a[1].total).map(([office, offData]) => {
+                        const offKey = 'bc_' + dev + '_' + office;
+                        const isOffOpen = expandedGL.has(offKey);
+                        return (
+                          <div key={office} className="border-t border-slate-100">
+                            <div className="pl-6 pr-3 py-2 flex justify-between items-center cursor-pointer hover:bg-slate-50" onClick={(e) => { e.stopPropagation(); setExpandedGL(prev => { const n = new Set(prev); if (n.has(offKey)) n.delete(offKey); else n.add(offKey); return n; }); }}>
+                              <div className="flex items-center gap-2"><span className="text-xs text-slate-400">{isOffOpen ? '▼' : '▶'}</span><span className="text-sm font-semibold text-slate-600">{OFFICES.find(o => o.code === office)?.name || office}</span><span className="text-xs text-slate-400">({offData.items.length})</span></div>
+                              <span className="font-semibold text-purple-600 text-sm">£{offData.total.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
                             </div>
-                          ))}
-                        </div>
-                      )}
+                            {isOffOpen && (
+                              <div className="pl-10 pr-3 pb-2 text-xs space-y-1">
+                                {offData.items.map((item, i) => (
+                                  <div key={i} className="flex justify-between py-1 border-b border-slate-50 last:border-0">
+                                    <span>{item.claimant} • {item.merchant} ({item.percentage}%)</span>
+                                    <span className={item.status === 'approved' || item.status === 'paid' || item.status === 'submitted_to_finance' ? 'text-green-600' : 'text-amber-600'}>
+                                      £{item.gbpAmount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                    </span>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
                     </div>
                   );
                 })}
@@ -4632,14 +4672,28 @@ export default function BerkeleyExpenseSystem() {
                               <div className="flex items-center gap-2"><span className="text-xs text-slate-400">{catOpen ? '▼' : '▶'}</span><span className="font-mono text-xs bg-slate-100 px-1.5 py-0.5 rounded">{catData.gl}</span><span className="text-sm">{catData.name}</span><span className="text-xs text-slate-400">({catData.itemCount})</span></div>
                               <span className="font-semibold text-blue-600 text-sm">£{catData.totalGBP.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
                             </div>
-                            {catOpen && Object.entries(catData.offices).sort((a, b) => b[1].totalGBP - a[1].totalGBP).map(([office, offData]) => (
-                              <div key={office} className="pl-10 pr-3 border-t border-slate-50">
-                                <div className="py-1.5 flex justify-between"><span className="text-xs font-semibold text-slate-500">{OFFICES.find(o => o.code === office)?.name || office}</span><span className="text-xs font-semibold">£{offData.totalGBP.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></div>
-                                {Object.entries(offData.employees).sort((a, b) => b[1].totalGBP - a[1].totalGBP).map(([emp, empData]) => (
-                                  <div key={emp} className="pl-4 py-0.5 flex justify-between text-xs text-slate-600"><span>{emp} <span className="text-slate-400">({empData.count})</span></span><span>£{empData.totalGBP.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></div>
-                                ))}
-                              </div>
-                            ))}
+                            {catOpen && (() => {
+                              const officeEntries = Object.entries(catData.offices).sort((a, b) => b[1].totalGBP - a[1].totalGBP);
+                              const singleOffice = selectedOffices.length === 1;
+                              return singleOffice ? (
+                                officeEntries.map(([office, offData]) => (
+                                  <div key={office} className="pl-10 pr-3 border-t border-slate-50">
+                                    {Object.entries(offData.employees).sort((a, b) => b[1].totalGBP - a[1].totalGBP).map(([emp, empData]) => (
+                                      <div key={emp} className="py-0.5 flex justify-between text-xs text-slate-600"><span>{emp} <span className="text-slate-400">({empData.count})</span></span><span>£{empData.totalGBP.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></div>
+                                    ))}
+                                  </div>
+                                ))
+                              ) : (
+                                officeEntries.map(([office, offData]) => (
+                                  <div key={office} className="pl-10 pr-3 border-t border-slate-50">
+                                    <div className="py-1.5 flex justify-between"><span className="text-xs font-semibold text-slate-500">{OFFICES.find(o => o.code === office)?.name || office}</span><span className="text-xs font-semibold">£{offData.totalGBP.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></div>
+                                    {Object.entries(offData.employees).sort((a, b) => b[1].totalGBP - a[1].totalGBP).map(([emp, empData]) => (
+                                      <div key={emp} className="pl-4 py-0.5 flex justify-between text-xs text-slate-600"><span>{emp} <span className="text-slate-400">({empData.count})</span></span><span>£{empData.totalGBP.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></div>
+                                    ))}
+                                  </div>
+                                ))
+                              );
+                            })()}
                           </div>
                         );
                       })}
