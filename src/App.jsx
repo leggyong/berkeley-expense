@@ -255,7 +255,7 @@ const EMPLOYEES = [
   { id: 803, name: 'Karen Chia', office: 'SIN', role: 'manager', reimburseCurrency: 'SGD', claimName: 'Karen', password: 'berkeley123', dashboardOffices: ['SIN', 'BKK', 'MYS'] },
   { id: 804, name: 'Cathy He', office: 'SIN', role: 'manager', reimburseCurrency: 'SGD', claimName: 'Cathy He', password: 'berkeley123' },
   { id: 805, name: 'Ann Low', office: 'SIN', role: 'admin', reimburseCurrency: 'SGD', claimName: 'Ann', password: 'berkeley123' },
-  { id: 806, name: 'Praba', office: 'SIN', role: 'employee', reimburseCurrency: 'SGD', claimName: 'Praba', password: 'berkeley123' },
+  { id: 806, name: 'Prabakaran Rajinderan', office: 'SIN', role: 'employee', reimburseCurrency: 'SGD', claimName: 'Praba', password: 'berkeley123' },
   { id: 807, name: 'Weiyu', office: 'SIN', role: 'employee', reimburseCurrency: 'SGD', claimName: 'Weiyu', password: 'berkeley123' },
   { id: 808, name: 'Ong Yongle', office: 'SIN', role: 'finance', reimburseCurrency: 'SGD', claimName: 'Yongle', password: 'berkeley123' },
   { id: 809, name: 'William Swinburn', office: 'SIN', role: 'employee', reimburseCurrency: 'SGD', claimName: 'William', password: 'berkeley123' },
@@ -1593,22 +1593,24 @@ export default function BerkeleyExpenseSystem() {
       // Receipt sizing - handle up to 4 receipts
       const receipts = [exp.receiptPreview, exp.receiptPreview2, exp.receiptPreview3, exp.receiptPreview4].filter(Boolean);
       const receiptCount = receipts.length;
-      const baseHeight = matchStmtImg ? 130 : 200;
+      const baseHeight = matchStmtImg ? 160 : 240;
       const availableHeight = baseHeight - heightPenalty;
       
       let receiptContent = '';
       if (receiptCount === 0) {
         receiptContent = '<div style="background:#f5f5f5;padding:30px;text-align:center;color:#999;">No receipt</div>';
-      } else if (receiptCount <= 2) {
-        // Stack vertically
-        const perH = receiptCount === 1 ? availableHeight : Math.floor(availableHeight * 0.48);
-        receiptContent = receipts.map((img, i) => '<div style="' + (i > 0 ? 'margin-top:4px;border-top:2px dashed #ccc;padding-top:4px;' : '') + '"><img src="' + img + '" style="max-width:100%;max-height:' + perH + 'mm;object-fit:contain;display:block;" /></div>').join('');
+      } else if (receiptCount === 1) {
+        receiptContent = '<div><img src="' + receipts[0] + '" style="max-width:100%;max-height:' + availableHeight + 'mm;object-fit:contain;display:block;" /></div>';
+      } else if (receiptCount === 2) {
+        // Side by side for 2 receipts to maximize space
+        const perH = Math.floor(availableHeight * 0.95);
+        receiptContent = '<div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;">' + receipts.map(img => '<div><img src="' + img + '" style="max-width:100%;max-height:' + perH + 'mm;object-fit:contain;display:block;" /></div>').join('') + '</div>';
       } else {
         // 2x2 grid for 3-4 receipts
-        const perH = Math.floor(availableHeight * 0.46);
+        const perH = Math.floor(availableHeight * 0.47);
         receiptContent = '<div style="display:grid;grid-template-columns:1fr 1fr;gap:4px;">' + receipts.map(img => '<div><img src="' + img + '" style="max-width:100%;max-height:' + perH + 'mm;object-fit:contain;display:block;" /></div>').join('') + '</div>';
       }
-      const stmtContent = matchStmtImg ? '<div style="flex:1;max-width:48%;border-left:3px solid #ff9800;padding-left:8px;"><div style="background:#ff9800;color:white;padding:5px 10px;font-weight:bold;font-size:9px;margin-bottom:8px;border-radius:4px;">💳 Matched Statement ' + (matchStmtIdx + 1) + '</div><img src="' + matchStmtImg + '" style="max-width:100%;max-height:' + (160 - heightPenalty) + 'mm;object-fit:contain;border:1px solid #ddd;" /></div>' : '';
+      const stmtContent = matchStmtImg ? '<div style="flex:1;max-width:48%;border-left:3px solid #ff9800;padding-left:8px;"><div style="background:#ff9800;color:white;padding:5px 10px;font-weight:bold;font-size:9px;margin-bottom:8px;border-radius:4px;">💳 Matched Statement ' + (matchStmtIdx + 1) + '</div><img src="' + matchStmtImg + '" style="max-width:100%;max-height:' + (190 - heightPenalty) + 'mm;object-fit:contain;border:1px solid #ddd;" /></div>' : '';
       const contentHTML = matchStmtImg ? '<div style="display:flex;gap:10px;align-items:flex-start;"><div style="flex:1;max-width:50%;">' + receiptContent + '</div>' + stmtContent + '</div>' : receiptContent;
       return '<div class="page receipt-page"><div class="receipt-header"><div class="receipt-ref">' + exp.seqRef + '</div><div class="receipt-info"><strong>' + exp.merchant + '</strong> | ' + formatDDMMYYYY(new Date(exp.date)) + '<br>' + cat.name + ' | ' + exp.currency + ' ' + fmtAmt(exp.amount) + (exp.isForeignCurrency ? ' → ' + reimburseCurrency + ' ' + fmtAmt(exp.reimbursementAmount) + (exp.forexRate ? ' (1 ' + exp.currency + ' = ' + exp.forexRate.toFixed(4) + ' ' + reimburseCurrency + ')' : '') : '') + '<br>' + (exp.description || '') + oldBadge + dupBadge + paxInfo + (exp.attendees ? '<br>' + exp.attendees.replace(/\n/g, ', ') : '') + (() => { const _n = exp.adminNotes ? formatAdminNotesHTML(exp.adminNotes, true) : ''; return _n ? '<br><div style="background:#fff8e1;padding:2px 4px;border-radius:3px;">📝 ' + _n + '</div>' : ''; })() + backchargeHTML + '</div></div>' + contentHTML + '</div>';
     }).join('');
@@ -3443,7 +3445,7 @@ export default function BerkeleyExpenseSystem() {
       };
       fetchDrafts();
     }, [includeDrafts]);
-    const [expandedGL, setExpandedGL] = useState(null);
+    const [expandedGL, setExpandedGL] = useState(new Set());
     const [expandedEmployee, setExpandedEmployee] = useState(null);
     const [expandedLate, setExpandedLate] = useState(null);
     const [migrating, setMigrating] = useState(false);
@@ -3578,11 +3580,14 @@ export default function BerkeleyExpenseSystem() {
               date: exp.date,
               merchant: exp.merchant || '-',
               category: exp.category,
+              catName: EXPENSE_CATEGORIES[exp.category]?.name || exp.category || '-',
+              gl: EXPENSE_CATEGORIES[exp.category]?.gl || '-',
               percentage: bc.percentage || 0,
               amount: amt,
               gbpAmount: gbpAmt,
               currency: claim.currency || 'GBP',
-              status: claim.status || 'unknown'
+              status: claim.status || 'unknown',
+              description: exp.description || '-'
             });
             backchargeData[dev].total += gbpAmt;
           });
@@ -3719,23 +3724,23 @@ export default function BerkeleyExpenseSystem() {
       
       if (reportType === 'backcharge') {
         filename = `backcharge_report_${dateFrom}_to_${dateTo}.csv`;
-        csvContent = 'Development,Claimant,Office,Date,Merchant,Category,Percentage,Amount (Local),Amount (GBP),Status\n';
+        csvContent = 'Development,GL Code,Category,Claim Number,Office,Claimant,Date,Merchant,Percentage,Currency,Recharged (Local),Recharged (GBP),Status,Description\n';
         Object.entries(backchargeData).forEach(([dev, data]) => {
           data.items.forEach(item => {
-            csvContent += `"${dev}","${item.claimant}","${item.office}","${item.date}","${item.merchant}","${item.category || ''}","${item.percentage}%","${item.currency} ${item.amount.toFixed(2)}","${item.gbpAmount.toFixed(2)}","${fmtStatus(item.status)}"\n`;
+            csvContent += `"${dev}","${item.gl}","${item.catName}","${item.claimNumber}","${item.office}","${item.claimant}","${item.date}","${item.merchant}","${item.percentage}%","${item.currency}","${item.amount.toFixed(2)}","${item.gbpAmount.toFixed(2)}","${fmtStatus(item.status)}","${(item.description || '').replace(/"/g, '""')}"\n`;
           });
         });
       } else if (reportType === 'gl') {
         filename = `gl_report_${dateFrom}_to_${dateTo}.csv`;
-        csvContent = 'GL Group,GL Code,Category,Claim Number,Office,Claimant,Date,Merchant,Currency,Amount (Local),Amount (GBP),Status,Description\n';
+        csvContent = 'GL Account,GL Code,Category,Claim Number,Office,Claimant,Date,Merchant,Currency,Amount (Local),Amount (GBP),Status,Description\n';
         glFlatItems.forEach(item => {
           csvContent += `"${GL_GROUP_NAMES[item.group] || item.group}","${item.gl}","${item.catName}","${item.claimNumber || ''}","${item.office}","${item.claimant}","${item.date}","${item.merchant}","${item.currency}","${item.amount.toFixed(2)}","${item.gbpAmount.toFixed(2)}","${fmtStatus(item.status)}","${(item.description || '').replace(/"/g, '""')}"\n`;
         });
       } else if (reportType === 'submissions') {
         filename = `submissions_report_${dateFrom}_to_${dateTo}.csv`;
-        csvContent = 'Employee,Office,Claims in Range,Total Claims,Last Submission,Last Expense Date\n';
+        csvContent = 'Employee,Office,Claims in Range,Total Claims,Last Submission\n';
         Object.entries(employeeData).forEach(([_, data]) => {
-          csvContent += `"${data.name}","${data.office}","${data.claimsInRange}","${data.totalClaims}","${formatDateShort(data.lastSubmission)}","${formatDateShort(data.lastExpenseDate)}"\n`;
+          csvContent += `"${data.name}","${data.office}","${data.claimsInRange}","${data.totalClaims}","${formatDateShort(data.lastSubmission)}"\n`;
         });
       } else if (reportType === 'late') {
         filename = `late_submitters_${dateFrom}_to_${dateTo}.csv`;
@@ -3818,10 +3823,10 @@ export default function BerkeleyExpenseSystem() {
               <div className="divide-y">
                 {GL_GROUP_ORDER.filter(g => glHierarchy[g]).map(group => {
                   const gData = glHierarchy[group];
-                  const isGroupOpen = expandedGL === group;
+                  const isGroupOpen = expandedGL.has(group);
                   return (
                     <div key={group}>
-                      <div className="p-3 flex justify-between items-center cursor-pointer hover:bg-blue-50 bg-slate-50" onClick={() => setExpandedGL(isGroupOpen ? null : group)}>
+                      <div className="p-3 flex justify-between items-center cursor-pointer hover:bg-blue-50 bg-slate-50" onClick={() => setExpandedGL(prev => { const n = new Set(prev); if (n.has(group)) n.delete(group); else n.add(group); return n; })}>
                         <div className="flex items-center gap-2">
                           <span className="text-xs">{isGroupOpen ? '▼' : '▶'}</span>
                           <span className="font-bold text-sm">{GL_GROUP_NAMES[group]}</span>
@@ -3829,10 +3834,10 @@ export default function BerkeleyExpenseSystem() {
                         <span className="font-bold text-blue-700">£{gData.totalGBP.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
                       </div>
                       {isGroupOpen && Object.entries(gData.cats).sort((a, b) => b[1].totalGBP - a[1].totalGBP).map(([catKey, catData]) => {
-                        const catOpen = expandedGL === group + '_' + catKey;
+                        const catOpen = expandedGL.has(group + '_' + catKey);
                         return (
                           <div key={catKey} className="border-t border-slate-100">
-                            <div className="pl-6 pr-3 py-2 flex justify-between items-center cursor-pointer hover:bg-slate-50" onClick={(e) => { e.stopPropagation(); setExpandedGL(catOpen ? group : group + '_' + catKey); }}>
+                            <div className="pl-6 pr-3 py-2 flex justify-between items-center cursor-pointer hover:bg-slate-50" onClick={(e) => { e.stopPropagation(); setExpandedGL(prev => { const n = new Set(prev); if (catOpen) n.delete(group + '_' + catKey); else n.add(group + '_' + catKey); return n; }); }}>
                               <div className="flex items-center gap-2">
                                 <span className="text-xs text-slate-400">{catOpen ? '▼' : '▶'}</span>
                                 <span className="font-mono text-xs bg-slate-100 px-1.5 py-0.5 rounded">{catData.gl}</span>
@@ -3871,31 +3876,35 @@ export default function BerkeleyExpenseSystem() {
           <div className="bg-white rounded-xl shadow-sm border overflow-hidden">
             <div className="bg-purple-50 p-4 border-b">
               <h3 className="font-bold text-purple-800">📊 Backcharge Report</h3>
-              <p className="text-xs text-purple-600">{Object.keys(backchargeData).length} developments • {relevantClaims.length} claims</p>
+              <p className="text-xs text-purple-600">{Object.keys(backchargeData).length} developments • Total: £{Object.values(backchargeData).reduce((s, d) => s + d.total, 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
             </div>
             {Object.keys(backchargeData).length === 0 ? (
               <p className="p-4 text-center text-slate-400">No backcharges in selected period</p>
             ) : (
               <div className="divide-y">
-                {Object.entries(backchargeData).sort((a, b) => b[1].total - a[1].total).map(([dev, data]) => (
-                  <div key={dev} className="p-4">
-                    <div className="flex justify-between items-center mb-2">
-                      <span className="font-bold text-slate-800">{dev}</span>
-                      <span className="font-bold text-purple-600">£{data.total.toFixed(2)}</span>
-                    </div>
-                    <div className="text-xs text-slate-500 space-y-1">
-                      {data.items.slice(0, 5).map((item, i) => (
-                        <div key={i} className="flex justify-between">
-                          <span>{item.claimant} • {item.merchant} ({item.percentage}%)</span>
-                          <span className={item.status === 'approved' ? 'text-green-600' : item.status === 'pending_level2' ? 'text-blue-600' : 'text-amber-600'}>
-                            £{item.gbpAmount.toFixed(2)} {item.status === 'pending_review' ? '(L1)' : item.status === 'pending_level2' ? '(L2)' : item.status === 'changes_requested' ? '(returned)' : item.status === 'draft' ? '(draft)' : ''}
-                          </span>
+                {Object.entries(backchargeData).sort((a, b) => b[1].total - a[1].total).map(([dev, data]) => {
+                  const isOpen = expandedGL.has('bc_' + dev);
+                  return (
+                    <div key={dev}>
+                      <div className="p-3 flex justify-between items-center cursor-pointer hover:bg-purple-50" onClick={() => setExpandedGL(prev => { const n = new Set(prev); if (n.has('bc_' + dev)) n.delete('bc_' + dev); else n.add('bc_' + dev); return n; })}>
+                        <div className="flex items-center gap-2"><span className="text-xs">{isOpen ? '▼' : '▶'}</span><span className="font-bold text-sm">{dev}</span><span className="text-xs text-slate-400">({data.items.length})</span></div>
+                        <span className="font-bold text-purple-600">£{data.total.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                      </div>
+                      {isOpen && (
+                        <div className="px-4 pb-3 text-xs space-y-1">
+                          {data.items.map((item, i) => (
+                            <div key={i} className="flex justify-between py-1 border-b border-slate-100 last:border-0">
+                              <span>{item.claimant} • {item.merchant} ({item.percentage}%)</span>
+                              <span className={item.status === 'approved' || item.status === 'paid' || item.status === 'submitted_to_finance' ? 'text-green-600' : 'text-amber-600'}>
+                                £{item.gbpAmount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} {item.status === 'pending_review' ? '(L1)' : item.status === 'pending_level2' ? '(L2)' : item.status === 'draft' ? '(draft)' : ''}
+                              </span>
+                            </div>
+                          ))}
                         </div>
-                      ))}
-                      {data.items.length > 5 && <div className="text-slate-400">+{data.items.length - 5} more items</div>}
+                      )}
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             )}
           </div>
@@ -4410,7 +4419,7 @@ export default function BerkeleyExpenseSystem() {
     const [dateFrom, setDateFrom] = useState(defaultFrom);
     const [dateTo, setDateTo] = useState(defaultTo);
     const [reportType, setReportType] = useState('gl');
-    const [expandedGL, setExpandedGL] = useState(null);
+    const [expandedGL, setExpandedGL] = useState(new Set());
     
     const GL_GROUP_ORDER = ['TRAVEL', 'SUBSISTENCE', 'ENTERTAINING', 'OFFICE', 'MARKETING', 'LEGAL', 'OTHER'];
     const GL_GROUP_NAMES = { 'TRAVEL': 'Travel', 'SUBSISTENCE': 'Subsistence, Welfare & Employee Entertaining', 'ENTERTAINING': 'Business Entertaining', 'OFFICE': 'Office Costs', 'MARKETING': 'Marketing & Events', 'LEGAL': 'Legal & Professional Fees', 'OTHER': 'Other' };
@@ -4479,7 +4488,7 @@ export default function BerkeleyExpenseSystem() {
           if (!backchargeData[dev]) backchargeData[dev] = { total: 0, gbpTotal: 0, items: [] };
           backchargeData[dev].total += bcAmt;
           backchargeData[dev].gbpTotal += gbp;
-          backchargeData[dev].items.push({ claimant: claim.user_name, office: claim.office_code, date: exp.date, merchant: exp.merchant, amount: bcAmt, currency: claim.currency, gbpAmount: gbp, percentage: pct, claimNumber: claim.claim_number });
+          backchargeData[dev].items.push({ claimant: claim.user_name, office: claim.office_code, date: exp.date, merchant: exp.merchant, amount: bcAmt, currency: claim.currency, gbpAmount: gbp, percentage: pct, claimNumber: claim.claim_number, gl: EXPENSE_CATEGORIES[exp.category]?.gl || '-', catName: EXPENSE_CATEGORIES[exp.category]?.name || '-', description: exp.description || '-', status: claim.status });
         });
       });
     });
@@ -4543,16 +4552,16 @@ export default function BerkeleyExpenseSystem() {
       let csvContent = '', filename = '';
       if (reportType === 'gl') {
         filename = `gl_report_${dateFrom}_to_${dateTo}.csv`;
-        csvContent = 'GL Group,GL Code,Category,Claim Number,Office,Claimant,Date,Merchant,Currency,Amount (Local),Amount (GBP),Status,Description\n';
+        csvContent = 'GL Account,GL Code,Category,Claim Number,Office,Claimant,Date,Merchant,Currency,Amount (Local),Amount (GBP),Status,Description\n';
         glFlatItems.forEach(item => { csvContent += `"${GL_GROUP_NAMES[item.group] || item.group}","${item.gl}","${item.catName}","${item.claimNumber || ''}","${item.office}","${item.claimant}","${item.date}","${item.merchant}","${item.currency}","${item.amount.toFixed(2)}","${item.gbpAmount.toFixed(2)}","${fmtStatus(item.status)}","${(item.description || '').replace(/"/g, '""')}"\n`; });
       } else if (reportType === 'backcharge') {
         filename = `backcharge_report_${dateFrom}_to_${dateTo}.csv`;
-        csvContent = 'Development,Claimant,Office,Date,Merchant,Percentage,Currency,Amount,Amount (GBP),Claim Number\n';
-        Object.entries(backchargeData).forEach(([dev, data]) => { data.items.forEach(item => { csvContent += `"${dev}","${item.claimant}","${item.office}","${item.date}","${item.merchant}","${item.percentage}%","${item.currency}","${item.amount.toFixed(2)}","${item.gbpAmount.toFixed(2)}","${item.claimNumber}"\n`; }); });
+        csvContent = 'Development,GL Code,Category,Claim Number,Office,Claimant,Date,Merchant,Percentage,Currency,Recharged (Local),Recharged (GBP),Status,Description\n';
+        Object.entries(backchargeData).forEach(([dev, data]) => { data.items.forEach(item => { csvContent += `"${dev}","${item.gl || ''}","${item.catName || ''}","${item.claimNumber}","${item.office}","${item.claimant}","${item.date}","${item.merchant}","${item.percentage}%","${item.currency}","${item.amount.toFixed(2)}","${item.gbpAmount.toFixed(2)}","${fmtStatus(item.status)}","${(item.description || '').replace(/"/g, '""')}"\n`; }); });
       } else if (reportType === 'submissions') {
         filename = `submissions_report_${dateFrom}_to_${dateTo}.csv`;
-        csvContent = 'Employee,Office,Claims in Range,Total Claims,Last Submission,Last Expense Date\n';
-        Object.values(employeeData).forEach(d => { csvContent += `"${d.name}","${d.office}","${d.claimsInRange}","${d.totalClaims}","${formatShortDate(d.lastSubmission)}","${formatShortDate(d.lastExpenseDate)}"\n`; });
+        csvContent = 'Employee,Office,Claims in Range,Total Claims,Last Submission\n';
+        Object.values(employeeData).forEach(d => { csvContent += `"${d.name}","${d.office}","${d.claimsInRange}","${d.totalClaims}","${formatShortDate(d.lastSubmission)}"\n`; });
       } else if (reportType === 'late') {
         filename = `late_submitters_${dateFrom}_to_${dateTo}.csv`;
         csvContent = 'Employee,Office,Late Expenses,Total Claims\n';
@@ -4608,18 +4617,18 @@ export default function BerkeleyExpenseSystem() {
               <div className="divide-y">
                 {GL_GROUP_ORDER.filter(g => glHierarchy[g]).map(group => {
                   const gData = glHierarchy[group];
-                  const isGroupOpen = expandedGL === group;
+                  const isGroupOpen = expandedGL.has(group);
                   return (
                     <div key={group}>
-                      <div className="p-3 flex justify-between items-center cursor-pointer hover:bg-blue-50 bg-slate-50" onClick={() => setExpandedGL(isGroupOpen ? null : group)}>
+                      <div className="p-3 flex justify-between items-center cursor-pointer hover:bg-blue-50 bg-slate-50" onClick={() => setExpandedGL(prev => { const n = new Set(prev); if (n.has(group)) n.delete(group); else n.add(group); return n; })}>
                         <div className="flex items-center gap-2"><span className="text-xs">{isGroupOpen ? '▼' : '▶'}</span><span className="font-bold text-sm">{GL_GROUP_NAMES[group]}</span></div>
                         <span className="font-bold text-blue-700">£{gData.totalGBP.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
                       </div>
                       {isGroupOpen && Object.entries(gData.cats).sort((a, b) => b[1].totalGBP - a[1].totalGBP).map(([catKey, catData]) => {
-                        const catOpen = expandedGL === group + '_' + catKey;
+                        const catOpen = expandedGL.has(group + '_' + catKey);
                         return (
                           <div key={catKey} className="border-t border-slate-100">
-                            <div className="pl-6 pr-3 py-2 flex justify-between items-center cursor-pointer hover:bg-slate-50" onClick={(e) => { e.stopPropagation(); setExpandedGL(catOpen ? group : group + '_' + catKey); }}>
+                            <div className="pl-6 pr-3 py-2 flex justify-between items-center cursor-pointer hover:bg-slate-50" onClick={(e) => { e.stopPropagation(); setExpandedGL(prev => { const n = new Set(prev); if (catOpen) n.delete(group + '_' + catKey); else n.add(group + '_' + catKey); return n; }); }}>
                               <div className="flex items-center gap-2"><span className="text-xs text-slate-400">{catOpen ? '▼' : '▶'}</span><span className="font-mono text-xs bg-slate-100 px-1.5 py-0.5 rounded">{catData.gl}</span><span className="text-sm">{catData.name}</span><span className="text-xs text-slate-400">({catData.itemCount})</span></div>
                               <span className="font-semibold text-blue-600 text-sm">£{catData.totalGBP.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
                             </div>
@@ -4645,48 +4654,104 @@ export default function BerkeleyExpenseSystem() {
         {/* Backcharge Report */}
         {reportType === 'backcharge' && (
           <div className="bg-white rounded-xl shadow-sm border overflow-hidden">
-            <div className="bg-purple-50 p-4 border-b"><h3 className="font-bold text-purple-800">📊 Backcharge Report</h3><p className="text-xs text-purple-600">{Object.keys(backchargeData).length} developments • £{totalBackcharge.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p></div>
+            <div className="bg-purple-50 p-4 border-b"><h3 className="font-bold text-purple-800">📊 Backcharge Report</h3><p className="text-xs text-purple-600">{Object.keys(backchargeData).length} developments • Total: £{totalBackcharge.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p></div>
             {Object.keys(backchargeData).length === 0 ? <p className="p-4 text-center text-slate-400">No backcharges</p> : (
               <div className="divide-y">
-                {Object.entries(backchargeData).sort((a, b) => b[1].gbpTotal - a[1].gbpTotal).map(([dev, data]) => (
-                  <div key={dev} className="p-3 flex justify-between items-center"><span className="font-semibold text-sm">{dev} <span className="text-xs text-slate-400">({data.items.length})</span></span><span className="font-bold text-purple-700">£{data.gbpTotal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></div>
-                ))}
+                {Object.entries(backchargeData).sort((a, b) => b[1].gbpTotal - a[1].gbpTotal).map(([dev, data]) => {
+                  const isOpen = expandedGL.has('bc_' + dev);
+                  return (
+                    <div key={dev}>
+                      <div className="p-3 flex justify-between items-center cursor-pointer hover:bg-purple-50" onClick={() => setExpandedGL(prev => { const n = new Set(prev); if (n.has('bc_' + dev)) n.delete('bc_' + dev); else n.add('bc_' + dev); return n; })}>
+                        <div className="flex items-center gap-2"><span className="text-xs">{isOpen ? '▼' : '▶'}</span><span className="font-bold text-sm">{dev}</span><span className="text-xs text-slate-400">({data.items.length})</span></div>
+                        <span className="font-bold text-purple-600">£{data.gbpTotal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                      </div>
+                      {isOpen && (
+                        <div className="px-4 pb-3 text-xs space-y-1">
+                          {data.items.map((item, i) => (
+                            <div key={i} className="flex justify-between py-1 border-b border-slate-100 last:border-0">
+                              <span>{item.claimant} • {item.merchant} ({item.percentage}%)</span>
+                              <span className={item.status === 'approved' || item.status === 'paid' || item.status === 'submitted_to_finance' ? 'text-green-600' : 'text-amber-600'}>£{item.gbpAmount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
               </div>
             )}
           </div>
         )}
 
         {/* Submissions Report */}
-        {reportType === 'submissions' && (
-          <div className="bg-white rounded-xl shadow-sm border overflow-hidden">
-            <div className="bg-green-50 p-4 border-b"><h3 className="font-bold text-green-800">📅 Submissions Report</h3><p className="text-xs text-green-600">{Object.keys(employeeData).length} employees</p></div>
-            <div className="divide-y">
-              {Object.entries(employeeData).sort((a, b) => b[1].claimsInRange - a[1].claimsInRange).map(([id, d]) => (
-                <div key={id} className="p-3 flex justify-between items-center text-sm">
-                  <div><span className="font-semibold">{d.name}</span> <span className="text-xs text-slate-400">{d.office}</span></div>
-                  <div className="text-right text-xs"><span className="font-bold">{d.claimsInRange}</span> in range • {d.totalClaims} total</div>
-                </div>
-              ))}
+        {reportType === 'submissions' && (() => {
+          const byOffice = {};
+          Object.entries(employeeData).forEach(([id, d]) => { if (!byOffice[d.office]) byOffice[d.office] = []; byOffice[d.office].push({ id, ...d }); });
+          return (
+            <div className="bg-white rounded-xl shadow-sm border overflow-hidden">
+              <div className="bg-green-50 p-4 border-b"><h3 className="font-bold text-green-800">📅 Submissions Report</h3><p className="text-xs text-green-600">{Object.keys(employeeData).length} employees</p></div>
+              <div className="divide-y">
+                {Object.entries(byOffice).sort((a, b) => a[0].localeCompare(b[0])).map(([office, emps]) => {
+                  const isOpen = expandedGL.has('sub_' + office);
+                  return (
+                    <div key={office}>
+                      <div className="p-3 flex justify-between items-center cursor-pointer hover:bg-green-50" onClick={() => setExpandedGL(prev => { const n = new Set(prev); if (n.has('sub_' + office)) n.delete('sub_' + office); else n.add('sub_' + office); return n; })}>
+                        <div className="flex items-center gap-2"><span className="text-xs">{isOpen ? '▼' : '▶'}</span><span className="font-bold text-sm">{OFFICES.find(o => o.code === office)?.name || office}</span><span className="text-xs text-slate-400">({emps.length})</span></div>
+                        <span className="text-xs font-semibold">{emps.reduce((s, e) => s + e.claimsInRange, 0)} claims in range</span>
+                      </div>
+                      {isOpen && (
+                        <div className="px-4 pb-2 text-xs space-y-1">
+                          {emps.sort((a, b) => b.claimsInRange - a.claimsInRange).map(emp => (
+                            <div key={emp.id} className="flex justify-between py-1 border-b border-slate-100 last:border-0">
+                              <span className="font-semibold">{emp.name}</span>
+                              <span><span className="font-bold">{emp.claimsInRange}</span> in range • {emp.totalClaims} total • {formatShortDate(emp.lastSubmission)}</span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
             </div>
-          </div>
-        )}
+          );
+        })()}
 
         {/* Late Submitters */}
-        {reportType === 'late' && (
-          <div className="bg-white rounded-xl shadow-sm border overflow-hidden">
-            <div className="bg-amber-50 p-4 border-b"><h3 className="font-bold text-amber-800">⚠️ Late Submitters</h3><p className="text-xs text-amber-600">Expenses &gt;2 months from receipt date</p></div>
-            {lateSubmitters.length === 0 ? <p className="p-4 text-center text-slate-400">No late submissions</p> : (
-              <div className="divide-y">
-                {lateSubmitters.map(([id, d]) => (
-                  <div key={id} className="p-3 flex justify-between items-center text-sm">
-                    <div><span className="font-semibold">{d.name}</span> <span className="text-xs text-slate-400">{d.office}</span></div>
-                    <span className="bg-red-100 text-red-600 text-xs font-bold px-2 py-0.5 rounded-full">{d.lateCount} late</span>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        )}
+        {reportType === 'late' && (() => {
+          const byOffice = {};
+          lateSubmitters.forEach(([id, d]) => { if (!byOffice[d.office]) byOffice[d.office] = []; byOffice[d.office].push({ id, ...d }); });
+          return (
+            <div className="bg-white rounded-xl shadow-sm border overflow-hidden">
+              <div className="bg-amber-50 p-4 border-b"><h3 className="font-bold text-amber-800">⚠️ Late Submitters</h3><p className="text-xs text-amber-600">Expenses &gt;2 months from receipt date</p></div>
+              {lateSubmitters.length === 0 ? <p className="p-4 text-center text-slate-400">No late submissions</p> : (
+                <div className="divide-y">
+                  {Object.entries(byOffice).sort((a, b) => a[0].localeCompare(b[0])).map(([office, emps]) => {
+                    const isOpen = expandedGL.has('late_' + office);
+                    return (
+                      <div key={office}>
+                        <div className="p-3 flex justify-between items-center cursor-pointer hover:bg-amber-50" onClick={() => setExpandedGL(prev => { const n = new Set(prev); if (n.has('late_' + office)) n.delete('late_' + office); else n.add('late_' + office); return n; })}>
+                          <div className="flex items-center gap-2"><span className="text-xs">{isOpen ? '▼' : '▶'}</span><span className="font-bold text-sm">{OFFICES.find(o => o.code === office)?.name || office}</span><span className="text-xs text-slate-400">({emps.length})</span></div>
+                          <span className="bg-red-100 text-red-600 text-xs font-bold px-2 py-0.5 rounded-full">{emps.reduce((s, e) => s + e.lateCount, 0)} late</span>
+                        </div>
+                        {isOpen && (
+                          <div className="px-4 pb-2 text-xs space-y-1">
+                            {emps.sort((a, b) => b.lateCount - a.lateCount).map(emp => (
+                              <div key={emp.id} className="flex justify-between py-1 border-b border-slate-100 last:border-0">
+                                <span className="font-semibold">{emp.name}</span>
+                                <span className="text-red-600 font-bold">{emp.lateCount} late receipts</span>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          );
+        })()}
 
         {/* Summary stats */}
         <div className="flex gap-3">
