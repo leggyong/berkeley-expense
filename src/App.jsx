@@ -1042,7 +1042,7 @@ const RequestChangesModal = ({ claim, onClose, onSubmit }) => {
   );
 };
 
-const StatementUploadModal = ({ existingImages, userId, onClose, onContinue }) => {
+const StatementUploadModal = ({ existingImages, userId, onClose, onSave, onAnnotate }) => {
     const [localStatements, setLocalStatements] = useState([...existingImages]);
     const [isProcessing, setIsProcessing] = useState(false);
     const fileInputRef = useRef(null);
@@ -1055,12 +1055,10 @@ const StatementUploadModal = ({ existingImages, userId, onClose, onContinue }) =
       const reader = new FileReader();
       reader.onload = async (event) => {
         try {
-          // Upload to Supabase Storage
           const imageUrl = await uploadImageToStorage(event.target.result, userId, 'statement');
           setLocalStatements(prev => [...prev, imageUrl]);
         } catch (err) {
           console.error('Upload failed:', err);
-          // Fallback to compressed base64
           const compressed = await compressImage(event.target.result);
           setLocalStatements(prev => [...prev, compressed]);
         }
@@ -1075,7 +1073,6 @@ const StatementUploadModal = ({ existingImages, userId, onClose, onContinue }) =
     };
 
     const removeStatement = (idx) => setLocalStatements(prev => prev.filter((_, i) => i !== idx));
-    const handleContinueInternal = () => { onContinue(localStatements); };
     
     return (
       <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50">
@@ -1098,7 +1095,11 @@ const StatementUploadModal = ({ existingImages, userId, onClose, onContinue }) =
             </div>
             {localStatements.length === 0 && (<div className="text-center py-8 text-slate-400"><p>📄 No statements uploaded yet</p><p className="text-sm">Tap the + box to add one</p></div>)}
           </div>
-          <div className="p-4 border-t flex gap-3 shrink-0"><button onClick={onClose} className="flex-1 py-3 rounded-xl border-2 font-semibold">Cancel</button><button onClick={handleContinueInternal} disabled={isProcessing} className="flex-[2] py-3 rounded-xl bg-green-600 text-white font-semibold disabled:opacity-50">{isProcessing ? 'Please wait...' : localStatements.length > 0 ? `Annotate (${localStatements.length}) →` : 'Clear Statements'}</button></div>
+          <div className="p-4 border-t flex gap-3 shrink-0">
+            <button onClick={onClose} disabled={isProcessing} className="flex-1 py-3 rounded-xl border-2 font-semibold">Cancel</button>
+            <button onClick={() => onSave(localStatements)} disabled={isProcessing} className="flex-1 py-3 rounded-xl bg-blue-600 text-white font-semibold disabled:opacity-50">💾 Save</button>
+            <button onClick={() => onAnnotate(localStatements)} disabled={localStatements.length === 0 || isProcessing} className="flex-1 py-3 rounded-xl bg-green-600 text-white font-semibold disabled:opacity-50">Annotate →</button>
+          </div>
         </div>
       </div>
     );
@@ -5314,21 +5315,38 @@ export default function BerkeleyExpenseSystem() {
           existingImages={originalStatementImages}
           userId={currentUser?.id}
           onClose={() => setShowStatementUpload(false)}
-          onContinue={(imgs) => {
+          onSave={(imgs) => {
+            // Remap annotations: keep annotations on surviving statements, clear deleted ones
+            const oldImgs = originalStatementImages || [];
+            const survivingOldIndices = [];
+            imgs.forEach(img => { const oldIdx = oldImgs.indexOf(img); if (oldIdx !== -1) survivingOldIndices.push(oldIdx); });
+            const newAnnotations = statementAnnotations
+              .filter(a => survivingOldIndices.includes(a.statementIndex || 0))
+              .map(a => ({ ...a, statementIndex: survivingOldIndices.indexOf(a.statementIndex || 0) }));
+            
             setStatementImages(imgs);
             setOriginalStatementImages(imgs);
-            // Always clear annotations — user will re-annotate
-            setStatementAnnotations([]);
-            setAnnotatedStatements(imgs);
+            setStatementAnnotations(newAnnotations);
+            setAnnotatedStatements(imgs.length > 0 ? imgs : []);
+            setShowStatementUpload(false);
+            saveToServer(expenses, imgs.length > 0 ? imgs : [], newAnnotations, imgs.length > 0 ? imgs : []);
+          }}
+          onAnnotate={(imgs) => {
+            // Same remap logic — keep existing annotations on surviving statements
+            const oldImgs = originalStatementImages || [];
+            const survivingOldIndices = [];
+            imgs.forEach(img => { const oldIdx = oldImgs.indexOf(img); if (oldIdx !== -1) survivingOldIndices.push(oldIdx); });
+            const newAnnotations = statementAnnotations
+              .filter(a => survivingOldIndices.includes(a.statementIndex || 0))
+              .map(a => ({ ...a, statementIndex: survivingOldIndices.indexOf(a.statementIndex || 0) }));
             
-            if (imgs.length > 0) {
-              setCurrentStatementIndex(0);
-              setShowStatementUpload(false); 
-              setShowStatementAnnotator(true);
-            } else {
-              setShowStatementUpload(false);
-              saveToServer(expenses, [], [], []);
-            }
+            setStatementImages(imgs);
+            setOriginalStatementImages(imgs);
+            setStatementAnnotations(newAnnotations);
+            setAnnotatedStatements(imgs);
+            setCurrentStatementIndex(0);
+            setShowStatementUpload(false);
+            setShowStatementAnnotator(true);
           }}
         />
       )}
