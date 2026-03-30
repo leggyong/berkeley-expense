@@ -766,6 +766,17 @@ const StatementAnnotator = ({ images, initialIndex = 0, expenses, existingAnnota
   const handleEnd = () => { setDragging(null); setResizing(null); };
   const removeAnnotation = (ref) => setCurrentAnnotations(prev => prev.filter(a => a.ref !== ref));
   
+  // Remove annotation from OTHER statements (stored in annotationsByStatement)
+  const removeAnnotationFromOther = (ref) => {
+    setAnnotationsByStatement(prev => {
+      const updated = {};
+      Object.keys(prev).forEach(idx => {
+        updated[idx] = prev[idx].filter(a => a.ref !== ref);
+      });
+      return updated;
+    });
+  };
+  
   // Save current statement's annotations before switching
   const saveCurrentToState = () => {
     if (imgDimensions.width > 0) {
@@ -906,6 +917,7 @@ const StatementAnnotator = ({ images, initialIndex = 0, expenses, existingAnnota
                   {isOnOtherStatement && ' (other stmt)'}
                 </div>
                 {isOnCurrentStatement && <span className="ml-1 text-xs" onClick={(e) => { e.stopPropagation(); removeAnnotation(exp.ref); }}>✕</span>}
+                {isOnOtherStatement && <span className="ml-1 text-xs" onClick={(e) => { e.stopPropagation(); removeAnnotationFromOther(exp.ref); }}>✕</span>}
               </button>
             );
           })}
@@ -1086,7 +1098,7 @@ const StatementUploadModal = ({ existingImages, userId, onClose, onContinue }) =
             </div>
             {localStatements.length === 0 && (<div className="text-center py-8 text-slate-400"><p>📄 No statements uploaded yet</p><p className="text-sm">Tap the + box to add one</p></div>)}
           </div>
-          <div className="p-4 border-t flex gap-3 shrink-0"><button onClick={onClose} className="flex-1 py-3 rounded-xl border-2 font-semibold">Cancel</button><button onClick={handleContinueInternal} disabled={localStatements.length === 0 || isProcessing} className="flex-[2] py-3 rounded-xl bg-green-600 text-white font-semibold disabled:opacity-50">{isProcessing ? 'Please wait...' : `Annotate (${localStatements.length}) →`}</button></div>
+          <div className="p-4 border-t flex gap-3 shrink-0"><button onClick={onClose} className="flex-1 py-3 rounded-xl border-2 font-semibold">Cancel</button><button onClick={handleContinueInternal} disabled={isProcessing} className="flex-[2] py-3 rounded-xl bg-green-600 text-white font-semibold disabled:opacity-50">{isProcessing ? 'Please wait...' : localStatements.length > 0 ? `Annotate (${localStatements.length}) →` : 'Clear Statements'}</button></div>
         </div>
       </div>
     );
@@ -1281,12 +1293,38 @@ export default function BerkeleyExpenseSystem() {
         const dateB = b?.date ? new Date(b.date) : new Date();
         return dateA - dateB;
       });
-      // Use sequential numbering (1, 2, 3...) sorted by date
       return sorted.map((exp, idx) => {
         if (!exp) return exp;
         return { ...exp, ref: String(idx + 1) };
       });
     } catch (err) { return expenseList || []; }
+  };
+  
+  // Remap statementAnnotations when expense refs change
+  // Returns the updated annotations array (caller should set state and pass to saveToServer)
+  const remapAnnotationsForRefChange = (oldExpenses, newExpenses, currentAnnotations) => {
+    if (!currentAnnotations || currentAnnotations.length === 0) return currentAnnotations;
+    const refMap = {};
+    let changed = false;
+    newExpenses.forEach(newExp => {
+      if (!newExp) return;
+      const oldExp = oldExpenses.find(e => e?.id === newExp.id);
+      if (oldExp && String(oldExp.ref) !== String(newExp.ref)) {
+        refMap[String(oldExp.ref)] = String(newExp.ref);
+        changed = true;
+      }
+    });
+    // Also check for deleted expenses
+    const newIds = new Set(newExpenses.map(e => e?.id).filter(Boolean));
+    const deletedRefs = new Set(oldExpenses.filter(e => e && !newIds.has(e.id)).map(e => String(e.ref)));
+    if (!changed && deletedRefs.size === 0) return currentAnnotations;
+    
+    return currentAnnotations
+      .filter(a => !deletedRefs.has(String(a.ref)))
+      .map(a => {
+        const newRef = refMap[String(a.ref)];
+        return newRef ? { ...a, ref: newRef } : a;
+      });
   };
 
   // Function to scan all expenses and mark duplicates (pairs)
@@ -1379,9 +1417,12 @@ export default function BerkeleyExpenseSystem() {
 
   // Delete expense and save immediately
   const handleDeleteExpense = async (expenseId) => {
+    const oldExpenses = expenses;
     const newExpenses = sortAndReassignRefs(expenses.filter(e => e.id !== expenseId));
+    const newAnnotations = remapAnnotationsForRefChange(oldExpenses, newExpenses, statementAnnotations);
     setExpenses(newExpenses);
-    await saveToServer(newExpenses, annotatedStatements, statementAnnotations, originalStatementImages);
+    setStatementAnnotations(newAnnotations);
+    await saveToServer(newExpenses, annotatedStatements, newAnnotations, originalStatementImages);
   };
 
   const clearDraftStorage = async () => {
@@ -2567,13 +2608,16 @@ export default function BerkeleyExpenseSystem() {
         const attendeesForSave = attendeesString;
         
         let newExpenses;
+        let currentAnns = statementAnnotations;
         if (editExpense) { 
+          const oldExps = [...expenses];
           newExpenses = expenses.map(e => e.id === editExpense.id ? { ...e, ...formData, attendees: attendeesForSave, amount: parseFloat(formData.amount), reimbursementAmount: isForeignCurrency ? parseFloat(formData.reimbursementAmount) : parseFloat(formData.amount), receiptPreview: receiptPreview || e.receiptPreview, receiptPreview2: receiptPreview2 || e.receiptPreview2, receiptPreview3: receiptPreview3 || e.receiptPreview3, receiptPreview4: receiptPreview4 || e.receiptPreview4, isForeignCurrency, isPotentialDuplicate: !!duplicateWarning, duplicateMatchLabel: duplicateMatchLabel || null, forexRate, updatedAt: new Date().toISOString() } : e);
           newExpenses = sortAndReassignRefs(newExpenses);
+          currentAnns = remapAnnotationsForRefChange(oldExps, newExpenses, statementAnnotations);
           setExpenses(newExpenses);
+          setStatementAnnotations(currentAnns);
         } else { 
           const newExpense = { id: Date.now(), ref: 'temp', ...formData, attendees: attendeesForSave, amount: parseFloat(formData.amount) || 0, reimbursementAmount: isForeignCurrency ? (parseFloat(formData.reimbursementAmount) || 0) : (parseFloat(formData.amount) || 0), receiptPreview: receiptPreview || null, receiptPreview2: receiptPreview2 || null, receiptPreview3: receiptPreview3 || null, receiptPreview4: receiptPreview4 || null, status: 'draft', isForeignCurrency: isForeignCurrency || false, isOld: isOlderThan2Months(formData.date), createdAt: new Date().toISOString(), isPotentialDuplicate: !!duplicateWarning, duplicateMatchLabel: duplicateMatchLabel || null, forexRate };
-          // If this is a duplicate, also mark the matching expense as duplicate
           let existingExpenses = [...expenses];
           if (duplicateWarning) {
             existingExpenses = expenses.map(e => {
@@ -2584,11 +2628,13 @@ export default function BerkeleyExpenseSystem() {
             });
           }
           newExpenses = sortAndReassignRefs([...existingExpenses, newExpense]);
+          currentAnns = remapAnnotationsForRefChange(existingExpenses, newExpenses, statementAnnotations);
           setExpenses(newExpenses);
+          setStatementAnnotations(currentAnns);
         }
         
         // IMMEDIATELY save to server
-        await saveToServer(newExpenses, annotatedStatements, statementAnnotations, originalStatementImages);
+        await saveToServer(newExpenses, annotatedStatements, currentAnns, originalStatementImages);
         
         onClose();
       } catch (err) { 
@@ -5222,10 +5268,13 @@ export default function BerkeleyExpenseSystem() {
               receiptPreview: null, receiptPreview2: null, receiptPreview3: null, receiptPreview4: null,
               status: 'draft', isForeignCurrency: false, createdAt: new Date().toISOString()
             };
+            const oldExps = [...expenses];
             const newExpenses = sortAndReassignRefs([...expenses, newExpense]);
+            const remappedAnns = remapAnnotationsForRefChange(oldExps, newExpenses, statementAnnotations);
             const processed = markDuplicatePairs(newExpenses);
             setExpenses(processed);
-            await saveToServer(processed, annotatedStatements, statementAnnotations, originalStatementImages);
+            setStatementAnnotations(remappedAnns);
+            await saveToServer(processed, annotatedStatements, remappedAnns, originalStatementImages);
             setSaving(false);
             setShowMileageModal(false);
           };
@@ -5267,12 +5316,18 @@ export default function BerkeleyExpenseSystem() {
           onClose={() => setShowStatementUpload(false)}
           onContinue={(imgs) => {
             setStatementImages(imgs);
-            // Save originals for re-annotation later
             setOriginalStatementImages(imgs);
+            // Always clear annotations — user will re-annotate
+            setStatementAnnotations([]);
+            setAnnotatedStatements(imgs);
+            
             if (imgs.length > 0) {
               setCurrentStatementIndex(0);
               setShowStatementUpload(false); 
               setShowStatementAnnotator(true);
+            } else {
+              setShowStatementUpload(false);
+              saveToServer(expenses, [], [], []);
             }
           }}
         />
