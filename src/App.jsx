@@ -1593,7 +1593,7 @@ export default function BerkeleyExpenseSystem() {
       // Receipt sizing - handle up to 4 receipts
       const receipts = [exp.receiptPreview, exp.receiptPreview2, exp.receiptPreview3, exp.receiptPreview4].filter(Boolean);
       const receiptCount = receipts.length;
-      const baseHeight = matchStmtImg ? 200 : 255;
+      const baseHeight = matchStmtImg ? 200 : (receiptCount <= 1 ? 200 : 250);
       const availableHeight = baseHeight - heightPenalty;
       
       let receiptContent = '';
@@ -3395,8 +3395,11 @@ export default function BerkeleyExpenseSystem() {
 
   // ============ EMMA'S FINANCE DASHBOARD ============
   const FinanceDashboard = () => {
-    const allFinOffices = currentUser.reportOffices || OFFICES.filter(o => !o.isAdmin).map(o => o.code);
+    const allFinOffices = currentUser.reportOffices || OFFICES.filter(o => !o.isAdmin && o.code !== 'LON').map(o => o.code);
     const [selectedFinOffices, setSelectedFinOffices] = useState(allFinOffices);
+    // For reporting, LON is treated as DXB
+    const reportOfficeMatch = (officeCode) => selectedFinOffices.includes(officeCode) || (officeCode === 'LON' && selectedFinOffices.includes('DXB'));
+    const mapOfficeForReport = (officeCode) => officeCode === 'LON' ? 'DXB' : officeCode;
     const [dateFrom, setDateFrom] = useState(() => {
       const d = new Date();
       d.setMonth(d.getMonth() - 3); // Default 3 months back
@@ -3541,7 +3544,7 @@ export default function BerkeleyExpenseSystem() {
       if (!c) return false;
       
       // Office scope filter
-      if (!selectedFinOffices.includes(c.office_code)) return false;
+      if (!reportOfficeMatch(c.office_code)) return false;
       
       const isApproved = c.status === 'approved' || c.status === 'paid' || c.status === 'submitted_to_finance';
       const isDraft = c.status === 'draft';
@@ -3575,7 +3578,7 @@ export default function BerkeleyExpenseSystem() {
             if (!backchargeData[dev]) backchargeData[dev] = { items: [], total: 0, byOffice: {} };
             const amt = (parseFloat(exp.reimbursementAmount || exp.amount) || 0) * ((parseFloat(bc.percentage) || 0) / 100);
             const gbpAmt = toGBP(amt, claim.currency || 'GBP');
-            const office = claim.office_code || '-';
+            const office = mapOfficeForReport(claim.office_code || '-');
             if (!backchargeData[dev].byOffice[office]) backchargeData[dev].byOffice[office] = { items: [], total: 0 };
             const item = {
               claimNumber: claim.claim_number || '-',
@@ -3617,7 +3620,7 @@ export default function BerkeleyExpenseSystem() {
         const catKey = exp.category || '?';
         const catName = cat?.name || exp.category || 'Unknown';
         const gl = cat?.gl || '9999';
-        const office = claim.office_code || 'Unknown';
+        const office = mapOfficeForReport(claim.office_code || 'Unknown');
         const empName = claim.user_name || 'Unknown';
         const amt = parseFloat(exp.reimbursementAmount || exp.amount) || 0;
         const gbp = toGBP(amt, claim.currency || 'GBP');
@@ -3646,7 +3649,7 @@ export default function BerkeleyExpenseSystem() {
     
     allClaims.forEach(claim => {
       if (!claim) return;
-      if (!selectedFinOffices.includes(claim.office_code)) return;
+      if (!reportOfficeMatch(claim.office_code)) return;
       const empId = claim.user_id;
       if (!empId) return;
       if (!employeeData[empId]) {
@@ -4151,6 +4154,55 @@ export default function BerkeleyExpenseSystem() {
           </div>
         )}
         
+        {/* Monthly Breakdown */}
+        {(() => {
+          const GL_GROUPS_M = { 'TRAVEL': 'Travel', 'SUBSISTENCE': 'Subsistence, Welfare & Employee Entertaining', 'ENTERTAINING': 'Business Entertaining', 'OFFICE': 'Office Costs', 'MARKETING': 'Marketing & Events', 'LEGAL': 'Legal & Professional Fees' };
+          const fy = getFinancialYear();
+          const fyStart = new Date(fy, 4, 1);
+          const now = new Date();
+          const months = [];
+          let md = new Date(fyStart);
+          while (md <= now) { months.push(new Date(md)); md.setMonth(md.getMonth() + 1); }
+          const monthNames = months.map(m => m.toLocaleDateString('en-GB', { month: 'short', year: '2-digit' }));
+          const glM = {};
+          Object.keys(GL_GROUPS_M).forEach(g => { glM[g] = { months: new Array(months.length).fill(0) }; });
+          // Use all claims matching office filter for FY (no date filter)
+          const fyClaims = claims.filter(c => reportOfficeMatch(c.office_code) && (c.status === 'approved' || c.status === 'paid' || c.status === 'submitted_to_finance' || (includePending && (c.status === 'pending_review' || c.status === 'pending_level2' || c.status === 'changes_requested'))));
+          fyClaims.forEach(c => {
+            (c.expenses || []).forEach(exp => {
+              const cat = EXPENSE_CATEGORIES[exp.category];
+              if (!cat) return;
+              const gbp = toGBP(parseFloat(exp.reimbursementAmount || exp.amount || 0), c.currency || 'GBP');
+              const ed = new Date(exp.date);
+              const mi = months.findIndex(m => m.getMonth() === ed.getMonth() && m.getFullYear() === ed.getFullYear());
+              if (mi < 0) return;
+              if (!glM[cat.group]) glM[cat.group] = { months: new Array(months.length).fill(0) };
+              glM[cat.group].months[mi] += gbp;
+            });
+          });
+          const fmtK = (v) => v > 0 ? Math.round(v).toLocaleString() : '';
+          const fmtKT = (v) => '£' + Math.round(v).toLocaleString();
+          return (
+            <div className="bg-white rounded-xl shadow-sm border p-4">
+              <h3 className="font-bold mb-1">📊 Monthly Breakdown</h3>
+              <p className="text-xs text-slate-400 mb-3">FY{fy} • GBP equivalent</p>
+              <div className="overflow-x-auto">
+                <table className="w-full text-xs border-collapse">
+                  <thead><tr className="bg-purple-50"><th className="text-left p-2 border">Category</th>{monthNames.map((m, i) => <th key={i} className="text-right p-2 border min-w-[65px]">{m}</th>)}<th className="text-right p-2 border font-bold bg-purple-100">Total</th></tr></thead>
+                  <tbody>
+                    {Object.entries(GL_GROUPS_M).map(([group, label]) => {
+                      const data = glM[group] || { months: new Array(months.length).fill(0) };
+                      const rowTotal = data.months.reduce((s, v) => s + v, 0);
+                      return (<tr key={group} className="hover:bg-slate-50"><td className="p-2 border font-semibold text-slate-700">{label}</td>{data.months.map((val, i) => <td key={i} className="text-right p-2 border text-slate-600">{fmtK(val)}</td>)}<td className="text-right p-2 border font-bold text-purple-700">{fmtKT(rowTotal)}</td></tr>);
+                    })}
+                    <tr className="bg-purple-100 font-bold"><td className="p-2 border">TOTAL</td>{months.map((_, i) => { const ct = Object.values(glM).reduce((s, d) => s + d.months[i], 0); return <td key={i} className="text-right p-2 border">{fmtKT(ct)}</td>; })}<td className="text-right p-2 border text-purple-800">{fmtKT(Object.values(glM).reduce((s, d) => s + d.months.reduce((a, b) => a + b, 0), 0))}</td></tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          );
+        })()}
+        
         {/* Summary Stats */}
         <div className="grid grid-cols-3 gap-3">
           <div className="bg-white rounded-xl p-4 shadow-sm border text-center">
@@ -4450,8 +4502,12 @@ export default function BerkeleyExpenseSystem() {
   
   // ============ COUNTRY HEAD REPORTS TAB ============
   const CountryHeadReportsTab = () => {
-    const allOffices = currentUser.dashboardOffices || [];
+    const rawOffices = currentUser.dashboardOffices || [];
+    // Merge LON into DXB for display
+    const allOffices = [...new Set(rawOffices.map(o => o === 'LON' ? 'DXB' : o))];
     const [selectedOffices, setSelectedOffices] = useState(allOffices);
+    const mapOffice = (code) => code === 'LON' ? 'DXB' : code;
+    const officeMatch = (code) => selectedOffices.includes(code) || (code === 'LON' && selectedOffices.includes('DXB'));
     const [includePending, setIncludePending] = useState(true);
     const [deductBackcharge, setDeductBackcharge] = useState(false);
     const defaultFrom = (() => { const d = new Date(); d.setMonth(d.getMonth() - 3); return d.toISOString().split('T')[0]; })();
@@ -4467,7 +4523,7 @@ export default function BerkeleyExpenseSystem() {
 
     // Filter claims for selected offices and date range
     const filteredClaims = claims.filter(c => {
-      if (!selectedOffices.includes(c.office_code)) return false;
+      if (!officeMatch(c.office_code)) return false;
       const isApproved = c.status === 'approved' || c.status === 'paid' || c.status === 'submitted_to_finance';
       const isPending = c.status === 'pending_review' || c.status === 'pending_level2' || c.status === 'changes_requested';
       if (!isApproved && !(includePending && isPending)) return false;
@@ -4478,7 +4534,7 @@ export default function BerkeleyExpenseSystem() {
     });
     
     // All claims for these offices (no date filter, for monthly table)
-    const allOfficeClaims = claims.filter(c => selectedOffices.includes(c.office_code));
+    const allOfficeClaims = claims.filter(c => officeMatch(c.office_code));
     const fyClaims = allOfficeClaims.filter(c => {
       const isApproved = c.status === 'approved' || c.status === 'paid' || c.status === 'submitted_to_finance';
       const isPending = c.status === 'pending_review' || c.status === 'pending_level2' || c.status === 'changes_requested';
@@ -4495,7 +4551,7 @@ export default function BerkeleyExpenseSystem() {
         const catKey = exp.category || '?';
         const catName = cat?.name || 'Unknown';
         const gl = cat?.gl || '9999';
-        const office = claim.office_code || '?';
+        const office = mapOffice(claim.office_code || '?');
         const empName = claim.user_name || 'Unknown';
         const amt = parseFloat(exp.reimbursementAmount || exp.amount) || 0;
         const gbp = toGBP(amt, claim.currency || 'GBP');
