@@ -269,11 +269,11 @@ const EMPLOYEES = [
   { id: 817, name: 'Tay Ruo Fan', office: 'SIN', role: 'employee', reimburseCurrency: 'SGD', claimName: 'Ruo Fan', password: '81299106' },
   { id: 818, name: 'May', office: 'SIN', role: 'employee', reimburseCurrency: 'SGD', claimName: 'May', password: 'RiseAndShine1!!!' },
   // Bangkok
-  { id: 901, name: 'Sutanya Jaruphiboon', office: 'BKK', role: 'employee', reimburseCurrency: 'THB', claimName: 'Praew', password: 'berkeley123' },
-  { id: 902, name: 'Chayasid Jongpipattanachoke', office: 'BKK', role: 'employee', reimburseCurrency: 'THB', claimName: 'Pjay', password: 'berkeley123' },
-  { id: 903, name: 'Juthamas Leewanun', office: 'BKK', role: 'employee', reimburseCurrency: 'THB', claimName: 'Art', password: 'berkeley123' },
-  { id: 904, name: 'Norakamol Seninvinin', office: 'BKK', role: 'employee', reimburseCurrency: 'THB', claimName: 'Nora', password: 'berkeley123' },
-  { id: 905, name: 'Warahnooch Achariyapradit', office: 'BKK', role: 'admin', reimburseCurrency: 'THB', claimName: 'Bow', password: 'berkeley123' },
+  { id: 901, name: 'Sutanya Jaruphiboon', office: 'BKK', role: 'employee', reimburseCurrency: 'THB', claimName: 'Praew', password: 'Happygirl55,' },
+  { id: 902, name: 'Chayasid Jongpipattanachoke', office: 'BKK', role: 'employee', reimburseCurrency: 'THB', claimName: 'Pjay', password: 'PJberkeley1993' },
+  { id: 903, name: 'Juthamas Leewanun', office: 'BKK', role: 'employee', reimburseCurrency: 'THB', claimName: 'Art', password: 'Ajlondon2*' },
+  { id: 904, name: 'Norakamol Seninvinin', office: 'BKK', role: 'employee', reimburseCurrency: 'THB', claimName: 'Nora', password: 'jizwut-9cyfre-cYzmut' },
+  { id: 905, name: 'Warahnooch Achariyapradit', office: 'BKK', role: 'admin', reimburseCurrency: 'THB', claimName: 'Bow', password: 'Letmedrinkcoffee1!' },
   // Dubai / MENA
   { id: 1001, name: 'Christopher Frame', office: 'DXB', role: 'manager', reimburseCurrency: 'AED', claimName: 'Christopher', password: 'berkeley123', dashboardOffices: ['DXB', 'LON'] },
   { id: 1002, name: 'Christine Dimaranan', office: 'DXB', role: 'admin', reimburseCurrency: 'AED', claimName: 'Christine', password: 'berkeley123' },
