@@ -609,12 +609,42 @@ const getClaimStatusText = (claim) => {
   return claim.status;
 };
 
-const ImageViewer = ({ src, onClose }) => (
-  <div className="fixed inset-0 bg-black/90 flex items-center justify-center z-[100] p-4" onClick={onClose}>
-    <button onClick={onClose} className="absolute top-4 right-4 bg-white/20 hover:bg-white/40 text-white w-12 h-12 rounded-full text-2xl">✕</button>
-    <img src={src} alt="Full size" className="max-w-full max-h-full object-contain" onClick={e => e.stopPropagation()} />
-  </div>
-);
+const ImageViewer = ({ src, onClose, onRotate }) => {
+  const [currentSrc, setCurrentSrc] = useState(src);
+  const [rotating, setRotating] = useState(false);
+  
+  const handleRotate = async (e) => {
+    e.stopPropagation();
+    if (rotating) return;
+    setRotating(true);
+    try {
+      const img = new Image();
+      img.crossOrigin = 'anonymous';
+      await new Promise((resolve, reject) => { img.onload = resolve; img.onerror = reject; img.src = currentSrc; });
+      const canvas = document.createElement('canvas');
+      canvas.width = img.naturalHeight;
+      canvas.height = img.naturalWidth;
+      const ctx = canvas.getContext('2d');
+      ctx.translate(canvas.width / 2, canvas.height / 2);
+      ctx.rotate(Math.PI / 2);
+      ctx.drawImage(img, -img.naturalWidth / 2, -img.naturalHeight / 2);
+      const rotated = canvas.toDataURL('image/jpeg', 0.85);
+      setCurrentSrc(rotated);
+      if (onRotate) onRotate(rotated);
+    } catch (err) { console.error('Rotate failed:', err); }
+    setRotating(false);
+  };
+  
+  return (
+    <div className="fixed inset-0 bg-black/90 flex items-center justify-center z-[100] p-4" onClick={onClose}>
+      <div className="absolute top-4 right-4 flex gap-2">
+        {onRotate && <button onClick={handleRotate} disabled={rotating} className="bg-white/20 hover:bg-white/40 text-white w-12 h-12 rounded-full text-xl">{rotating ? '⏳' : '🔄'}</button>}
+        <button onClick={onClose} className="bg-white/20 hover:bg-white/40 text-white w-12 h-12 rounded-full text-2xl">✕</button>
+      </div>
+      <img src={currentSrc} alt="Full size" className="max-w-full max-h-full object-contain" onClick={e => e.stopPropagation()} />
+    </div>
+  );
+};
 
 const StatementAnnotator = ({ images, initialIndex = 0, expenses, existingAnnotations = [], onSave, onCancel }) => {
   const canvasRef = useRef(null);
@@ -1671,23 +1701,23 @@ export default function BerkeleyExpenseSystem() {
 
     const html = '<!DOCTYPE html><html><head><title>Expense Claim</title><style>' +
       '*{margin:0;padding:0;box-sizing:border-box;}' +
-      'body{font-family:Arial,sans-serif;font-size:9px;}' +
-      '@page{margin:8mm;size:A4;}' +
-      '.page{page-break-after:always;padding:3mm;}' +
+      'body{font-family:Arial,sans-serif;font-size:12px;}' +
+      '@page{margin:10mm;size:A4;}' +
+      '.page{page-break-after:always;padding:5mm;}' +
       '.page:last-child{page-break-after:avoid;}' +
-      'h1{text-align:center;font-size:12px;font-weight:bold;margin-bottom:8px;}' +
-      '.info-table{width:100%;border-collapse:collapse;margin-bottom:6px;}' +
-      '.info-table td{padding:3px 6px;border:1px solid #ccc;font-size:9px;}' +
+      'h1{text-align:center;font-size:18px;font-weight:bold;margin-bottom:15px;}' +
+      '.info-table{width:100%;border-collapse:collapse;margin-bottom:10px;}' +
+      '.info-table td{padding:8px 12px;border:1px solid #ccc;font-size:13px;}' +
       '.info-table .label{background:#f5f5f5;font-weight:bold;width:40%;}' +
       '.info-table .value{background:#fffde7;}' +
-      '.summary-table{width:100%;border-collapse:collapse;margin-top:6px;}' +
-      '.summary-table th,.summary-table td{padding:2px 4px;border:1px solid #ccc;font-size:8px;}' +
+      '.summary-table{width:100%;border-collapse:collapse;margin-top:10px;}' +
+      '.summary-table th,.summary-table td{padding:6px 10px;border:1px solid #ccc;font-size:12px;}' +
       '.summary-table th{background:#e0e0e0;text-align:left;}' +
       '.group-row td{background:#f5f5f5;font-weight:bold;}' +
-      '.total-row td{background:#000;color:#fff;font-weight:bold;}' +
-      '.detail-table{width:100%;border-collapse:collapse;font-size:8px;}' +
-      '.detail-table th,.detail-table td{border:1px solid #ccc;padding:3px;}' +
-      '.detail-table th{background:#e8eaf6;text-align:left;}' +
+      '.total-row td{background:#000;color:#fff;font-weight:bold;font-size:14px;}' +
+      '.detail-table{width:100%;border-collapse:collapse;font-size:10px;}' +
+      '.detail-table th,.detail-table td{border:1px solid #ccc;padding:5px 6px;}' +
+      '.detail-table th{background:#e8eaf6;text-align:left;font-size:10px;}' +
       '.receipt-page{padding:3mm;}' +
       '.receipt-header{background:#1565c0;color:#fff;padding:8px;display:flex;align-items:flex-start;border-radius:4px;margin-bottom:6px;}' +
       '.receipt-ref{font-size:28px;font-weight:bold;margin-right:15px;}' +
@@ -1714,7 +1744,7 @@ export default function BerkeleyExpenseSystem() {
       '<tr><td class="label">DATE OF APPROVAL (dd/mm/yyyy)</td><td class="value">' + (level2ApprovedAt ? formatDDMMYYYY(new Date(level2ApprovedAt)) : '') + '</td></tr>' +
       '</table>' +
       '<table class="info-table" style="margin-top:6px;">' +
-      '<tr><td class="label">DATE OF OLDEST EXPENSE CLAIMED <span style="color:red;font-size:7px;">(Red if >2months old)</span></td><td class="value" style="' + (isOldestOver2Months ? 'background:#ffcdd2;color:red;' : '') + '">' + formatDDMMYYYY(oldestDate) + '</td></tr>' +
+      '<tr><td class="label">DATE OF OLDEST EXPENSE CLAIMED <span style="color:red;font-size:9px;">(Red if >2months old)</span></td><td class="value" style="' + (isOldestOver2Months ? 'background:#ffcdd2;color:red;' : '') + '">' + formatDDMMYYYY(oldestDate) + '</td></tr>' +
       '<tr><td class="label">DATE OF NEWEST EXPENSE CLAIMED</td><td class="value">' + formatDDMMYYYY(newestDate) + '</td></tr>' +
       '</table>' +
       // FIXED: 3 columns - Category | Amount (with currency header) | GL Code
@@ -1727,8 +1757,8 @@ export default function BerkeleyExpenseSystem() {
       
       // PAGE 2: Detail - FIXED: totals with currency and commas
       (expensesWithRefs.length > 0 ? '<div class="page">' +
-      '<h2 style="text-align:center;margin-bottom:8px;font-size:11px;">Expense Claim Detail</h2>' +
-      '<p style="margin-bottom:8px;font-size:9px;">Name: <strong>' + userName + '</strong> | Claim: <strong>' + (claimNumber || 'DRAFT') + '</strong> | ' + expensesWithRefs.length + ' items</p>' +
+      '<h2 style="text-align:center;margin-bottom:10px;font-size:14px;">Expense Claim Detail</h2>' +
+      '<p style="margin-bottom:10px;font-size:11px;">Name: <strong>' + userName + '</strong> | Claim: <strong>' + (claimNumber || 'DRAFT') + '</strong> | ' + expensesWithRefs.length + ' items</p>' +
       '<table class="detail-table">' +
       '<thead><tr>' +
       '<th style="width:3%;">REF</th>' +
@@ -1763,8 +1793,24 @@ export default function BerkeleyExpenseSystem() {
     setDownloading(true);
     try {
       const emp = EMPLOYEES.find(e => e.id === claim.user_id);
-      const statements = claim.annotated_statements || (claim.annotated_statement ? [claim.annotated_statement] : []);
-      await generatePDFFromHTML(enrichWithDuplicates(claim.expenses || [], claim.id), claim.user_name, emp?.office, claim.claim_number, claim.submitted_at, statements, emp?.reimburseCurrency || claim.currency, claim.level2_approved_by, claim.level2_approved_at, claim.annotations || []);
+      const annotations = claim.statement_annotations || [];
+      let statements = claim.annotated_statements || (claim.annotated_statement ? [claim.annotated_statement] : []);
+      
+      // Re-render annotation boxes from position data if available
+      // This ensures orange boxes appear even if annotated_statements has clean images
+      if (annotations.length > 0) {
+        const originals = claim.original_statements || statements;
+        if (originals.length > 0) {
+          try {
+            const reRendered = await reRenderStatementAnnotations(originals, annotations);
+            if (reRendered) {
+              statements = originals.map((orig, idx) => reRendered[idx] || orig);
+            }
+          } catch (e) { console.warn('Re-render failed, using stored images:', e); }
+        }
+      }
+      
+      await generatePDFFromHTML(enrichWithDuplicates(claim.expenses || [], claim.id), claim.user_name, emp?.office, claim.claim_number, claim.submitted_at, statements, emp?.reimburseCurrency || claim.currency, claim.level2_approved_by, claim.level2_approved_at, annotations);
     } catch (err) { alert('❌ Failed'); }
     setDownloading(false);
   };
@@ -1772,12 +1818,18 @@ export default function BerkeleyExpenseSystem() {
   const handleDownloadPreviewPDF = async () => {
     setDownloading(true);
     try {
-      // Generate draft claim number: ClaimName - YYYY - XX (what it will be on submit)
       const year = getFinancialYear();
       const claimName = currentUser.claimName || currentUser.name.trim().split(' ').pop();
       const nextSeq = getNextClaimSeq(claims, currentUser.id, claimName, year);
       const draftClaimNumber = `${claimName} - ${year} - ${String(nextSeq).padStart(2, '0')} (Draft)`;
-      await generatePDFFromHTML(pendingExpenses, currentUser.name, currentUser.office, draftClaimNumber, new Date().toISOString(), annotatedStatements, getUserReimburseCurrency(currentUser), null, null, statementAnnotations);
+      let stmts = annotatedStatements;
+      if (statementAnnotations.length > 0 && originalStatementImages.length > 0) {
+        try {
+          const reRendered = await reRenderStatementAnnotations(originalStatementImages, statementAnnotations);
+          if (reRendered) stmts = originalStatementImages.map((orig, idx) => reRendered[idx] || orig);
+        } catch (e) { console.warn('Re-render failed:', e); }
+      }
+      await generatePDFFromHTML(pendingExpenses, currentUser.name, currentUser.office, draftClaimNumber, new Date().toISOString(), stmts, getUserReimburseCurrency(currentUser), null, null, statementAnnotations);
     } catch (err) { alert('❌ Failed'); }
     setDownloading(false);
   };
@@ -2777,7 +2829,7 @@ export default function BerkeleyExpenseSystem() {
     const groupedExpenses = pendingExpenses.reduce((acc, exp) => { if (!acc[exp.category]) acc[exp.category] = []; acc[exp.category].push(exp); return acc; }, {});
     const getCategoryTotal = (cat) => (groupedExpenses[cat] || []).reduce((sum, e) => sum + parseFloat(e.reimbursementAmount || e.amount || 0), 0);
     const workflow = getApprovalWorkflow(currentUser.id, currentUser.office);
-    const [viewImg, setViewImg] = useState(null);
+    const [viewImg, setViewImg] = useState(null); // { src, expId, slot } or null
     const untaggedExpenses = foreignCurrencyExpenses.filter(e => !statementAnnotations.some(a => a.ref === e.ref));
     // Can submit only if: no foreign currency OR (has statement AND no untagged expenses)
     const canSubmit = !hasForeignCurrency || (hasForeignCurrency && annotatedStatements.length > 0 && untaggedExpenses.length === 0);
@@ -2794,7 +2846,7 @@ export default function BerkeleyExpenseSystem() {
               <table className="w-full text-sm"><tbody>{Object.entries(EXPENSE_CATEGORIES).filter(([cat, _]) => getCategoryTotal(cat) > 0).map(([cat, catData]) => (<tr key={cat} className="border-b"><td className="py-2 font-bold text-blue-700 w-10">{catData.icon}</td><td className="py-2">{catData.name}<span className="text-slate-400 text-xs ml-2">GL {catData.gl}</span></td><td className="py-2 text-right font-medium">{userReimburseCurrency} {getCategoryTotal(cat).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td></tr>))}</tbody></table>
               <div className="bg-blue-50 p-4 rounded-xl mt-4 flex justify-between items-center"><span className="font-bold text-lg">Total</span><span className="font-bold text-2xl text-blue-700">{formatCurrency(reimbursementTotal, userReimburseCurrency)}</span></div>
               <h3 className="font-bold mt-6 mb-3">Receipts ({pendingExpenses.length})</h3>
-              <div className="grid grid-cols-3 gap-3">{pendingExpenses.map(exp => (<div key={exp.id} className="border rounded-lg overflow-hidden"><div className="bg-blue-100 p-1 flex justify-between text-xs"><span className="font-bold text-blue-700">{exp.ref}</span><div className="flex gap-1">{exp.isForeignCurrency && <span>💳</span>}{[exp.receiptPreview2, exp.receiptPreview3, exp.receiptPreview4].some(Boolean) && <span>📑{[exp.receiptPreview, exp.receiptPreview2, exp.receiptPreview3, exp.receiptPreview4].filter(Boolean).length}</span>}</div></div>{exp.receiptPreview ? (<img src={exp.receiptPreview} alt={exp.ref} className="w-full h-16 object-cover cursor-pointer" onClick={() => setViewImg(exp.receiptPreview)} />) : (<div className="w-full h-16 bg-slate-100 flex items-center justify-center">📄</div>)}<div className="p-1 bg-slate-50 text-xs"><p className="truncate">{exp.merchant}</p><p className="text-green-700 font-bold">{formatCurrency(exp.reimbursementAmount || exp.amount, userReimburseCurrency)}</p></div></div>))}</div>
+              <div className="grid grid-cols-3 gap-3">{pendingExpenses.map(exp => (<div key={exp.id} className="border rounded-lg overflow-hidden"><div className="bg-blue-100 p-1 flex justify-between text-xs"><span className="font-bold text-blue-700">{exp.ref}</span><div className="flex gap-1">{exp.isForeignCurrency && <span>💳</span>}{[exp.receiptPreview2, exp.receiptPreview3, exp.receiptPreview4].some(Boolean) && <span>📑{[exp.receiptPreview, exp.receiptPreview2, exp.receiptPreview3, exp.receiptPreview4].filter(Boolean).length}</span>}</div></div>{exp.receiptPreview ? (<img src={exp.receiptPreview} alt={exp.ref} className="w-full h-16 object-cover cursor-pointer" onClick={() => setViewImg({ src: exp.receiptPreview, expId: exp.id, slot: 'receiptPreview' })} />) : (<div className="w-full h-16 bg-slate-100 flex items-center justify-center">📄</div>)}<div className="p-1 bg-slate-50 text-xs"><p className="truncate">{exp.merchant}</p><p className="text-green-700 font-bold">{formatCurrency(exp.reimbursementAmount || exp.amount, userReimburseCurrency)}</p></div></div>))}</div>
               {hasForeignCurrency && annotatedStatements.length === 0 && (<div className="mt-4 bg-red-50 border-2 border-red-300 rounded-xl p-4"><p className="text-red-800 font-bold">❌ Statement(s) Required</p><button onClick={() => { setShowPreview(false); setShowStatementUpload(true); }} className="mt-2 bg-amber-500 text-white px-4 py-2 rounded-lg font-semibold text-sm">📎 Upload Statements</button></div>)}
               {annotatedStatements.length > 0 && (<div className="mt-4 bg-green-50 border border-green-200 rounded-xl p-4"><div className="flex justify-between items-start"><p className="text-green-800 font-semibold">✅ {annotatedStatements.length} Statement(s) Annotated</p><div className="flex gap-2"><button onClick={() => { 
                 // Use original images but keep existing annotations (positions now stored as %)
@@ -2802,12 +2854,17 @@ export default function BerkeleyExpenseSystem() {
                 setCurrentStatementIndex(0); 
                 setShowPreview(false); 
                 setShowStatementAnnotator(true); 
-              }} className="text-purple-600 text-sm font-semibold" disabled={originalStatementImages.length === 0}>✏️ Edit Tags</button><button onClick={() => { setShowPreview(false); setShowStatementUpload(true); }} className="text-blue-600 text-sm">➕ Add Statement</button></div></div><div className="flex gap-2 mt-2 overflow-x-auto">{annotatedStatements.map((img, idx) => (<img key={idx} src={img} alt={`Statement ${idx+1}`} className="h-20 rounded cursor-pointer border-2 border-green-300" onClick={() => setViewImg(img)} />))}</div>{untaggedExpenses.length > 0 && (<div className="mt-2 bg-amber-100 border border-amber-300 rounded-lg p-2"><p className="text-amber-800 text-sm">⚠️ Untagged: {untaggedExpenses.map(e => e.ref).join(', ')}</p></div>)}</div>)}
+              }} className="text-purple-600 text-sm font-semibold" disabled={originalStatementImages.length === 0}>✏️ Edit Tags</button><button onClick={() => { setShowPreview(false); setShowStatementUpload(true); }} className="text-blue-600 text-sm">➕ Add Statement</button></div></div><div className="flex gap-2 mt-2 overflow-x-auto">{annotatedStatements.map((img, idx) => (<img key={idx} src={img} alt={`Statement ${idx+1}`} className="h-20 rounded cursor-pointer border-2 border-green-300" onClick={() => setViewImg({ src: img })} />))}</div>{untaggedExpenses.length > 0 && (<div className="mt-2 bg-amber-100 border border-amber-300 rounded-lg p-2"><p className="text-amber-800 text-sm">⚠️ Untagged: {untaggedExpenses.map(e => e.ref).join(', ')}</p></div>)}</div>)}
             </div>
           </div>
           <div className="p-4 border-t bg-slate-50 flex gap-3 shrink-0"><button onClick={handleClosePreview} className="flex-1 py-3 rounded-xl border-2 font-semibold">← Back</button><button onClick={handleSubmitClaim} disabled={!canSubmit || loading} className={`flex-[2] py-3 rounded-xl font-semibold ${canSubmit && !loading ? 'bg-green-600 text-white' : 'bg-slate-300 text-slate-500'}`}>{editingReturnedClaimId ? (loading ? '⏳...' : '🔄 Address & Resubmit') : submitButtonText}</button></div>
         </div>
-        {viewImg && <ImageViewer src={viewImg} onClose={() => setViewImg(null)} />}
+        {viewImg && <ImageViewer src={viewImg.src} onClose={() => setViewImg(null)} onRotate={viewImg.expId ? async (rotated) => {
+              const newExps = expenses.map(e => e.id === viewImg.expId ? { ...e, [viewImg.slot]: rotated } : e);
+              setExpenses(newExps);
+              setViewImg(prev => prev ? { ...prev, src: rotated } : null);
+              await saveToServer(newExps, annotatedStatements, statementAnnotations, originalStatementImages);
+            } : undefined} />}
       </div>
     );
   };
@@ -2819,18 +2876,40 @@ export default function BerkeleyExpenseSystem() {
       if (!isNaN(numA) && !isNaN(numB)) return numA - numB;
       return (a.ref || '999').localeCompare(b.ref || '999', undefined, { numeric: true });
     });
-    // Dynamic duplicate check against ALL claims
     const sortedExpenses = enrichWithDuplicates(rawSorted, claim.id);
-    const [notes, setNotes] = useState({}); // idx -> note text (internal, persists in PDF)
-    const [returnReasons, setReturnReasons] = useState({}); // idx -> return reason (triggers Return button)
-    const [addressed, setAddressed] = useState({}); // idx -> true (marks previous return as addressed, stripped on final approval)
-    const [editingPrevNotes, setEditingPrevNotes] = useState({}); // idx -> true when editing previous notes
-    const [editedPrevNotes, setEditedPrevNotes] = useState({}); // idx -> edited adminNotes string
-    const [expenseEdits, setExpenseEdits] = useState({}); // idx -> { field: value } for editing approved claims
-    const [deletedExpenses, setDeletedExpenses] = useState(new Set()); // idx of expenses to remove
+    const [notes, setNotes] = useState({});
+    const [returnReasons, setReturnReasons] = useState({});
+    const [addressed, setAddressed] = useState({});
+    const [editingPrevNotes, setEditingPrevNotes] = useState({});
+    const [editedPrevNotes, setEditedPrevNotes] = useState({});
+    const [expenseEdits, setExpenseEdits] = useState({});
+    const [deletedExpenses, setDeletedExpenses] = useState(new Set());
+    const [reviewViewImg, setReviewViewImg] = useState(null); // { src, expIdx, slot } for image viewer
     
     const getExpField = (idx, field, defaultVal) => expenseEdits[idx]?.[field] !== undefined ? expenseEdits[idx][field] : defaultVal;
     const setExpField = (idx, field, value) => setExpenseEdits(prev => ({ ...prev, [idx]: { ...(prev[idx] || {}), [field]: value } }));
+    
+    // Handle image rotation in review
+    const handleReviewRotate = async (rotatedSrc) => {
+      if (!reviewViewImg) return;
+      const { expIdx, slot } = reviewViewImg;
+      const exp = sortedExpenses[expIdx];
+      if (!exp) return;
+      // Update the expense in the claim directly
+      const updatedExpenses = [...(claim.expenses || [])];
+      const targetExp = updatedExpenses.find(e => e.id === exp.id || e.ref === exp.ref);
+      if (targetExp) {
+        targetExp[slot] = rotatedSrc;
+        try {
+          const { error } = await supabase.from('claims').update({ expenses: updatedExpenses }).eq('id', claim.id);
+          if (!error) {
+            // Update local view
+            setReviewViewImg(prev => prev ? { ...prev, src: rotatedSrc } : null);
+            await loadClaims();
+          }
+        } catch (err) { console.error('Rotate save failed:', err); }
+      }
+    };
     const [saving, setSaving] = useState(false);
     const [showApproveConfirm, setShowApproveConfirm] = useState(false);
     const reviewerFirstName = currentUser.name.split(' ')[0];
@@ -3011,6 +3090,40 @@ export default function BerkeleyExpenseSystem() {
                     {exp.mileageDistance && <div><span className="font-semibold text-slate-500">Mileage:</span> {exp.mileageFrom && <span>{exp.mileageFrom} → {exp.mileageTo} | </span>}{exp.mileageDistance} {exp.mileageUnit || 'km'}</div>}
                   </div>
                   
+                  {/* Receipt thumbnails */}
+                  {(() => {
+                    const receipts = [
+                      { src: exp.receiptPreview, slot: 'receiptPreview', label: 'Receipt' },
+                      { src: exp.receiptPreview2, slot: 'receiptPreview2', label: 'Receipt 2' },
+                      { src: exp.receiptPreview3, slot: 'receiptPreview3', label: 'Receipt 3' },
+                      { src: exp.receiptPreview4, slot: 'receiptPreview4', label: 'Receipt 4' }
+                    ].filter(r => r.src);
+                    if (receipts.length === 0) return null;
+                    return (
+                      <div className="flex gap-2 mb-3 overflow-x-auto">
+                        {receipts.map((r, ri) => (
+                          <div key={ri} className="relative flex-shrink-0">
+                            <img src={r.src} alt={r.label} className="h-16 w-16 object-cover rounded-lg border-2 border-slate-200 cursor-pointer hover:border-blue-400" 
+                              onClick={() => setReviewViewImg({ src: r.src, expIdx: idx, slot: r.slot })} />
+                            {isEditable && (
+                              <button onClick={async (e) => {
+                                e.stopPropagation();
+                                if (!window.confirm(`Delete this image from ${exp.ref}?`)) return;
+                                const updatedExpenses = [...(claim.expenses || [])];
+                                const target = updatedExpenses.find(x => x.id === exp.id || x.ref === exp.ref);
+                                if (target) { target[r.slot] = null; }
+                                try {
+                                  await supabase.from('claims').update({ expenses: updatedExpenses }).eq('id', claim.id);
+                                  await loadClaims();
+                                } catch (err) { console.error('Delete image failed:', err); }
+                              }} className="absolute -top-1 -right-1 bg-red-500 text-white w-5 h-5 rounded-full text-xs flex items-center justify-center hover:bg-red-600">✕</button>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    );
+                  })()}
+                  
                   {/* Previous notes and return reasons - shown separately */}
                   {exp.adminNotes && (() => {
                     const lines = exp.adminNotes.split('\n').filter(l => l.trim());
@@ -3132,6 +3245,9 @@ export default function BerkeleyExpenseSystem() {
               </div>
             </div>
           )}
+          
+          {/* Image viewer with rotate for receipts */}
+          {reviewViewImg && <ImageViewer src={reviewViewImg.src} onClose={() => setReviewViewImg(null)} onRotate={handleReviewRotate} />}
         </div>
       </div>
     );
@@ -5311,7 +5427,7 @@ export default function BerkeleyExpenseSystem() {
       })()}
       {showPreview && <PreviewClaimModal />}
       {showStatementUpload && (
-        <StatementUploadModal 
+        <StatementUploadModal
           existingImages={originalStatementImages}
           userId={currentUser?.id}
           onClose={() => setShowStatementUpload(false)}
