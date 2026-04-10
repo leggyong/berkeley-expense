@@ -475,21 +475,22 @@ const compressImage = (dataUrl, maxWidth = 1200, quality = 0.7) => {
 // Upload image to Supabase Storage and return URL
 const uploadImageToStorage = async (dataUrl, userId, type = 'receipt') => {
   try {
-    // First compress the image
-    const compressed = await compressImage(dataUrl);
+    // Only compress statements (screenshots, already clear). Receipts upload at full quality.
+    const isStatement = type === 'statement' || type === 'original';
+    const imageData = isStatement ? await compressImage(dataUrl) : dataUrl;
     
     // Generate unique filename
     const timestamp = Date.now();
     const random = Math.random().toString(36).substring(7);
-    const filename = `${userId}/${type}_${timestamp}_${random}.jpg`;
+    const ext = isStatement ? 'jpg' : 'jpg';
+    const filename = `${userId}/${type}_${timestamp}_${random}.${ext}`;
     
     // Upload to storage bucket named 'receipts'
-    const { data, error } = await supabase.storage.from('Receipts').upload(filename, compressed);
+    const { data, error } = await supabase.storage.from('Receipts').upload(filename, imageData);
     
     if (error) {
       console.error('Storage upload failed:', error);
-      // Fallback: return compressed base64 if storage fails
-      return compressed;
+      return isStatement ? imageData : dataUrl;
     }
     
     // Get public URL
@@ -499,8 +500,7 @@ const uploadImageToStorage = async (dataUrl, userId, type = 'receipt') => {
     return urlData.publicUrl;
   } catch (err) {
     console.error('Upload error:', err);
-    // Fallback: return compressed base64 if upload fails
-    return await compressImage(dataUrl);
+    return isStatement ? await compressImage(dataUrl) : dataUrl;
   }
 };
 
@@ -627,7 +627,7 @@ const ImageViewer = ({ src, onClose, onRotate }) => {
       ctx.translate(canvas.width / 2, canvas.height / 2);
       ctx.rotate(Math.PI / 2);
       ctx.drawImage(img, -img.naturalWidth / 2, -img.naturalHeight / 2);
-      const rotated = canvas.toDataURL('image/jpeg', 0.85);
+      const rotated = canvas.toDataURL('image/jpeg', 1.0);
       setCurrentSrc(rotated);
       if (onRotate) onRotate(rotated);
     } catch (err) { console.error('Rotate failed:', err); }
@@ -2622,8 +2622,7 @@ export default function BerkeleyExpenseSystem() {
           if (receiptNum === 1) setStep(2);
         } catch (err) {
           console.error('Upload failed:', err);
-          const compressed = await compressImage(event.target.result);
-          setter(compressed);
+          setter(event.target.result); // Store raw image if upload fails
           if (receiptNum === 1) setStep(2);
         }
         setIsUploading(false);
@@ -2897,13 +2896,25 @@ export default function BerkeleyExpenseSystem() {
       const { type, expIdx, slot, stmtIdx } = reviewViewImg;
       
       if (type === 'statement') {
-        // Rotate a credit card/bank statement
+        // Rotate clean original, save as both original and annotated
         const updatedAnnotated = [...(claim.annotated_statements || [])];
         const updatedOriginals = [...(claim.original_statements || updatedAnnotated)];
         if (stmtIdx >= 0 && stmtIdx < updatedAnnotated.length) updatedAnnotated[stmtIdx] = rotatedSrc;
         if (stmtIdx >= 0 && stmtIdx < updatedOriginals.length) updatedOriginals[stmtIdx] = rotatedSrc;
+        // Transform annotation positions for 90° clockwise rotation
+        // (xPct, yPct, wPct, hPct) → (1 - yPct - hPct, xPct, hPct, wPct)
+        const updatedAnnotations = (claim.statement_annotations || []).map(a => {
+          if ((a.statementIndex || 0) !== stmtIdx) return a;
+          return {
+            ...a,
+            xPct: 1 - (a.yPct || 0) - (a.heightPct || 0),
+            yPct: a.xPct || 0,
+            widthPct: a.heightPct || 0,
+            heightPct: a.widthPct || 0
+          };
+        });
         try {
-          const updateData = { annotated_statements: updatedAnnotated };
+          const updateData = { annotated_statements: updatedAnnotated, statement_annotations: updatedAnnotations };
           if (claim.original_statements) updateData.original_statements = updatedOriginals;
           await supabase.from('claims').update(updateData).eq('id', claim.id);
           setReviewViewImg(prev => prev ? { ...prev, src: rotatedSrc } : null);
@@ -3041,6 +3052,7 @@ export default function BerkeleyExpenseSystem() {
             {/* Credit Card / Bank Statements */}
             {(() => {
               const stmts = claim.annotated_statements || (claim.annotated_statement ? [claim.annotated_statement] : []);
+              const originals = claim.original_statements || stmts;
               if (stmts.length === 0) return null;
               return (
                 <div className="mb-3 bg-amber-50 border border-amber-200 rounded-xl p-3">
@@ -3048,7 +3060,7 @@ export default function BerkeleyExpenseSystem() {
                   <div className="flex gap-2 overflow-x-auto">
                     {stmts.map((img, si) => (
                       <img key={si} src={img} alt={`Statement ${si + 1}`} className="h-20 w-20 object-cover rounded-lg border-2 border-amber-300 cursor-pointer hover:border-amber-500 flex-shrink-0" 
-                        onClick={() => setReviewViewImg({ src: img, type: 'statement', stmtIdx: si })} />
+                        onClick={() => setReviewViewImg({ src: originals[si] || img, type: 'statement', stmtIdx: si })} />
                     ))}
                   </div>
                 </div>
