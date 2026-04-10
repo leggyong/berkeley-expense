@@ -2894,22 +2894,35 @@ export default function BerkeleyExpenseSystem() {
     // Handle image rotation in review
     const handleReviewRotate = async (rotatedSrc) => {
       if (!reviewViewImg) return;
-      const { expIdx, slot } = reviewViewImg;
-      const exp = sortedExpenses[expIdx];
-      if (!exp) return;
-      // Update the expense in the claim directly
-      const updatedExpenses = [...(claim.expenses || [])];
-      const targetExp = updatedExpenses.find(e => e.id === exp.id || e.ref === exp.ref);
-      if (targetExp) {
-        targetExp[slot] = rotatedSrc;
+      const { type, expIdx, slot, stmtIdx } = reviewViewImg;
+      
+      if (type === 'statement') {
+        // Rotate a credit card/bank statement
+        const updatedAnnotated = [...(claim.annotated_statements || [])];
+        const updatedOriginals = [...(claim.original_statements || updatedAnnotated)];
+        if (stmtIdx >= 0 && stmtIdx < updatedAnnotated.length) updatedAnnotated[stmtIdx] = rotatedSrc;
+        if (stmtIdx >= 0 && stmtIdx < updatedOriginals.length) updatedOriginals[stmtIdx] = rotatedSrc;
         try {
-          const { error } = await supabase.from('claims').update({ expenses: updatedExpenses }).eq('id', claim.id);
-          if (!error) {
-            // Update local view
+          const updateData = { annotated_statements: updatedAnnotated };
+          if (claim.original_statements) updateData.original_statements = updatedOriginals;
+          await supabase.from('claims').update(updateData).eq('id', claim.id);
+          setReviewViewImg(prev => prev ? { ...prev, src: rotatedSrc } : null);
+          await loadClaims();
+        } catch (err) { console.error('Statement rotate failed:', err); }
+      } else {
+        // Rotate a receipt image
+        const exp = sortedExpenses[expIdx];
+        if (!exp) return;
+        const updatedExpenses = [...(claim.expenses || [])];
+        const targetExp = updatedExpenses.find(e => e.id === exp.id || e.ref === exp.ref);
+        if (targetExp) {
+          targetExp[slot] = rotatedSrc;
+          try {
+            await supabase.from('claims').update({ expenses: updatedExpenses }).eq('id', claim.id);
             setReviewViewImg(prev => prev ? { ...prev, src: rotatedSrc } : null);
             await loadClaims();
-          }
-        } catch (err) { console.error('Rotate save failed:', err); }
+          } catch (err) { console.error('Rotate save failed:', err); }
+        }
       }
     };
     const [saving, setSaving] = useState(false);
@@ -3025,6 +3038,22 @@ export default function BerkeleyExpenseSystem() {
                 {isEditable ? '✏️ This claim is submitted for payment. You can edit expenses, add notes, or return it.' : '📁 This claim is finalized. You can add notes or return it for changes.'}
               </div>
             )}
+            {/* Credit Card / Bank Statements */}
+            {(() => {
+              const stmts = claim.annotated_statements || (claim.annotated_statement ? [claim.annotated_statement] : []);
+              if (stmts.length === 0) return null;
+              return (
+                <div className="mb-3 bg-amber-50 border border-amber-200 rounded-xl p-3">
+                  <p className="text-xs font-semibold text-amber-700 mb-2">💳 Credit Card / Bank Statements ({stmts.length})</p>
+                  <div className="flex gap-2 overflow-x-auto">
+                    {stmts.map((img, si) => (
+                      <img key={si} src={img} alt={`Statement ${si + 1}`} className="h-20 w-20 object-cover rounded-lg border-2 border-amber-300 cursor-pointer hover:border-amber-500 flex-shrink-0" 
+                        onClick={() => setReviewViewImg({ src: img, type: 'statement', stmtIdx: si })} />
+                    ))}
+                  </div>
+                </div>
+              );
+            })()}
             {sortedExpenses.map((exp, idx) => {
               const cat = EXPENSE_CATEGORIES[exp.category] || {};
               const isOld = isOlderThan2Months(exp.date, claim.level2_approved_at || claim.submitted_at);
@@ -3106,7 +3135,7 @@ export default function BerkeleyExpenseSystem() {
                         {receipts.map((r, ri) => (
                           <div key={ri} className="relative flex-shrink-0">
                             <img src={r.src} alt={r.label} className="h-16 w-16 object-cover rounded-lg border-2 border-slate-200 cursor-pointer hover:border-blue-400" 
-                              onClick={() => setReviewViewImg({ src: r.src, expIdx: idx, slot: r.slot })} />
+                              onClick={() => setReviewViewImg({ src: r.src, type: 'receipt', expIdx: idx, slot: r.slot })} />
                             {isEditable && (
                               <button onClick={async (e) => {
                                 e.stopPropagation();
