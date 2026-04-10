@@ -3421,12 +3421,12 @@ export default function BerkeleyExpenseSystem() {
         <div className="bg-white rounded-2xl shadow-lg p-6"><div className="flex flex-wrap gap-3"><button onClick={() => setShowAddExpense(true)} className="bg-blue-600 text-white px-6 py-3 rounded-xl font-semibold shadow-lg">📸 Add Receipt</button>{currentUser.mileageRate && <button onClick={() => setShowMileageModal(true)} className="bg-green-600 text-white px-6 py-3 rounded-xl font-semibold shadow-lg">📍 Mileage</button>}{pendingExpenses.length > 0 && (<button onClick={() => setShowPreview(true)} className="border-2 border-green-500 text-green-600 px-6 py-3 rounded-xl font-semibold">📋 Preview ({pendingExpenses.length})</button>)}{activeClaimTab === 'current' && <button onClick={handleManualSync} disabled={loading} className="border-2 border-slate-300 text-slate-600 px-4 py-3 rounded-xl font-semibold">{loading ? '⏳' : '🔄'} Sync</button>}</div></div>
         <div className="bg-white rounded-2xl shadow-lg p-6">
           <h3 className="font-bold text-slate-800 mb-4">{activeClaimTab === 'current' ? '📋 Pending Expenses (sorted by date)' : `📋 ${activeReturnedClaim?.claim_number || 'Returned'} Expenses`}</h3>
-          {sortedExpenses.some(exp => isOlderThan2Months(exp.date, claim.level2_approved_at || claim.submitted_at)) && (
+          {(() => { const rc = editingReturnedClaimId ? claims.find(c => c.id === editingReturnedClaimId) : null; const refDate = rc ? (rc.level2_approved_at || rc.submitted_at) : undefined; return sortedExpenses.some(exp => isOlderThan2Months(exp.date, refDate)); })() && (
             <div className="bg-red-100 border-2 border-red-400 rounded-xl p-3 mb-4">
               <p className="text-red-700 font-semibold text-sm">🚨 Some receipts are over 2 months old and may not be reimbursable!</p>
             </div>
           )}
-          {sortedExpenses.some(exp => isApproaching2Months(exp.date)) && !sortedExpenses.some(exp => isOlderThan2Months(exp.date, claim.level2_approved_at || claim.submitted_at)) && (
+          {(() => { const rc = editingReturnedClaimId ? claims.find(c => c.id === editingReturnedClaimId) : null; const refDate = rc ? (rc.level2_approved_at || rc.submitted_at) : undefined; return sortedExpenses.some(exp => isApproaching2Months(exp.date)) && !sortedExpenses.some(exp => isOlderThan2Months(exp.date, refDate)); })() && (
             <div className="bg-amber-100 border-2 border-amber-400 rounded-xl p-3 mb-4">
               <p className="text-amber-700 font-semibold text-sm">⏰ Some receipts are approaching 2 months old - submit soon!</p>
             </div>
@@ -3434,7 +3434,8 @@ export default function BerkeleyExpenseSystem() {
           {sortedExpenses.length === 0 ? (<div className="text-center py-12 text-slate-400">📭 No {activeClaimTab === 'current' ? 'pending' : ''} expenses</div>) : (
             <div className="space-y-2">{sortedExpenses.map((exp, idx) => {
               const flaggedRefs = activeReturnedClaim?.flagged_expenses || [];
-              const isOld = isOlderThan2Months(exp.date, editingReturnedClaimId ? (() => { const rc = claims.find(c => c.id === editingReturnedClaimId); return rc?.level2_approved_at || rc?.submitted_at; })() : undefined); 
+              const returnedClaim = editingReturnedClaimId ? claims.find(c => c.id === editingReturnedClaimId) : null;
+              const isOld = isOlderThan2Months(exp.date, returnedClaim ? (returnedClaim.level2_approved_at || returnedClaim.submitted_at) : undefined); 
               const isApproaching = isApproaching2Months(exp.date); 
               const daysLeft = getDaysUntil2Months(exp.date);
               const isFlagged = flaggedRefs.includes(exp.ref);
