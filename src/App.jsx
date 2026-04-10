@@ -515,7 +515,7 @@ const APPROVAL_WORKFLOWS = {
   'SHA': { level1: 306, level2: 303, level1Name: 'Cathy Liu', level2Name: 'Elsa Huang' },
   'CHE': { level1: 306, level2: 302, level1Name: 'Cathy Liu', level2Name: 'Eddy Tao' },
   'SIN': { level1: 805, level2: 803, level1Name: 'Ann Low', level2Name: 'Karen Chia' },
-  'BKK': { level1: 905, level2: 803, level1Name: 'Bow', level2Name: 'Karen Chia' },
+  'BKK': { level1: 805, level2: 803, level1Name: 'Ann Low', level2Name: 'Karen Chia' },
   'MYS': { level1: 805, level2: 803, level1Name: 'Ann Low', level2Name: 'Karen Chia' },
   'DXB': { level1: 1002, level2: 1001, level1Name: 'Christine Dimaranan', level2Name: 'Christopher Frame' },
   'LON': { level1: 1002, level2: 1001, level1Name: 'Christine Dimaranan', level2Name: 'Christopher Frame' },
@@ -563,7 +563,6 @@ const SENIOR_STAFF_ROUTING = {
   306: { level1: 303, level2: null, level1Name: 'Elsa Huang', level2Name: null, singleLevel: true },
   505: { level1: 502, level2: null, level1Name: 'Anthony Jurenko', level2Name: null, singleLevel: true },
   805: { level1: 803, level2: null, level1Name: 'Karen Chia', level2Name: null, singleLevel: true },
-  905: { level1: 803, level2: null, level1Name: 'Karen Chia', level2Name: null, singleLevel: true },
   1002: { level1: 1001, level2: null, level1Name: 'Christopher Frame', level2Name: null, singleLevel: true },
   // Kareen → Cathy He (single level)
   812: { level1: 804, level2: null, level1Name: 'Cathy He', level2Name: null, singleLevel: true },
@@ -1576,7 +1575,7 @@ export default function BerkeleyExpenseSystem() {
           const cat = EXPENSE_CATEGORIES[catKey];
           if (!cat) return;
           const amt = getCategoryTotal(catKey);
-          html += '<tr><td style="padding-left:20px;">' + cat.name.toUpperCase() + '</td><td style="text-align:right;">' + fmtAmt(amt) + '</td><td style="text-align:right;color:#666;">GL ' + cat.gl + '</td></tr>';
+          html += '<tr><td style="padding-left:15px;font-size:8px;">' + cat.name.toUpperCase() + '</td><td style="text-align:right;font-size:8px;">' + fmtAmt(amt) + '</td><td style="text-align:right;color:#666;font-size:8px;">GL ' + cat.gl + '</td></tr>';
         });
       });
       return html;
@@ -1701,23 +1700,26 @@ export default function BerkeleyExpenseSystem() {
 
     const html = '<!DOCTYPE html><html><head><title>Expense Claim</title><style>' +
       '*{margin:0;padding:0;box-sizing:border-box;}' +
-      'body{font-family:Arial,sans-serif;font-size:12px;}' +
-      '@page{margin:10mm;size:A4;}' +
-      '.page{page-break-after:always;padding:5mm;}' +
+      'body{font-family:Arial,sans-serif;font-size:10px;}' +
+      '@page{margin:8mm;size:A4;}' +
+      '@page:first{size:A4 portrait;}' +
+      '.page{page-break-after:always;padding:4mm;}' +
       '.page:last-child{page-break-after:avoid;}' +
-      'h1{text-align:center;font-size:18px;font-weight:bold;margin-bottom:15px;}' +
-      '.info-table{width:100%;border-collapse:collapse;margin-bottom:10px;}' +
-      '.info-table td{padding:8px 12px;border:1px solid #ccc;font-size:13px;}' +
+      'h1{text-align:center;font-size:14px;font-weight:bold;margin-bottom:8px;}' +
+      '.info-table{width:100%;border-collapse:collapse;margin-bottom:5px;}' +
+      '.info-table td{padding:4px 8px;border:1px solid #ccc;font-size:11px;}' +
       '.info-table .label{background:#f5f5f5;font-weight:bold;width:40%;}' +
       '.info-table .value{background:#fffde7;}' +
-      '.summary-table{width:100%;border-collapse:collapse;margin-top:10px;}' +
-      '.summary-table th,.summary-table td{padding:6px 10px;border:1px solid #ccc;font-size:12px;}' +
-      '.summary-table th{background:#e0e0e0;text-align:left;}' +
-      '.group-row td{background:#f5f5f5;font-weight:bold;}' +
-      '.total-row td{background:#000;color:#fff;font-weight:bold;font-size:14px;}' +
-      '.detail-table{width:100%;border-collapse:collapse;font-size:10px;}' +
-      '.detail-table th,.detail-table td{border:1px solid #ccc;padding:5px 6px;}' +
-      '.detail-table th{background:#e8eaf6;text-align:left;font-size:10px;}' +
+      '.summary-table{width:100%;border-collapse:collapse;margin-top:5px;}' +
+      '.summary-table th,.summary-table td{padding:2px 6px;border:1px solid #ccc;font-size:9px;}' +
+      '.summary-table th{background:#e0e0e0;text-align:left;font-size:10px;}' +
+      '.group-row td{background:#f5f5f5;font-weight:bold;font-size:9px;}' +
+      '.total-row td{background:#000;color:#fff;font-weight:bold;font-size:11px;}' +
+      '.detail-section{padding:4mm;}' +
+      '.detail-table{width:100%;border-collapse:collapse;font-size:9px;}' +
+      '.detail-table th,.detail-table td{border:1px solid #ccc;padding:4px 5px;}' +
+      '.detail-table th{background:#e8eaf6;text-align:left;font-size:9px;}' +
+      '.detail-table tfoot{display:table-row-group;}' +
       '.receipt-page{padding:3mm;}' +
       '.receipt-header{background:#1565c0;color:#fff;padding:8px;display:flex;align-items:flex-start;border-radius:4px;margin-bottom:6px;}' +
       '.receipt-ref{font-size:28px;font-weight:bold;margin-right:15px;}' +
@@ -1744,21 +1746,21 @@ export default function BerkeleyExpenseSystem() {
       '<tr><td class="label">DATE OF APPROVAL (dd/mm/yyyy)</td><td class="value">' + (level2ApprovedAt ? formatDDMMYYYY(new Date(level2ApprovedAt)) : '') + '</td></tr>' +
       '</table>' +
       '<table class="info-table" style="margin-top:6px;">' +
-      '<tr><td class="label">DATE OF OLDEST EXPENSE CLAIMED <span style="color:red;font-size:9px;">(Red if >2months old)</span></td><td class="value" style="' + (isOldestOver2Months ? 'background:#ffcdd2;color:red;' : '') + '">' + formatDDMMYYYY(oldestDate) + '</td></tr>' +
+      '<tr><td class="label">DATE OF OLDEST EXPENSE CLAIMED <span style="color:red;font-size:8px;">(Red if >2mo old)</span></td><td class="value" style="' + (isOldestOver2Months ? 'background:#ffcdd2;color:red;' : '') + '">' + formatDDMMYYYY(oldestDate) + '</td></tr>' +
       '<tr><td class="label">DATE OF NEWEST EXPENSE CLAIMED</td><td class="value">' + formatDDMMYYYY(newestDate) + '</td></tr>' +
       '</table>' +
       // FIXED: 3 columns - Category | Amount (with currency header) | GL Code
       '<table class="summary-table">' +
-      '<thead><tr><th style="background:#e0e0e0;">CLAIM SUMMARY</th><th style="text-align:right;background:#e0e0e0;">' + reimburseCurrency + '</th><th style="text-align:right;background:#e0e0e0;"></th></tr></thead>' +
+      '<thead><tr><th style="background:#e0e0e0;">CLAIM SUMMARY</th><th style="text-align:right;background:#e0e0e0;width:15%;">' + reimburseCurrency + '</th><th style="text-align:right;background:#e0e0e0;width:12%;"></th></tr></thead>' +
       '<tbody>' + buildCategorySummary() + '</tbody>' +
       '<tfoot><tr class="total-row"><td>CLAIM TOTAL</td><td style="text-align:right;">' + fmtAmt(totalAmount) + '</td><td></td></tr></tfoot>' +
       '</table>' +
       '</div>' +
       
-      // PAGE 2: Detail - FIXED: totals with currency and commas
-      (expensesWithRefs.length > 0 ? '<div class="page">' +
-      '<h2 style="text-align:center;margin-bottom:10px;font-size:14px;">Expense Claim Detail</h2>' +
-      '<p style="margin-bottom:10px;font-size:11px;">Name: <strong>' + userName + '</strong> | Claim: <strong>' + (claimNumber || 'DRAFT') + '</strong> | ' + expensesWithRefs.length + ' items</p>' +
+      // DETAIL TABLE: flows naturally across pages, total only at the end
+      (expensesWithRefs.length > 0 ? '<div class="detail-section" style="page-break-before:always;">' +
+      '<h2 style="text-align:center;margin-bottom:8px;font-size:13px;">Expense Claim Detail</h2>' +
+      '<p style="margin-bottom:8px;font-size:10px;">Name: <strong>' + userName + '</strong> | Claim: <strong>' + (claimNumber || 'DRAFT') + '</strong> | ' + expensesWithRefs.length + ' items</p>' +
       '<table class="detail-table">' +
       '<thead><tr>' +
       '<th style="width:3%;">REF</th>' +
@@ -1770,14 +1772,14 @@ export default function BerkeleyExpenseSystem() {
       '<th style="width:9%;text-align:right;">FX RATE</th>' +
       '<th style="width:12%;text-align:right;">GBP<br>APPROX</th>' +
       '</tr></thead>' +
-      '<tbody>' + buildDetailTable() + '</tbody>' +
-      '<tfoot><tr style="background:#1565c0;color:#fff;font-weight:bold;">' +
+      '<tbody>' + buildDetailTable() +
+      '<tr style="background:#1565c0;color:#fff;font-weight:bold;">' +
       '<td colspan="4">TOTAL</td>' +
       '<td></td>' +
       '<td style="text-align:right;">' + reimburseCurrency + ' ' + fmtAmt(totalAmount) + '</td>' +
       '<td></td>' +
       '<td style="text-align:right;">£' + fmtAmt(totalGBP) + '</td>' +
-      '</tr></tfoot>' +
+      '</tr></tbody>' +
       '</table></div>' : '') +
       
       backchargeReportHTML + receiptsHTML + statementsHTML +
