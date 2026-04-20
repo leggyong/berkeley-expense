@@ -515,7 +515,7 @@ const APPROVAL_WORKFLOWS = {
   'SHA': { level1: 306, level2: 303, level1Name: 'Cathy Liu', level2Name: 'Elsa Huang' },
   'CHE': { level1: 306, level2: 302, level1Name: 'Cathy Liu', level2Name: 'Eddy Tao' },
   'SIN': { level1: 805, level2: 803, level1Name: 'Ann Low', level2Name: 'Karen Chia' },
-  'BKK': { level1: 805, level2: 803, level1Name: 'Ann Low', level2Name: 'Karen Chia' },
+  'BKK': { level1: 905, level2: 805, level3: 803, level1Name: 'Bow', level2Name: 'Ann Low', level3Name: 'Karen Chia' },
   'MYS': { level1: 805, level2: 803, level1Name: 'Ann Low', level2Name: 'Karen Chia' },
   'DXB': { level1: 1002, level2: 1001, level1Name: 'Christine Dimaranan', level2Name: 'Christopher Frame' },
   'LON': { level1: 1002, level2: 1001, level1Name: 'Christine Dimaranan', level2Name: 'Christopher Frame' },
@@ -563,6 +563,7 @@ const SENIOR_STAFF_ROUTING = {
   306: { level1: 303, level2: null, level1Name: 'Elsa Huang', level2Name: null, singleLevel: true },
   505: { level1: 502, level2: null, level1Name: 'Anthony Jurenko', level2Name: null, singleLevel: true },
   805: { level1: 803, level2: null, level1Name: 'Karen Chia', level2Name: null, singleLevel: true },
+  905: { level1: 805, level2: 803, level1Name: 'Ann Low', level2Name: 'Karen Chia' },
   1002: { level1: 1001, level2: null, level1Name: 'Christopher Frame', level2Name: null, singleLevel: true },
   // Kareen → Cathy He (single level)
   812: { level1: 804, level2: null, level1Name: 'Cathy He', level2Name: null, singleLevel: true },
@@ -583,6 +584,7 @@ const canUserReviewClaim = (userId, claim) => {
   const level = claim.approval_level || 1;
   if (level === 1 && claim.level1_approver === userId) return true;
   if (level === 2 && claim.level2_approver === userId) return true;
+  if (level === 3 && claim.level3_approver === userId) return true;
   return false;
 };
 
@@ -603,6 +605,10 @@ const getClaimStatusText = (claim) => {
   }
   if (claim.status === 'pending_level2') {
     const approverName = getApproverName(claim.level2_approver);
+    return `Pending ${approverName}'s Review`;
+  }
+  if (claim.status === 'pending_level3') {
+    const approverName = getApproverName(claim.level3_approver);
     return `Pending ${approverName}'s Review`;
   }
   return claim.status;
@@ -1487,7 +1493,7 @@ export default function BerkeleyExpenseSystem() {
   const foreignCurrencyExpenses = pendingExpenses.filter(e => e.isForeignCurrency);
   const hasForeignCurrency = foreignCurrencyExpenses.length > 0;
   
-  const getReviewableClaims = () => { if (!currentUser) return []; return claims.filter(c => (c.status === 'pending_review' || c.status === 'pending_level2') && canUserReviewClaim(currentUser.id, c)); };
+  const getReviewableClaims = () => { if (!currentUser) return []; return claims.filter(c => (c.status === 'pending_review' || c.status === 'pending_level2' || c.status === 'pending_level3') && canUserReviewClaim(currentUser.id, c)); };
   
   // Dynamic duplicate check: enrich a claim's expenses with duplicate info by scanning ALL claims
   const enrichWithDuplicates = (claimExpenses, claimId) => {
@@ -1812,7 +1818,9 @@ export default function BerkeleyExpenseSystem() {
         }
       }
       
-      await generatePDFFromHTML(enrichWithDuplicates(claim.expenses || [], claim.id), claim.user_name, emp?.office, claim.claim_number, claim.submitted_at, statements, emp?.reimburseCurrency || claim.currency, claim.level2_approved_by, claim.level2_approved_at, annotations);
+      const finalApprover = claim.level3_approved_by || claim.level2_approved_by;
+      const finalApprovalDate = claim.level3_approved_at || claim.level2_approved_at;
+      await generatePDFFromHTML(enrichWithDuplicates(claim.expenses || [], claim.id), claim.user_name, emp?.office, claim.claim_number, claim.submitted_at, statements, emp?.reimburseCurrency || claim.currency, finalApprover, finalApprovalDate, annotations);
     } catch (err) { alert('❌ Failed'); }
     setDownloading(false);
   };
@@ -2038,6 +2046,7 @@ export default function BerkeleyExpenseSystem() {
           approval_level: isSelfSubmit ? 2 : 1,
           level1_approver: workflow?.level1, 
           level2_approver: workflow?.level2,
+          level3_approver: workflow?.level3 || null,
           annotated_statement: annotatedStatements[0] || null,
           expenses: expensesWithAnnotations,
           submitted_at: new Date().toISOString()
@@ -2133,8 +2142,10 @@ export default function BerkeleyExpenseSystem() {
     try {
       const level = claim.approval_level || 1;
       const workflow = SENIOR_STAFF_ROUTING[claim.user_id];
+      const fullWorkflow = getApprovalWorkflow(claim.user_id, claim.office_code);
       const isSingleLevel = workflow?.singleLevel === true;
       const externalNote = workflow?.externalApproval;
+      const hasLevel3 = !!claim.level3_approver;
       
       // Helper: strip return reasons from expenses on final approval (keep only notes)
       const stripReturnReasons = (expenses) => {
@@ -2145,7 +2156,7 @@ export default function BerkeleyExpenseSystem() {
         });
       };
       
-      const isFinalApproval = (level === 1 && isSingleLevel) || level === 2;
+      const isFinalApproval = (level === 1 && isSingleLevel) || (level === 2 && !hasLevel3) || level === 3;
       
       if (level === 1) {
         if (isSingleLevel) {
@@ -2175,13 +2186,39 @@ export default function BerkeleyExpenseSystem() {
           setSelectedClaim(null);
           alert('✅ Approved → Sent to Level 2 reviewer');
         }
-      } else {
+      } else if (level === 2) {
+        if (hasLevel3) {
+          // Route to level 3
+          const { error } = await supabase.from('claims').update({ 
+            status: 'pending_level3', 
+            approval_level: 3, 
+            level2_approved_by: currentUser.name, 
+            level2_approved_at: new Date().toISOString() 
+          }).eq('id', claim.id);
+          if (error) throw error;
+          await loadClaims();
+          setSelectedClaim(null);
+          alert('✅ Approved → Sent to Level 3 reviewer');
+        } else {
+          const updateData = { 
+            status: 'approved', 
+            level2_approved_by: currentUser.name, 
+            level2_approved_at: new Date().toISOString() 
+          };
+          updateData.expenses = stripReturnReasons(claim.expenses);
+          const { error } = await supabase.from('claims').update(updateData).eq('id', claim.id);
+          if (error) throw error;
+          await loadClaims();
+          setSelectedClaim(null);
+          alert('✅ Final Approval Complete!');
+        }
+      } else if (level === 3) {
         const updateData = { 
           status: 'approved', 
-          level2_approved_by: currentUser.name, 
-          level2_approved_at: new Date().toISOString() 
+          level3_approved_by: currentUser.name, 
+          level3_approved_at: new Date().toISOString() 
         };
-        if (isFinalApproval) updateData.expenses = stripReturnReasons(claim.expenses);
+        updateData.expenses = stripReturnReasons(claim.expenses);
         const { error } = await supabase.from('claims').update(updateData).eq('id', claim.id);
         if (error) throw error;
         await loadClaims();
@@ -3758,6 +3795,7 @@ export default function BerkeleyExpenseSystem() {
       // Include ALL non-rejected statuses when includePending is checked
       const isPendingOrInProgress = c.status === 'pending_review' || 
                                      c.status === 'pending_level2' || 
+                                     c.status === 'pending_level3' || 
                                      c.status === 'changes_requested';
       
       if (!includePending && !includeDrafts && !isApproved) return false;
@@ -4205,6 +4243,7 @@ export default function BerkeleyExpenseSystem() {
                                 cl.status === 'submitted_to_finance' ? 'bg-purple-100 text-purple-700' : 
                                 cl.status === 'pending_review' ? 'bg-amber-100 text-amber-700' : 
                                 cl.status === 'pending_level2' ? 'bg-blue-100 text-blue-700' : 
+                                cl.status === 'pending_level3' ? 'bg-purple-100 text-purple-700' : 
                                 cl.status === 'changes_requested' ? 'bg-red-100 text-red-700' :
                                 cl.status === 'draft' ? 'bg-slate-100 text-slate-600' :
                                 'bg-slate-100 text-slate-600'
@@ -4214,6 +4253,7 @@ export default function BerkeleyExpenseSystem() {
                                 cl.status === 'submitted_to_finance' ? '📤 Submitted' : 
                                 cl.status === 'pending_review' ? '⏳ Pending L1' : 
                                 cl.status === 'pending_level2' ? '⏳ Pending L2' : 
+                                cl.status === 'pending_level3' ? '⏳ Pending L3' : 
                                 cl.status === 'changes_requested' ? '🔄 Returned' :
                                 cl.status === 'draft' ? '📝 Draft' :
                                 cl.status
@@ -4374,7 +4414,7 @@ export default function BerkeleyExpenseSystem() {
           const glM = {};
           Object.keys(GL_GROUPS_M).forEach(g => { glM[g] = { months: new Array(months.length).fill(0) }; });
           // Use all claims matching office filter for FY (no date filter)
-          const fyClaims = claims.filter(c => reportOfficeMatch(c.office_code) && (c.status === 'approved' || c.status === 'paid' || c.status === 'submitted_to_finance' || (includePending && (c.status === 'pending_review' || c.status === 'pending_level2' || c.status === 'changes_requested'))));
+          const fyClaims = claims.filter(c => reportOfficeMatch(c.office_code) && (c.status === 'approved' || c.status === 'paid' || c.status === 'submitted_to_finance' || (includePending && (c.status === 'pending_review' || c.status === 'pending_level2' || c.status === 'pending_level3' || c.status === 'changes_requested'))));
           fyClaims.forEach(c => {
             (c.expenses || []).forEach(exp => {
               const cat = EXPENSE_CATEGORIES[exp.category];
@@ -4453,7 +4493,7 @@ export default function BerkeleyExpenseSystem() {
           const wf = getApprovalWorkflow(tid, emp.office);
           const exps = (showDupModal.expenses || []).map((e, i) => ({ ...e, id: Date.now() + i, adminNotes: null, isPotentialDuplicate: false, duplicateMatchLabel: null, duplicateMatchRef: null, ref: String(i + 1) }));
           const total = exps.reduce((s, e) => s + parseFloat(e.reimbursementAmount || e.amount || 0), 0);
-          const ins = { claim_number: num, user_id: tid, user_name: emp.name, office: OFFICES.find(o => o.code === emp.office)?.name, office_code: emp.office, currency: showDupModal.currency, total_amount: total, item_count: exps.length, status: 'pending_review', approval_level: 1, level1_approver: wf?.level1, level2_approver: wf?.level2, expenses: exps, submitted_at: new Date().toISOString() };
+          const ins = { claim_number: num, user_id: tid, user_name: emp.name, office: OFFICES.find(o => o.code === emp.office)?.name, office_code: emp.office, currency: showDupModal.currency, total_amount: total, item_count: exps.length, status: 'pending_review', approval_level: 1, level1_approver: wf?.level1, level2_approver: wf?.level2, level3_approver: wf?.level3 || null, expenses: exps, submitted_at: new Date().toISOString() };
           // Include statement data — ensure both singular and plural are populated
           const stmts = showDupModal.annotated_statements || (showDupModal.annotated_statement ? [showDupModal.annotated_statement] : null);
           if (stmts) { ins.annotated_statements = stmts; ins.annotated_statement = stmts[0]; }
@@ -4503,7 +4543,7 @@ export default function BerkeleyExpenseSystem() {
     }, []);
     
     const officeFilter = (c) => !currentUser.reportOffices || currentUser.reportOffices.includes(c.office_code);
-    const pendingClaims = claims.filter(c => (c.status === 'pending_review' || c.status === 'pending_level2' || c.status === 'changes_requested') && officeFilter(c));
+    const pendingClaims = claims.filter(c => (c.status === 'pending_review' || c.status === 'pending_level2' || c.status === 'pending_level3' || c.status === 'changes_requested') && officeFilter(c));
     const submittedClaims = claims.filter(c => (c.status === 'submitted_to_finance' || c.status === 'approved') && officeFilter(c));
     const paidClaims = claims.filter(c => c.status === 'paid' && officeFilter(c));
     
@@ -4527,6 +4567,7 @@ export default function BerkeleyExpenseSystem() {
             <span className={`text-xs px-1.5 py-0.5 rounded-full font-medium ${
               claim.status === 'pending_review' ? 'bg-amber-100 text-amber-700' :
               claim.status === 'pending_level2' ? 'bg-blue-100 text-blue-700' :
+              claim.status === 'pending_level3' ? 'bg-purple-100 text-purple-700' :
               claim.status === 'changes_requested' ? 'bg-red-100 text-red-700' :
               claim.status === 'approved' ? 'bg-green-100 text-green-700' :
               claim.status === 'submitted_to_finance' ? 'bg-purple-100 text-purple-700' :
@@ -4535,6 +4576,7 @@ export default function BerkeleyExpenseSystem() {
             }`}>{
               claim.status === 'pending_review' ? 'L1' :
               claim.status === 'pending_level2' ? 'L2' :
+              claim.status === 'pending_level3' ? 'L3' :
               claim.status === 'changes_requested' ? 'Returned' :
               claim.status === 'approved' ? 'Approved' :
               claim.status === 'submitted_to_finance' ? 'Submitted' :
@@ -4732,7 +4774,7 @@ export default function BerkeleyExpenseSystem() {
     const filteredClaims = claims.filter(c => {
       if (!officeMatch(c.office_code)) return false;
       const isApproved = c.status === 'approved' || c.status === 'paid' || c.status === 'submitted_to_finance';
-      const isPending = c.status === 'pending_review' || c.status === 'pending_level2' || c.status === 'changes_requested';
+      const isPending = c.status === 'pending_review' || c.status === 'pending_level2' || c.status === 'pending_level3' || c.status === 'changes_requested';
       if (!isApproved && !(includePending && isPending)) return false;
       const subDate = c.submitted_at?.split('T')[0];
       if (subDate && dateFrom && subDate < dateFrom) return false;
@@ -4744,7 +4786,7 @@ export default function BerkeleyExpenseSystem() {
     const allOfficeClaims = claims.filter(c => officeMatch(c.office_code));
     const fyClaims = allOfficeClaims.filter(c => {
       const isApproved = c.status === 'approved' || c.status === 'paid' || c.status === 'submitted_to_finance';
-      const isPending = c.status === 'pending_review' || c.status === 'pending_level2' || c.status === 'changes_requested';
+      const isPending = c.status === 'pending_review' || c.status === 'pending_level2' || c.status === 'pending_level3' || c.status === 'changes_requested';
       return isApproved || (includePending && isPending);
     });
 
@@ -5129,7 +5171,7 @@ export default function BerkeleyExpenseSystem() {
             office: OFFICES.find(o => o.code === emp.office)?.name, office_code: emp.office,
             currency: showDupModal.currency, total_amount: total, item_count: exps.length,
             status: 'pending_review', approval_level: 1,
-            level1_approver: wf?.level1, level2_approver: wf?.level2,
+            level1_approver: wf?.level1, level2_approver: wf?.level2, level3_approver: wf?.level3 || null,
             expenses: exps, submitted_at: new Date().toISOString()
           };
           if (showDupModal.annotated_statements) ins.annotated_statements = showDupModal.annotated_statements;
