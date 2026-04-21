@@ -1547,7 +1547,7 @@ export default function BerkeleyExpenseSystem() {
   };
   
 
-  const generatePDFFromHTML = async (expenseList, userName, officeCode, claimNumber, submittedDate, statementImgs, reimburseCurrency, level2ApprovedBy, level2ApprovedAt, annotations = [], useHD = false) => {
+  const generatePDFFromHTML = async (expenseList, userName, officeCode, claimNumber, submittedDate, statementImgs, reimburseCurrency, level2ApprovedBy, level2ApprovedAt, annotations = [], useHD = true) => {
     const printWindow = window.open('', '_blank');
     if (!printWindow) { alert('Please allow popups'); return; }
     const office = OFFICES.find(o => o.code === officeCode);
@@ -1944,25 +1944,6 @@ export default function BerkeleyExpenseSystem() {
       }
       await generatePDFFromHTML(pendingExpenses, currentUser.name, currentUser.office, draftClaimNumber, new Date().toISOString(), stmts, getUserReimburseCurrency(currentUser), null, null, statementAnnotations);
     } catch (err) { alert('❌ Failed'); }
-    setDownloading(false);
-  };
-  
-  const handleDownloadPreviewHDPDF = async () => {
-    setDownloading(true);
-    try {
-      const year = getFinancialYear();
-      const claimName = currentUser.claimName || currentUser.name.trim().split(' ').pop();
-      const nextSeq = getNextClaimSeq(claims, currentUser.id, claimName, year);
-      const draftClaimNumber = `${claimName} - ${year} - ${String(nextSeq).padStart(2, '0')} (Draft)`;
-      let stmts = annotatedStatements;
-      if (statementAnnotations.length > 0 && originalStatementImages.length > 0) {
-        try {
-          const reRendered = await reRenderStatementAnnotations(originalStatementImages, statementAnnotations);
-          if (reRendered) stmts = originalStatementImages.map((orig, idx) => reRendered[idx] || orig);
-        } catch (e) { console.warn('Re-render failed:', e); }
-      }
-      await generatePDFFromHTML(pendingExpenses, currentUser.name, currentUser.office, draftClaimNumber, new Date().toISOString(), stmts, getUserReimburseCurrency(currentUser), null, null, statementAnnotations, true);
-    } catch (err) { alert('❌ HD PDF Failed'); }
     setDownloading(false);
   };
   
@@ -2997,7 +2978,7 @@ export default function BerkeleyExpenseSystem() {
     return (
       <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-50">
         <div className="bg-white rounded-2xl max-w-4xl w-full max-h-[95vh] overflow-hidden shadow-2xl flex flex-col">
-          <div className="bg-gradient-to-r from-blue-900 to-indigo-900 text-white p-4 flex justify-between items-center shrink-0"><div><h2 className="text-lg font-bold">📋 Preview</h2><p className="text-blue-200 text-sm">{userReimburseCurrency}</p></div><div className="flex items-center gap-2"><button onClick={handleDownloadPreviewPDF} disabled={downloading} className="bg-green-500 text-white px-4 py-2 rounded-lg font-semibold text-sm">📥 PDF</button><button onClick={handleDownloadPreviewHDPDF} disabled={downloading} className="bg-indigo-500 text-white px-3 py-2 rounded-lg font-semibold text-sm">📥 HD</button><button onClick={handleClosePreview} className="w-8 h-8 rounded-full bg-white/20">✕</button></div></div>
+          <div className="bg-gradient-to-r from-blue-900 to-indigo-900 text-white p-4 flex justify-between items-center shrink-0"><div><h2 className="text-lg font-bold">📋 Preview</h2><p className="text-blue-200 text-sm">{userReimburseCurrency}</p></div><div className="flex items-center gap-2"><button onClick={handleDownloadPreviewPDF} disabled={downloading} className="bg-green-500 text-white px-4 py-2 rounded-lg font-semibold text-sm">{downloading ? '⏳...' : '📥 PDF'}</button><button onClick={handleClosePreview} className="w-8 h-8 rounded-full bg-white/20">✕</button></div></div>
           <div className="flex-1 overflow-y-auto p-6">
             <div className="max-w-3xl mx-auto border-2 border-slate-300 rounded-xl p-6">
               <div className="text-center mb-6"><h1 className="text-xl font-bold">Berkeley International Expense Claim Form</h1><p className="text-sm text-slate-500">{getCompanyName(currentUser.office)}</p></div>
