@@ -1547,7 +1547,7 @@ export default function BerkeleyExpenseSystem() {
   };
   
 
-  const generatePDFFromHTML = async (expenseList, userName, officeCode, claimNumber, submittedDate, statementImgs, reimburseCurrency, level2ApprovedBy, level2ApprovedAt, annotations = []) => {
+  const generatePDFFromHTML = async (expenseList, userName, officeCode, claimNumber, submittedDate, statementImgs, reimburseCurrency, level2ApprovedBy, level2ApprovedAt, annotations = [], useHD = false) => {
     const printWindow = window.open('', '_blank');
     if (!printWindow) { alert('Please allow popups'); return; }
     const office = OFFICES.find(o => o.code === officeCode);
@@ -1695,7 +1695,7 @@ export default function BerkeleyExpenseSystem() {
       const heightPenalty = Math.min(30, Math.floor(notesLen / 80) * 8 + Math.floor(attendeesLen / 150) * 8 + (exp.hasBackcharge ? 8 : 0));
       const receipts = [exp.receiptPreview, exp.receiptPreview2, exp.receiptPreview3, exp.receiptPreview4].filter(Boolean);
       const receiptCount = receipts.length;
-      const baseHeight = matchStmtImg ? 200 : (receiptCount <= 1 ? 200 : 250);
+      const baseHeight = matchStmtImg ? 200 : (receiptCount <= 1 ? 250 : 250);
       const availableHeight = baseHeight - heightPenalty;
       let receiptContent = '';
       if (receiptCount === 0) {
@@ -1790,7 +1790,7 @@ export default function BerkeleyExpenseSystem() {
       '.statement-page{padding:5mm;}' +
       '.statement-header{background:#ff9800;color:#fff;padding:8px;text-align:center;font-weight:bold;}' +
       '.statement-img{max-width:100%;max-height:260mm;object-fit:contain;display:block;margin:0 auto;border:1px solid #ccc;}' +
-      '@media print{body{-webkit-print-color-adjust:exact;print-color-adjust:exact;}}' +
+      '@media print{body{-webkit-print-color-adjust:exact;print-color-adjust:exact;}img{image-rendering:high-quality;-webkit-print-color-adjust:exact;}}' +
       '</style></head><body>' +
       
       // PAGE 1: Summary - FIXED: removed e-signature, compact to fit 1 page
@@ -1850,10 +1850,53 @@ export default function BerkeleyExpenseSystem() {
     printWindow.document.close();
     printWindow.document.title = claimNumber || (userName + ' - Expense Claim');
     printWindow.focus();
-    // Wait for all images to load before printing
+    
+    // Wait for all images to load
     const imgs = printWindow.document.querySelectorAll('img');
     const loaded = Array.from(imgs).map(img => img.complete ? Promise.resolve() : new Promise(r => { img.onload = r; img.onerror = r; }));
-    Promise.all(loaded).then(() => { setTimeout(() => { printWindow.print(); setTimeout(() => { try { printWindow.close(); } catch(e) {} }, 1000); }, 200); });
+    await Promise.all(loaded);
+    
+    if (useHD) {
+      // HD mode: load html2pdf.js in the print window, render at 2x scale
+      try {
+        const status = printWindow.document.createElement('div');
+        status.style.cssText = 'position:fixed;top:0;left:0;right:0;background:#1565c0;color:white;padding:15px;text-align:center;font-family:Arial;font-size:14px;z-index:9999;box-shadow:0 2px 10px rgba(0,0,0,0.3);';
+        status.textContent = '⏳ Rendering HD PDF... Please wait 30-60 seconds';
+        printWindow.document.body.prepend(status);
+        
+        await new Promise((resolve, reject) => {
+          const s = printWindow.document.createElement('script');
+          s.src = 'https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js';
+          s.onload = resolve;
+          s.onerror = () => reject(new Error('Could not load html2pdf library'));
+          printWindow.document.head.appendChild(s);
+        });
+        
+        // Remove status overlay before capture
+        await new Promise(r => setTimeout(r, 300));
+        status.remove();
+        
+        const opt = {
+          margin: 0,
+          filename: (claimNumber || 'Expense_Claim').replace(/[^a-zA-Z0-9\-_ ]/g, '') + '.pdf',
+          image: { type: 'jpeg', quality: 0.98 },
+          html2canvas: { scale: 2, useCORS: true, letterRendering: true, logging: false },
+          jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' },
+          pagebreak: { mode: ['css', 'legacy'], before: '.page' }
+        };
+        
+        await printWindow.html2pdf().set(opt).from(printWindow.document.body).save();
+        setTimeout(() => { try { printWindow.close(); } catch(e) {} }, 2000);
+      } catch (err) {
+        console.error('HD PDF error:', err);
+        alert('HD PDF failed: ' + err.message + '\nFalling back to standard print.');
+        printWindow.print();
+        setTimeout(() => { try { printWindow.close(); } catch(e) {} }, 1000);
+      }
+    } else {
+      // Standard mode: browser print dialog
+      setTimeout(() => { printWindow.print(); setTimeout(() => { try { printWindow.close(); } catch(e) {} }, 1000); }, 200);
+    }
   };
 
 
@@ -1901,6 +1944,25 @@ export default function BerkeleyExpenseSystem() {
       }
       await generatePDFFromHTML(pendingExpenses, currentUser.name, currentUser.office, draftClaimNumber, new Date().toISOString(), stmts, getUserReimburseCurrency(currentUser), null, null, statementAnnotations);
     } catch (err) { alert('❌ Failed'); }
+    setDownloading(false);
+  };
+  
+  const handleDownloadPreviewHDPDF = async () => {
+    setDownloading(true);
+    try {
+      const year = getFinancialYear();
+      const claimName = currentUser.claimName || currentUser.name.trim().split(' ').pop();
+      const nextSeq = getNextClaimSeq(claims, currentUser.id, claimName, year);
+      const draftClaimNumber = `${claimName} - ${year} - ${String(nextSeq).padStart(2, '0')} (Draft)`;
+      let stmts = annotatedStatements;
+      if (statementAnnotations.length > 0 && originalStatementImages.length > 0) {
+        try {
+          const reRendered = await reRenderStatementAnnotations(originalStatementImages, statementAnnotations);
+          if (reRendered) stmts = originalStatementImages.map((orig, idx) => reRendered[idx] || orig);
+        } catch (e) { console.warn('Re-render failed:', e); }
+      }
+      await generatePDFFromHTML(pendingExpenses, currentUser.name, currentUser.office, draftClaimNumber, new Date().toISOString(), stmts, getUserReimburseCurrency(currentUser), null, null, statementAnnotations, true);
+    } catch (err) { alert('❌ HD PDF Failed'); }
     setDownloading(false);
   };
   
@@ -2935,7 +2997,7 @@ export default function BerkeleyExpenseSystem() {
     return (
       <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-50">
         <div className="bg-white rounded-2xl max-w-4xl w-full max-h-[95vh] overflow-hidden shadow-2xl flex flex-col">
-          <div className="bg-gradient-to-r from-blue-900 to-indigo-900 text-white p-4 flex justify-between items-center shrink-0"><div><h2 className="text-lg font-bold">📋 Preview</h2><p className="text-blue-200 text-sm">{userReimburseCurrency}</p></div><div className="flex items-center gap-2"><button onClick={handleDownloadPreviewPDF} disabled={downloading} className="bg-green-500 text-white px-4 py-2 rounded-lg font-semibold text-sm">📥 PDF</button><button onClick={handleClosePreview} className="w-8 h-8 rounded-full bg-white/20">✕</button></div></div>
+          <div className="bg-gradient-to-r from-blue-900 to-indigo-900 text-white p-4 flex justify-between items-center shrink-0"><div><h2 className="text-lg font-bold">📋 Preview</h2><p className="text-blue-200 text-sm">{userReimburseCurrency}</p></div><div className="flex items-center gap-2"><button onClick={handleDownloadPreviewPDF} disabled={downloading} className="bg-green-500 text-white px-4 py-2 rounded-lg font-semibold text-sm">📥 PDF</button><button onClick={handleDownloadPreviewHDPDF} disabled={downloading} className="bg-indigo-500 text-white px-3 py-2 rounded-lg font-semibold text-sm">📥 HD</button><button onClick={handleClosePreview} className="w-8 h-8 rounded-full bg-white/20">✕</button></div></div>
           <div className="flex-1 overflow-y-auto p-6">
             <div className="max-w-3xl mx-auto border-2 border-slate-300 rounded-xl p-6">
               <div className="text-center mb-6"><h1 className="text-xl font-bold">Berkeley International Expense Claim Form</h1><p className="text-sm text-slate-500">{getCompanyName(currentUser.office)}</p></div>
