@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 
 /*
  * BERKELEY INTERNATIONAL EXPENSE MANAGEMENT SYSTEM
- * Version: 7.0 - Ultra Simple (Server Only, No localStorage)
+ * Version: 7.1 - Bulk DiDi UX (Batch Edit, Annotations, Drag Reposition)
  * 
  * HOW IT WORKS:
  * 1. Load from server on login
@@ -1149,6 +1149,7 @@ export default function BerkeleyExpenseSystem() {
   const [downloading, setDownloading] = useState(false);
   const [showAddExpense, setShowAddExpense] = useState(false);
   const [showMileageModal, setShowMileageModal] = useState(false);
+  const [showBulkDiDi, setShowBulkDiDi] = useState(false);
   const [showPreview, setShowPreview] = useState(false);
   const [editingReturnedClaimId, setEditingReturnedClaimId] = useState(null); // Track which returned claim we're editing
   const [activeClaimTab, setActiveClaimTab] = useState('current'); // 'current' or claim.id — lifted to parent
@@ -1167,6 +1168,7 @@ export default function BerkeleyExpenseSystem() {
     if (currentUser?.role === 'group_finance') setActiveTab('finance');
   }, [currentUser]);
   const [editingExpense, setEditingExpense] = useState(null);
+  const [editingBulkBatch, setEditingBulkBatch] = useState(null); // batchId for bulk DiDi edit
   const [editingClaim, setEditingClaim] = useState(null);
   const [backchargeFromDate, setBackchargeFromDate] = useState('');
   const [backchargeToDate, setBackchargeToDate] = useState('');
@@ -1453,6 +1455,23 @@ export default function BerkeleyExpenseSystem() {
 
   // Delete expense and save immediately
   const handleDeleteExpense = async (expenseId) => {
+    const exp = expenses.find(e => e.id === expenseId);
+    if (exp?.bulkBatchId) {
+      const batchExpenses = expenses.filter(e => e.bulkBatchId === exp.bulkBatchId);
+      if (batchExpenses.length > 1) {
+        const confirmed = window.confirm(`This trip is part of a DiDi batch (${batchExpenses.length} trips). Deleting one trip means the 发票 total won't match.\n\nDelete all ${batchExpenses.length} trips in this batch?`);
+        if (!confirmed) return;
+        // Delete entire batch
+        const batchIds = new Set(batchExpenses.map(e => e.id));
+        const oldExpenses = expenses;
+        const newExpenses = sortAndReassignRefs(expenses.filter(e => !batchIds.has(e.id)));
+        const newAnnotations = remapAnnotationsForRefChange(oldExpenses, newExpenses, statementAnnotations);
+        setExpenses(newExpenses);
+        setStatementAnnotations(newAnnotations);
+        await saveToServer(newExpenses, annotatedStatements, newAnnotations, originalStatementImages);
+        return;
+      }
+    }
     const oldExpenses = expenses;
     const newExpenses = sortAndReassignRefs(expenses.filter(e => e.id !== expenseId));
     const newAnnotations = remapAnnotationsForRefChange(oldExpenses, newExpenses, statementAnnotations);
@@ -1645,7 +1664,19 @@ export default function BerkeleyExpenseSystem() {
     const statementsArray = Array.isArray(statementImgs) ? statementImgs : (statementImgs ? [statementImgs] : []);
 
     // Receipt pages - with matched statement shown beside receipt for foreign currency expenses
-    const receiptsHTML = expensesWithRefs.filter(exp => exp.category !== 'H').map(exp => {
+    // Group bulk batch expenses together
+    const batchGroups = {};
+    const nonBatchExps = [];
+    expensesWithRefs.filter(exp => exp.category !== 'H').forEach(exp => {
+      if (exp.bulkBatchId) {
+        if (!batchGroups[exp.bulkBatchId]) batchGroups[exp.bulkBatchId] = [];
+        batchGroups[exp.bulkBatchId].push(exp);
+      } else {
+        nonBatchExps.push(exp);
+      }
+    });
+    
+    const renderSingleReceipt = (exp) => {
       const cat = EXPENSE_CATEGORIES[exp.category] || { name: 'Unknown' };
       const pax = parseInt(exp.numberOfPax) || 0;
       const claimAmt = parseFloat(exp.reimbursementAmount || exp.amount);
@@ -1654,43 +1685,67 @@ export default function BerkeleyExpenseSystem() {
       const isOld = isOlderThan2Months(exp.date, level2ApprovedAt || submittedDate);
       const oldBadge = isOld ? '<br><span style="background:#ffcdd2;color:#c62828;padding:2px 6px;border-radius:3px;font-weight:bold;">⚠ >2 MONTHS OLD</span>' : '';
       const dupBadge = exp.isPotentialDuplicate ? '<br><span style="background:#fff3e0;color:#e65100;padding:2px 6px;border-radius:3px;font-weight:bold;">⚠ DUPLICATE with ' + (exp.duplicateMatchLabel || exp.duplicateMatchRef || '?') + '?</span>' : '';
-      // FIXED: backcharge with white background and dark text for visibility
       const backchargeHTML = exp.hasBackcharge && exp.backcharges?.length > 0 ? '<div style="background:#fff;border:2px solid #9c27b0;color:#6a1b9a;padding:4px 8px;margin-top:5px;font-size:10px;border-radius:4px;"><strong>📊 Backcharge:</strong> ' + exp.backcharges.map(bc => bc.development + ': ' + bc.percentage + '%').join(' | ') + '</div>' : '';
       const paxInfo = pax > 0 ? '<br>👥 ' + pax + ' pax: ' + reimburseCurrency + ' ' + fmtAmt(perPax) + ' (£' + fmtAmt(perPaxGBP) + ')/pax' : '';
-      // Find matching statement - check both annotations array AND embedded statementIndex
       const annotationMatch = annotations ? annotations.find(a => a.ref === exp.ref || a.ref === String(exp.seqRef)) : null;
       const matchStmtIdx = annotationMatch ? (annotationMatch.statementIndex || 0) : (exp.statementIndex !== undefined ? exp.statementIndex : -1);
       const matchStmtImg = matchStmtIdx >= 0 && statementsArray[matchStmtIdx] ? statementsArray[matchStmtIdx] : null;
-      
-      // Auto-resize: reduce heights when there's long content
       const notesLen = (exp.adminNotes || '').length;
       const attendeesLen = (exp.attendees || '').length;
       const heightPenalty = Math.min(30, Math.floor(notesLen / 80) * 8 + Math.floor(attendeesLen / 150) * 8 + (exp.hasBackcharge ? 8 : 0));
-      
-      // Receipt sizing - handle up to 4 receipts
       const receipts = [exp.receiptPreview, exp.receiptPreview2, exp.receiptPreview3, exp.receiptPreview4].filter(Boolean);
       const receiptCount = receipts.length;
       const baseHeight = matchStmtImg ? 200 : (receiptCount <= 1 ? 200 : 250);
       const availableHeight = baseHeight - heightPenalty;
-      
       let receiptContent = '';
       if (receiptCount === 0) {
         receiptContent = '<div style="background:#f5f5f5;padding:30px;text-align:center;color:#999;">No receipt</div>';
       } else if (receiptCount === 1) {
         receiptContent = '<div><img src="' + receipts[0] + '" style="max-width:100%;max-height:' + availableHeight + 'mm;object-fit:contain;display:block;" /></div>';
       } else if (receiptCount === 2) {
-        // Side by side for 2 receipts to maximize space
         const perH = Math.floor(availableHeight * 0.95);
         receiptContent = '<div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;">' + receipts.map(img => '<div><img src="' + img + '" style="max-width:100%;max-height:' + perH + 'mm;object-fit:contain;display:block;" /></div>').join('') + '</div>';
       } else {
-        // 2x2 grid for 3-4 receipts
         const perH = Math.floor(availableHeight * 0.47);
         receiptContent = '<div style="display:grid;grid-template-columns:1fr 1fr;gap:4px;">' + receipts.map(img => '<div><img src="' + img + '" style="max-width:100%;max-height:' + perH + 'mm;object-fit:contain;display:block;" /></div>').join('') + '</div>';
       }
       const stmtContent = matchStmtImg ? '<div style="flex:1;max-width:48%;border-left:3px solid #ff9800;padding-left:8px;"><div style="background:#ff9800;color:white;padding:5px 10px;font-weight:bold;font-size:9px;margin-bottom:6px;border-radius:4px;">💳 Matched Statement ' + (matchStmtIdx + 1) + '</div><img src="' + matchStmtImg + '" style="max-width:100%;max-height:' + (210 - heightPenalty) + 'mm;object-fit:contain;border:1px solid #ddd;" /></div>' : '';
       const contentHTML = matchStmtImg ? '<div style="display:flex;gap:10px;align-items:flex-start;"><div style="flex:1;max-width:50%;">' + receiptContent + '</div>' + stmtContent + '</div>' : receiptContent;
       return '<div class="page receipt-page"><div class="receipt-header"><div class="receipt-ref">' + exp.seqRef + '</div><div class="receipt-info"><strong>' + exp.merchant + '</strong> | ' + formatDDMMYYYY(new Date(exp.date)) + '<br>' + cat.name + ' | ' + exp.currency + ' ' + fmtAmt(exp.amount) + (exp.isForeignCurrency ? ' → ' + reimburseCurrency + ' ' + fmtAmt(exp.reimbursementAmount) + (exp.forexRate ? ' (1 ' + exp.currency + ' = ' + exp.forexRate.toFixed(4) + ' ' + reimburseCurrency + ')' : '') : '') + '<br>' + (exp.description || '') + oldBadge + dupBadge + paxInfo + (exp.attendees ? '<br>' + exp.attendees.replace(/\n/g, ', ') : '') + (() => { const _n = exp.adminNotes ? formatAdminNotesHTML(exp.adminNotes, true) : ''; return _n ? '<br><div style="background:#fff8e1;padding:2px 4px;border-radius:3px;">📝 ' + _n + '</div>' : ''; })() + backchargeHTML + '</div></div>' + contentHTML + '</div>';
-    }).join('');
+    };
+    
+    const renderBatchReceipt = (batchExps) => {
+      const headerLines = batchExps.map(exp => '<div style="padding:3px 0;border-bottom:1px solid rgba(255,255,255,0.2);"><strong>' + exp.seqRef + ':</strong> ' + (exp.merchant || 'DiDi') + ' | ' + formatDDMMYYYY(new Date(exp.date)) + ' | ' + exp.currency + ' ' + fmtAmt(exp.amount) + '<br><span style="font-size:11px;opacity:0.9;">' + (exp.description || '') + '</span></div>').join('');
+      const totalAmt = batchExps.reduce((s, e) => s + parseFloat(e.reimbursementAmount || e.amount || 0), 0);
+      const xiaopiaoImg = batchExps[0]?.receiptPreview;
+      const fapiaoImg = batchExps[0]?.receiptPreview2;
+      // Build annotation markers for xiaopiao
+      const annotationOverlays = batchExps.map(exp => {
+        const ann = exp.bulkTripAnnotation;
+        if (!ann) return '';
+        return '<div style="position:absolute;left:' + Math.max(0, ann.xPct * 100 - 1) + '%;top:' + Math.max(0, ann.yPct * 100 - 1) + '%;width:22px;height:22px;background:#ff6600;border-radius:50%;border:2px solid #fff;display:flex;align-items:center;justify-content:center;color:#fff;font-weight:bold;font-size:11px;box-shadow:0 1px 3px rgba(0,0,0,0.3);">' + exp.seqRef + '</div>';
+      }).join('');
+      const imgContent = '<div style="display:flex;gap:10px;align-items:flex-start;">' +
+        (xiaopiaoImg ? '<div style="flex:1;max-width:50%;"><div style="background:#ff9800;color:white;padding:4px 8px;font-weight:bold;font-size:9px;margin-bottom:4px;border-radius:3px;">📄 小票 Xiaopiao</div><div style="position:relative;display:inline-block;"><img src="' + xiaopiaoImg + '" style="max-width:100%;max-height:200mm;object-fit:contain;border:1px solid #ddd;display:block;" />' + annotationOverlays + '</div></div>' : '') +
+        (fapiaoImg ? '<div style="flex:1;max-width:50%;border-left:3px solid #ff9800;padding-left:8px;"><div style="background:#ff9800;color:white;padding:4px 8px;font-weight:bold;font-size:9px;margin-bottom:4px;border-radius:3px;">🧾 发票 Fapiao</div><img src="' + fapiaoImg + '" style="max-width:100%;max-height:200mm;object-fit:contain;border:1px solid #ddd;" /></div>' : '') +
+        '</div>';
+      return '<div class="page receipt-page"><div style="background:#1565c0;color:#fff;padding:10px;border-radius:4px;margin-bottom:6px;"><div style="font-size:14px;font-weight:bold;margin-bottom:6px;">🚕 DiDi Batch (' + batchExps.length + ' trips) — Total: ' + reimburseCurrency + ' ' + fmtAmt(totalAmt) + '</div><div style="font-size:11px;line-height:1.6;">' + headerLines + '</div></div>' + imgContent + '</div>';
+    };
+    
+    // Build receiptsHTML: non-batch first (in order), then batch groups
+    const allReceiptPages = [];
+    const processedBatches = new Set();
+    expensesWithRefs.filter(exp => exp.category !== 'H').forEach(exp => {
+      if (exp.bulkBatchId) {
+        if (!processedBatches.has(exp.bulkBatchId)) {
+          processedBatches.add(exp.bulkBatchId);
+          allReceiptPages.push(renderBatchReceipt(batchGroups[exp.bulkBatchId]));
+        }
+      } else {
+        allReceiptPages.push(renderSingleReceipt(exp));
+      }
+    });
+    const receiptsHTML = allReceiptPages.join('');
 
     // Statement pages - only include if there are foreign currency expenses without inline matched statements
     const foreignExps = expensesWithRefs.filter(e => e.isForeignCurrency);
@@ -1704,7 +1759,7 @@ export default function BerkeleyExpenseSystem() {
     // Backcharge report
     const backchargeReportHTML = Object.keys(backchargeSummary).length > 0 ? '<div class="page"><h2 style="text-align:center;color:#9c27b0;">Backcharge Summary</h2><table class="detail-table"><thead><tr><th>Development</th><th>Line #</th><th>Date</th><th>%</th><th style="text-align:right;">Amount</th></tr></thead><tbody>' + Object.entries(backchargeSummary).map(([dev, data]) => data.items.map((item, idx) => '<tr><td>' + (idx === 0 ? '<strong>' + dev + '</strong>' : '') + '</td><td>' + item.ref + '</td><td>' + formatDDMMYYYY(new Date(item.date)) + '</td><td>' + item.percentage + '%</td><td style="text-align:right;">' + fmtAmt(item.amount) + '</td></tr>').join('') + '<tr style="background:#e1bee7;"><td colspan="4"><strong>Subtotal</strong></td><td style="text-align:right;"><strong>' + fmtAmt(data.total) + '</strong></td></tr>').join('') + '</tbody></table></div>' : '';
 
-    const html = '<!DOCTYPE html><html><head><title>Expense Claim</title><style>' +
+    const html = '<!DOCTYPE html><html><head><title>' + (claimNumber || userName + ' - Expense Claim') + '</title><style>' +
       '*{margin:0;padding:0;box-sizing:border-box;}' +
       'body{font-family:Arial,sans-serif;font-size:10px;}' +
       '@page{margin:8mm;size:A4;}' +
@@ -1789,11 +1844,16 @@ export default function BerkeleyExpenseSystem() {
       '</table></div>' : '') +
       
       backchargeReportHTML + receiptsHTML + statementsHTML +
-      '<script>window.onload=function(){window.print();setTimeout(function(){window.close();},500);};<\/script>' +
       '</body></html>';
     
     printWindow.document.write(html);
     printWindow.document.close();
+    printWindow.document.title = claimNumber || (userName + ' - Expense Claim');
+    printWindow.focus();
+    // Wait for all images to load before printing
+    const imgs = printWindow.document.querySelectorAll('img');
+    const loaded = Array.from(imgs).map(img => img.complete ? Promise.resolve() : new Promise(r => { img.onload = r; img.onerror = r; }));
+    Promise.all(loaded).then(() => { setTimeout(() => { printWindow.print(); setTimeout(() => { try { printWindow.close(); } catch(e) {} }, 1000); }, 200); });
   };
 
 
@@ -2797,7 +2857,7 @@ export default function BerkeleyExpenseSystem() {
                 </details>
                 <div className="grid grid-cols-2 gap-4">
                   <input type="date" className="p-3 border-2 border-slate-200 rounded-xl" value={formData.date} onChange={e => setFormData(prev => ({ ...prev, date: e.target.value }))} />
-                  <select className={`p-3 border-2 rounded-xl bg-white text-sm ${!formData.category ? 'border-red-400' : 'border-slate-200'}`} value={formData.category} onChange={e => setFormData(prev => ({ ...prev, category: e.target.value }))}>
+                  <select className={`p-3 border-2 rounded-xl bg-white text-sm ${!formData.category ? 'border-red-400' : 'border-slate-200'}`} value={formData.category} onChange={e => { const newCat = e.target.value; const needsAtt = EXPENSE_CATEGORIES[newCat]?.requiresAttendees; setFormData(prev => ({ ...prev, category: newCat, ...(needsAtt ? {} : { numberOfPax: '', attendeesList: [{ name: '', company: '' }] }) })); }}>
                     <option value="">— Select Category —</option>
                     <optgroup label="Travel">
                       {Object.entries(EXPENSE_CATEGORIES).filter(([k,v]) => v.group === 'TRAVEL' && k !== 'H').map(([key, val]) => <option key={key} value={key}>{val.icon} {val.name}</option>)}
@@ -2884,7 +2944,7 @@ export default function BerkeleyExpenseSystem() {
               <table className="w-full text-sm"><tbody>{Object.entries(EXPENSE_CATEGORIES).filter(([cat, _]) => getCategoryTotal(cat) > 0).map(([cat, catData]) => (<tr key={cat} className="border-b"><td className="py-2 font-bold text-blue-700 w-10">{catData.icon}</td><td className="py-2">{catData.name}<span className="text-slate-400 text-xs ml-2">GL {catData.gl}</span></td><td className="py-2 text-right font-medium">{userReimburseCurrency} {getCategoryTotal(cat).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td></tr>))}</tbody></table>
               <div className="bg-blue-50 p-4 rounded-xl mt-4 flex justify-between items-center"><span className="font-bold text-lg">Total</span><span className="font-bold text-2xl text-blue-700">{formatCurrency(reimbursementTotal, userReimburseCurrency)}</span></div>
               <h3 className="font-bold mt-6 mb-3">Receipts ({pendingExpenses.length})</h3>
-              <div className="grid grid-cols-3 gap-3">{pendingExpenses.map(exp => (<div key={exp.id} className="border rounded-lg overflow-hidden"><div className="bg-blue-100 p-1 flex justify-between text-xs"><span className="font-bold text-blue-700">{exp.ref}</span><div className="flex gap-1">{exp.isForeignCurrency && <span>💳</span>}{[exp.receiptPreview2, exp.receiptPreview3, exp.receiptPreview4].some(Boolean) && <span>📑{[exp.receiptPreview, exp.receiptPreview2, exp.receiptPreview3, exp.receiptPreview4].filter(Boolean).length}</span>}</div></div>{exp.receiptPreview ? (<img src={exp.receiptPreview} alt={exp.ref} className="w-full h-16 object-cover cursor-pointer" onClick={() => setViewImg({ src: exp.receiptPreview, expId: exp.id, slot: 'receiptPreview' })} />) : (<div className="w-full h-16 bg-slate-100 flex items-center justify-center">📄</div>)}<div className="p-1 bg-slate-50 text-xs"><p className="truncate">{exp.merchant}</p><p className="text-green-700 font-bold">{formatCurrency(exp.reimbursementAmount || exp.amount, userReimburseCurrency)}</p></div></div>))}</div>
+              <div className="grid grid-cols-3 gap-3">{pendingExpenses.map(exp => (<div key={exp.id} className="border rounded-lg overflow-hidden"><div className="bg-blue-100 p-1 flex justify-between text-xs"><span className="font-bold text-blue-700">{exp.ref}</span><div className="flex gap-1">{exp.isForeignCurrency && <span>💳</span>}{exp.bulkBatchId && (() => { const batchIds = [...new Set(pendingExpenses.filter(e => e.bulkBatchId).map(e => e.bulkBatchId))]; return <span className="text-amber-700 font-bold">🚕B{batchIds.indexOf(exp.bulkBatchId) + 1}</span>; })()}</div></div>{exp.receiptPreview ? (<img src={exp.receiptPreview} alt={exp.ref} className="w-full h-16 object-cover cursor-pointer" onClick={() => { if (exp.bulkBatchId) { const batchSiblings = pendingExpenses.filter(e => e.bulkBatchId === exp.bulkBatchId).sort((a, b) => (a.bulkTripIndex ?? 0) - (b.bulkTripIndex ?? 0)); setViewImg({ src: exp.receiptPreview, bulkAnnotations: batchSiblings.map((e, i) => e.bulkTripAnnotation ? { ...e.bulkTripAnnotation, label: i + 1 } : null) }); } else { setViewImg({ src: exp.receiptPreview, expId: exp.id, slot: 'receiptPreview' }); } }} />) : (<div className="w-full h-16 bg-slate-100 flex items-center justify-center">📄</div>)}<div className="p-1 bg-slate-50 text-xs"><p className="truncate">{exp.merchant}</p><p className="text-green-700 font-bold">{formatCurrency(exp.reimbursementAmount || exp.amount, userReimburseCurrency)}</p></div></div>))}</div>
               {hasForeignCurrency && annotatedStatements.length === 0 && (<div className="mt-4 bg-red-50 border-2 border-red-300 rounded-xl p-4"><p className="text-red-800 font-bold">❌ Statement(s) Required</p><button onClick={() => { setShowPreview(false); setShowStatementUpload(true); }} className="mt-2 bg-amber-500 text-white px-4 py-2 rounded-lg font-semibold text-sm">📎 Upload Statements</button></div>)}
               {annotatedStatements.length > 0 && (<div className="mt-4 bg-green-50 border border-green-200 rounded-xl p-4"><div className="flex justify-between items-start"><p className="text-green-800 font-semibold">✅ {annotatedStatements.length} Statement(s) Annotated</p><div className="flex gap-2"><button onClick={() => { 
                 // Use original images but keep existing annotations (positions now stored as %)
@@ -2897,12 +2957,22 @@ export default function BerkeleyExpenseSystem() {
           </div>
           <div className="p-4 border-t bg-slate-50 flex gap-3 shrink-0"><button onClick={handleClosePreview} className="flex-1 py-3 rounded-xl border-2 font-semibold">← Back</button><button onClick={handleSubmitClaim} disabled={!canSubmit || loading} className={`flex-[2] py-3 rounded-xl font-semibold ${canSubmit && !loading ? 'bg-green-600 text-white' : 'bg-slate-300 text-slate-500'}`}>{editingReturnedClaimId ? (loading ? '⏳...' : '🔄 Address & Resubmit') : submitButtonText}</button></div>
         </div>
-        {viewImg && <ImageViewer src={viewImg.src} onClose={() => setViewImg(null)} onRotate={viewImg.expId ? async (rotated) => {
+        {viewImg && (viewImg.bulkAnnotations ? (
+          <div className="fixed inset-0 bg-black/90 flex items-center justify-center z-[100] p-4" onClick={() => setViewImg(null)}>
+            <button onClick={() => setViewImg(null)} className="absolute top-4 right-4 bg-white/20 hover:bg-white/40 text-white w-12 h-12 rounded-full text-2xl z-10">✕</button>
+            <div className="relative max-w-full max-h-full" onClick={e => e.stopPropagation()}>
+              <img src={viewImg.src} alt="Xiaopiao" className="max-w-full max-h-[90vh] object-contain" />
+              {viewImg.bulkAnnotations.map((ann, i) => ann ? (
+                <div key={i} style={{ position: 'absolute', left: `${ann.xPct * 100}%`, top: `${ann.yPct * 100}%`, transform: 'translate(-50%, -50%)', width: '22px', height: '22px', background: '#ff6600', borderRadius: '50%', border: '2px solid #fff', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', fontWeight: 'bold', fontSize: '12px', boxShadow: '0 1px 3px rgba(0,0,0,0.3)' }}>{ann.label}</div>
+              ) : null)}
+            </div>
+          </div>
+        ) : <ImageViewer src={viewImg.src} onClose={() => setViewImg(null)} onRotate={viewImg.expId ? async (rotated) => {
               const newExps = expenses.map(e => e.id === viewImg.expId ? { ...e, [viewImg.slot]: rotated } : e);
               setExpenses(newExps);
               setViewImg(prev => prev ? { ...prev, src: rotated } : null);
               await saveToServer(newExps, annotatedStatements, statementAnnotations, originalStatementImages);
-            } : undefined} />}
+            } : undefined} />)}
       </div>
     );
   };
@@ -3016,6 +3086,8 @@ export default function BerkeleyExpenseSystem() {
           if (edits.reimbursementAmount !== undefined) {
             updated.reimbursementAmount = parseFloat(edits.reimbursementAmount) || 0;
           }
+          if (edits.numberOfPax !== undefined) updated.numberOfPax = edits.numberOfPax ? parseInt(edits.numberOfPax) : null;
+          if (edits.attendees !== undefined) updated.attendees = edits.attendees || null;
         }
         // Apply notes
         const parts = [];
@@ -3165,9 +3237,21 @@ export default function BerkeleyExpenseSystem() {
                     ) : <span>{exp.description || '—'}</span>}</div>
                     <div><span className="font-semibold text-slate-500">Receipt amount:</span> {exp.currency} {parseFloat(exp.amount).toFixed(2)}{isDiffCurrency && <span> → <strong>{claim.currency} {parseFloat(exp.reimbursementAmount || exp.amount).toFixed(2)}</strong></span>}</div>
                     {isDiffCurrency && exp.forexRate && <div><span className="font-semibold text-slate-500">FX Rate:</span> 1 {exp.currency} = {exp.forexRate.toFixed(4)} {claim.currency}</div>}
-                    {paxCount > 0 && <div><span className="font-semibold text-slate-500">Pax:</span> 👥 {paxCount}{isEntertaining && perPax > 0 && <span> • 💰 {claim.currency} {perPax.toFixed(2)}/pax</span>}</div>}
-                    {exp.attendees && <div><span className="font-semibold text-slate-500">Attendees:</span> {exp.attendees.replace(/\n/g, ', ')}</div>}
+                    {(paxCount > 0 || isEditable) && <div><span className="font-semibold text-slate-500">Pax:</span> {isEditable ? (
+                      <input type="number" min="0" className="ml-1 w-16 border-b border-slate-300 bg-transparent text-sm" value={getExpField(idx, 'numberOfPax', exp.numberOfPax || '')} onChange={e => setExpField(idx, 'numberOfPax', e.target.value)} placeholder="0" />
+                    ) : <span> 👥 {paxCount}{isEntertaining && perPax > 0 && <span> • 💰 {claim.currency} {perPax.toFixed(2)}/pax</span>}</span>}</div>}
+                    {(exp.attendees || isEditable) && <div><span className="font-semibold text-slate-500">Attendees:</span> {isEditable ? (
+                      <input className="ml-1 w-full border-b border-slate-300 bg-transparent text-sm" value={getExpField(idx, 'attendees', exp.attendees || '')} onChange={e => setExpField(idx, 'attendees', e.target.value)} placeholder="Names, comma separated" />
+                    ) : <span> {exp.attendees.replace(/\n/g, ', ')}</span>}</div>}
                     {exp.mileageDistance && <div><span className="font-semibold text-slate-500">Mileage:</span> {exp.mileageFrom && <span>{exp.mileageFrom} → {exp.mileageTo} | </span>}{exp.mileageDistance} {exp.mileageUnit || 'km'}</div>}
+                    {exp.hasBackcharge && exp.backcharges?.length > 0 && (
+                      <div className="mt-1 bg-purple-50 border border-purple-200 rounded p-2">
+                        <span className="font-semibold text-purple-700">📊 Backcharge:</span>
+                        {exp.backcharges.map((bc, bi) => (
+                          <span key={bi} className="ml-2 text-purple-600 text-xs">{bc.development}: {bc.percentage}%</span>
+                        ))}
+                      </div>
+                    )}
                   </div>
                   
                   {/* Receipt thumbnails */}
@@ -3184,7 +3268,7 @@ export default function BerkeleyExpenseSystem() {
                         {receipts.map((r, ri) => (
                           <div key={ri} className="relative flex-shrink-0">
                             <img src={r.src} alt={r.label} className="h-16 w-16 object-cover rounded-lg border-2 border-slate-200 cursor-pointer hover:border-blue-400" 
-                              onClick={() => setReviewViewImg({ src: r.src, type: 'receipt', expIdx: idx, slot: r.slot })} />
+                              onClick={() => { if (exp.bulkBatchId && r.slot === 'receiptPreview') { const batchSiblings = (claim.expenses || []).filter(e => e.bulkBatchId === exp.bulkBatchId).sort((a, b) => (a.bulkTripIndex ?? 0) - (b.bulkTripIndex ?? 0)); setReviewViewImg({ src: r.src, bulkAnnotations: batchSiblings.map((e, i) => e.bulkTripAnnotation ? { ...e.bulkTripAnnotation, label: e.ref || (i + 1) } : null) }); } else { setReviewViewImg({ src: r.src, type: 'receipt', expIdx: idx, slot: r.slot }); } }} />
                             {isEditable && (
                               <button onClick={async (e) => {
                                 e.stopPropagation();
@@ -3327,7 +3411,17 @@ export default function BerkeleyExpenseSystem() {
           )}
           
           {/* Image viewer with rotate for receipts */}
-          {reviewViewImg && <ImageViewer src={reviewViewImg.src} onClose={() => setReviewViewImg(null)} onRotate={handleReviewRotate} />}
+          {reviewViewImg && (reviewViewImg.bulkAnnotations ? (
+            <div className="fixed inset-0 bg-black/90 flex items-center justify-center z-[100] p-4" onClick={() => setReviewViewImg(null)}>
+              <button onClick={() => setReviewViewImg(null)} className="absolute top-4 right-4 bg-white/20 hover:bg-white/40 text-white w-12 h-12 rounded-full text-2xl z-10">✕</button>
+              <div className="relative max-w-full max-h-full" onClick={e => e.stopPropagation()}>
+                <img src={reviewViewImg.src} alt="Xiaopiao" className="max-w-full max-h-[90vh] object-contain" />
+                {reviewViewImg.bulkAnnotations.map((ann, i) => ann ? (
+                  <div key={i} style={{ position: 'absolute', left: `${ann.xPct * 100}%`, top: `${ann.yPct * 100}%`, transform: 'translate(-50%, -50%)', width: '22px', height: '22px', background: '#ff6600', borderRadius: '50%', border: '2px solid #fff', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', fontWeight: 'bold', fontSize: '11px', boxShadow: '0 1px 3px rgba(0,0,0,0.3)' }}>{ann.label}</div>
+                ) : null)}
+              </div>
+            </div>
+          ) : <ImageViewer src={reviewViewImg.src} onClose={() => setReviewViewImg(null)} onRotate={handleReviewRotate} />)}
         </div>
       </div>
     );
@@ -3455,7 +3549,7 @@ export default function BerkeleyExpenseSystem() {
         )}
         
         <div className="grid grid-cols-2 gap-4"><div className="bg-white rounded-2xl shadow-lg p-6 text-center"><div className="text-4xl font-bold text-slate-800">{sortedExpenses.length}</div><div className="text-sm text-slate-500">{activeClaimTab === 'current' ? 'Pending' : 'In Claim'}</div></div><div className="bg-white rounded-2xl shadow-lg p-6 text-center"><div className="text-2xl font-bold text-green-600">{formatCurrency(reimbursementTotal, userReimburseCurrency)}</div><div className="text-sm text-slate-500">To Reimburse</div></div></div>
-        <div className="bg-white rounded-2xl shadow-lg p-6"><div className="flex flex-wrap gap-3"><button onClick={() => setShowAddExpense(true)} className="bg-blue-600 text-white px-6 py-3 rounded-xl font-semibold shadow-lg">📸 Add Receipt</button>{currentUser.mileageRate && <button onClick={() => setShowMileageModal(true)} className="bg-green-600 text-white px-6 py-3 rounded-xl font-semibold shadow-lg">📍 Mileage</button>}{pendingExpenses.length > 0 && (<button onClick={() => setShowPreview(true)} className="border-2 border-green-500 text-green-600 px-6 py-3 rounded-xl font-semibold">📋 Preview ({pendingExpenses.length})</button>)}{activeClaimTab === 'current' && <button onClick={handleManualSync} disabled={loading} className="border-2 border-slate-300 text-slate-600 px-4 py-3 rounded-xl font-semibold">{loading ? '⏳' : '🔄'} Sync</button>}</div></div>
+        <div className="bg-white rounded-2xl shadow-lg p-6"><div className="flex flex-wrap gap-3"><button onClick={() => setShowAddExpense(true)} className="bg-blue-600 text-white px-6 py-3 rounded-xl font-semibold shadow-lg">📸 Add Receipt</button>{currentUser.mileageRate && <button onClick={() => setShowMileageModal(true)} className="bg-green-600 text-white px-6 py-3 rounded-xl font-semibold shadow-lg">📍 Mileage</button>}{['BEJ','CHE','SHA','SHE'].includes(currentUser.office) && <button onClick={() => setShowBulkDiDi(true)} className="bg-amber-500 text-white px-6 py-3 rounded-xl font-semibold shadow-lg">🚕 Bulk DiDi</button>}{pendingExpenses.length > 0 && (<button onClick={() => setShowPreview(true)} className="bg-green-600 text-white px-6 py-3 rounded-xl font-semibold shadow-lg">📤 Preview & Submit ({pendingExpenses.length})</button>)}{activeClaimTab === 'current' && <button onClick={handleManualSync} disabled={loading} className="border-2 border-slate-300 text-slate-600 px-4 py-3 rounded-xl font-semibold">{loading ? '⏳' : '🔄'} Sync</button>}</div></div>
         <div className="bg-white rounded-2xl shadow-lg p-6">
           <h3 className="font-bold text-slate-800 mb-4">{activeClaimTab === 'current' ? '📋 Pending Expenses (sorted by date)' : `📋 ${activeReturnedClaim?.claim_number || 'Returned'} Expenses`}</h3>
           {(() => { const rc = editingReturnedClaimId ? claims.find(c => c.id === editingReturnedClaimId) : null; const refDate = rc ? (rc.level2_approved_at || rc.submitted_at) : undefined; return sortedExpenses.some(exp => isOlderThan2Months(exp.date, refDate)); })() && (
@@ -3488,7 +3582,7 @@ export default function BerkeleyExpenseSystem() {
                     {isOld && <span className="bg-red-100 text-red-600 text-xs font-bold px-2 py-1 rounded animate-pulse">🚨 &gt;2 Months</span>}
                     {isApproaching && <span className="bg-amber-100 text-amber-700 text-xs font-bold px-2 py-1 rounded">⏰ {daysLeft}d left</span>}
                     {exp.isForeignCurrency && <span className="text-amber-600 text-xs">💳</span>}
-                    {[exp.receiptPreview2, exp.receiptPreview3, exp.receiptPreview4].some(Boolean) && <span className="text-slate-500 text-xs">📑{[exp.receiptPreview, exp.receiptPreview2, exp.receiptPreview3, exp.receiptPreview4].filter(Boolean).length}</span>}
+                    {exp.bulkBatchId && (() => { const batchIds = [...new Set(sortedExpenses.filter(e => e.bulkBatchId).map(e => e.bulkBatchId))]; const batchNum = batchIds.indexOf(exp.bulkBatchId) + 1; return <span className="bg-amber-100 text-amber-700 text-xs font-bold px-1.5 py-0.5 rounded">🚕 Batch {batchNum}</span>; })()}
                   </div>
                   <p className="text-xs text-slate-500 mt-1">{cat?.icon} {cat?.name} • {exp.description}</p>
                   {exp.adminNotes && <div className="text-xs mt-1 bg-amber-50 border border-amber-200 px-2 py-1 rounded"><span className="font-semibold">📋 Review:</span><div dangerouslySetInnerHTML={{ __html: formatAdminNotesReact(exp.adminNotes) }} /></div>}
@@ -3496,7 +3590,7 @@ export default function BerkeleyExpenseSystem() {
                 </div>
                 <div className="flex items-center gap-2">
                   <span className="font-bold text-green-700">{formatCurrency(exp.reimbursementAmount || exp.amount, userReimburseCurrency)}</span>
-                  <button onClick={() => setEditingExpense(exp)} className="text-blue-500 p-2">✏️</button>
+                  <button onClick={() => exp.bulkBatchId ? setEditingBulkBatch(exp.bulkBatchId) : setEditingExpense(exp)} className="text-blue-500 p-2">✏️</button>
                   <button onClick={() => handleDeleteExpense(exp.id)} className="text-red-500 p-2">🗑️</button>
                 </div>
               </div>); 
@@ -4609,7 +4703,7 @@ export default function BerkeleyExpenseSystem() {
               <span className={`bg-${color}-100 text-${color}-700 text-xs px-2 py-0.5 rounded-full font-bold`}>{claimList.length}</span>
             </div>
             <span className="font-bold text-slate-500 text-sm">
-              {formatCurrency(claimList.reduce((s, c) => s + parseFloat(c.total_amount || 0), 0), 'GBP')}
+              {formatCurrency(claimList.reduce((s, c) => s + toGBP(parseFloat(c.total_amount || 0), c.currency || 'GBP'), 0), 'GBP')}
             </span>
           </button>
           {isOpen && (
@@ -5447,6 +5541,121 @@ export default function BerkeleyExpenseSystem() {
       {(canReview || canSeeReports) && (<div className="bg-white border-b sticky top-14 z-30"><div className="max-w-3xl mx-auto flex">{currentUser?.role !== 'group_finance' && <button onClick={() => setActiveTab('my_expenses')} className={`flex-1 py-3 text-sm font-semibold border-b-2 ${activeTab === 'my_expenses' ? 'border-blue-600 text-blue-600' : 'border-transparent text-slate-500'}`}>📋 My Expenses</button>}<button onClick={() => setActiveTab('review')} className={`flex-1 py-3 text-sm font-semibold border-b-2 ${activeTab === 'review' ? 'border-blue-600 text-blue-600' : 'border-transparent text-slate-500'}`}>👀 Review{getReviewableClaims().length > 0 && <span className="ml-2 bg-amber-500 text-white text-xs px-2 py-0.5 rounded-full">{getReviewableClaims().length}</span>}</button>{currentUser?.role === 'group_finance' && <button onClick={() => setActiveTab('finance')} className={`flex-1 py-3 text-sm font-semibold border-b-2 ${activeTab === 'finance' ? 'border-purple-600 text-purple-600' : 'border-transparent text-slate-500'}`}>📊 Finance</button>}{canSeeReports && <button onClick={() => setActiveTab('reports')} className={`flex-1 py-3 text-sm font-semibold border-b-2 ${activeTab === 'reports' ? 'border-blue-600 text-blue-600' : 'border-transparent text-slate-500'}`}>📊 Reports</button>}</div></div>)}
       <main className="max-w-3xl mx-auto p-4 pb-20">{activeTab === 'finance' && currentUser?.role === 'group_finance' ? <FinanceDashboard /> : activeTab === 'reports' && canSeeReports ? <CountryHeadReportsTab /> : activeTab === 'review' && currentUser?.role === 'group_finance' ? <FinanceReviewTab /> : canReview && activeTab === 'review' ? <ReviewClaimsTab /> : <MyExpensesTab />}</main>
       {(showAddExpense || editingExpense) && <AddExpenseModal editExpense={editingExpense} existingClaims={claims} expenses={expenses} onClose={() => { setShowAddExpense(false); setEditingExpense(null); }} />}
+      {editingBulkBatch && (() => {
+        const BatchEditInner = () => {
+          const batchExps = expenses.filter(e => e.bulkBatchId === editingBulkBatch).sort((a, b) => (a.bulkTripIndex ?? 0) - (b.bulkTripIndex ?? 0));
+          const xiaopiaoSrc = batchExps[0]?.receiptPreview;
+          const fapiaoSrc = batchExps[0]?.receiptPreview2;
+          const [tripEdits, setTripEdits] = useState(batchExps.map(exp => {
+            const desc = exp.description || '';
+            const arrowMatch = desc.match(/^(.+?)\s*→\s*(.+?)(?:\.\s*(.*))?$/);
+            return {
+              id: exp.id,
+              date: exp.date || '',
+              amount: String(exp.amount || ''),
+              from: arrowMatch ? arrowMatch[1] : '',
+              to: arrowMatch ? arrowMatch[2] : '',
+              description: arrowMatch ? (arrowMatch[3] || '') : desc,
+              merchant: exp.merchant || 'DiDi'
+            };
+          }));
+          const [saving, setSaving] = useState(false);
+          const [viewFullXiaopiao, setViewFullXiaopiao] = useState(false);
+          const [viewFullFapiao, setViewFullFapiao] = useState(false);
+          
+          const updateTrip = (idx, field, value) => setTripEdits(prev => prev.map((t, i) => i === idx ? { ...t, [field]: value } : t));
+          const tripTotal = tripEdits.reduce((s, t) => s + (parseFloat(t.amount) || 0), 0);
+          
+          const handleSaveBatchEdits = async () => {
+            setSaving(true);
+            try {
+              const updatedExpenses = expenses.map(exp => {
+                const edit = tripEdits.find(t => t.id === exp.id);
+                if (!edit) return exp;
+                return { ...exp, date: edit.date, amount: parseFloat(edit.amount) || 0, reimbursementAmount: parseFloat(edit.amount) || 0, merchant: edit.merchant, description: (edit.from && edit.to ? `${edit.from} → ${edit.to}` : edit.from || '') + (edit.description ? `. ${edit.description}` : ''), updatedAt: new Date().toISOString() };
+              });
+              const sorted = sortAndReassignRefs(updatedExpenses);
+              const remapped = remapAnnotationsForRefChange(expenses, sorted, statementAnnotations);
+              setExpenses(sorted);
+              setStatementAnnotations(remapped);
+              await saveToServer(sorted, annotatedStatements, remapped, originalStatementImages);
+              setSaving(false);
+              setEditingBulkBatch(null);
+            } catch (err) {
+              console.error('Batch edit save error:', err);
+              alert('❌ Failed to save changes');
+              setSaving(false);
+            }
+          };
+          
+          return (
+            <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50">
+              <div className="bg-white rounded-2xl max-w-2xl w-full shadow-2xl max-h-[90vh] overflow-hidden flex flex-col">
+                <div className="bg-amber-500 text-white p-5 flex justify-between items-center shrink-0">
+                  <div><h2 className="text-lg font-bold">✏️ Edit DiDi Batch ({batchExps.length} trips)</h2><p className="text-amber-100 text-sm">Total: CNY {tripTotal.toFixed(2)}</p></div>
+                  <button onClick={() => setEditingBulkBatch(null)} className="w-8 h-8 rounded-full bg-white/20">✕</button>
+                </div>
+                <div className="flex-1 overflow-y-auto p-5 space-y-4">
+                  {/* Reference images */}
+                  <details open className="bg-slate-50 border border-slate-200 rounded-xl">
+                    <summary className="p-3 font-semibold text-sm text-slate-700 cursor-pointer">📄 Reference Images (Xiaopiao & Fapiao)</summary>
+                    <div className="p-3 pt-0 grid grid-cols-2 gap-3">
+                      {xiaopiaoSrc && <div>
+                        <p className="text-xs font-bold text-amber-700 mb-1">小票 Xiaopiao</p>
+                        <div className="relative bg-white rounded-lg border overflow-hidden cursor-pointer" onClick={() => setViewFullXiaopiao(true)}>
+                          <img src={xiaopiaoSrc} alt="Xiaopiao" className="w-full object-contain" style={{ maxHeight: '200px' }} />
+                          {batchExps.map((exp, i) => {
+                            const ann = exp.bulkTripAnnotation;
+                            if (!ann) return null;
+                            return <div key={i} style={{ position: 'absolute', left: `${ann.xPct * 100}%`, top: `${ann.yPct * 100}%`, transform: 'translate(-50%, -50%)', width: '18px', height: '18px', background: '#ff6600', borderRadius: '50%', border: '2px solid #fff', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', fontWeight: 'bold', fontSize: '10px', boxShadow: '0 1px 3px rgba(0,0,0,0.3)', pointerEvents: 'none' }}>{i + 1}</div>;
+                          })}
+                        </div>
+                      </div>}
+                      {fapiaoSrc && <div>
+                        <p className="text-xs font-bold text-amber-700 mb-1">发票 Fapiao</p>
+                        <img src={fapiaoSrc} alt="Fapiao" className="w-full object-contain bg-white rounded-lg border cursor-pointer" style={{ maxHeight: '200px' }} onClick={() => setViewFullFapiao(true)} />
+                      </div>}
+                    </div>
+                  </details>
+                  {/* Trip details */}
+                  {tripEdits.map((trip, i) => (
+                    <div key={i} className="border-2 border-slate-200 rounded-xl p-4">
+                      <h4 className="font-bold text-amber-700 mb-3">Trip {i + 1} <span className="text-xs font-normal text-slate-400">{batchExps[i]?.ref}</span></h4>
+                      <div className="grid grid-cols-2 gap-3">
+                        <div><label className="text-xs font-semibold text-slate-500">Date *</label><input type="date" className="w-full p-2 border rounded-lg text-sm" value={trip.date} onChange={e => updateTrip(i, 'date', e.target.value)} /></div>
+                        <div><label className="text-xs font-semibold text-slate-500">Amount (CNY) *</label><input type="number" step="0.01" className="w-full p-2 border rounded-lg text-sm" value={trip.amount} onChange={e => updateTrip(i, 'amount', e.target.value)} /></div>
+                        <div><label className="text-xs font-semibold text-slate-500">From *</label><input className="w-full p-2 border rounded-lg text-sm" value={trip.from} onChange={e => updateTrip(i, 'from', e.target.value)} /></div>
+                        <div><label className="text-xs font-semibold text-slate-500">To</label><input className="w-full p-2 border rounded-lg text-sm" value={trip.to} onChange={e => updateTrip(i, 'to', e.target.value)} /></div>
+                      </div>
+                      <div className="mt-2"><label className="text-xs font-semibold text-slate-500">Description</label><input className="w-full p-2 border rounded-lg text-sm" value={trip.description} onChange={e => updateTrip(i, 'description', e.target.value)} /></div>
+                    </div>
+                  ))}
+                </div>
+                <div className="p-4 border-t flex gap-3 shrink-0">
+                  <button onClick={() => setEditingBulkBatch(null)} className="flex-1 py-3 rounded-xl border-2 font-semibold">Cancel</button>
+                  <button onClick={handleSaveBatchEdits} disabled={saving || tripEdits.some(t => !t.date || !t.amount || !t.from)} className="flex-[2] py-3 rounded-xl bg-amber-500 text-white font-semibold disabled:opacity-50">{saving ? '⏳ Saving...' : '💾 Save Changes'}</button>
+                </div>
+              </div>
+              {/* Full-size annotated xiaopiao */}
+              {viewFullXiaopiao && xiaopiaoSrc && (
+                <div className="fixed inset-0 bg-black/90 flex items-center justify-center z-[100] p-4" onClick={() => setViewFullXiaopiao(false)}>
+                  <button onClick={() => setViewFullXiaopiao(false)} className="absolute top-4 right-4 bg-white/20 hover:bg-white/40 text-white w-12 h-12 rounded-full text-2xl z-10">✕</button>
+                  <div className="relative max-w-full max-h-full" onClick={e => e.stopPropagation()}>
+                    <img src={xiaopiaoSrc} alt="Xiaopiao" className="max-w-full max-h-[90vh] object-contain" />
+                    {batchExps.map((exp, i) => {
+                      const ann = exp.bulkTripAnnotation;
+                      if (!ann) return null;
+                      return <div key={i} style={{ position: 'absolute', left: `${ann.xPct * 100}%`, top: `${ann.yPct * 100}%`, transform: 'translate(-50%, -50%)', width: '22px', height: '22px', background: '#ff6600', borderRadius: '50%', border: '2px solid #fff', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', fontWeight: 'bold', fontSize: '12px', boxShadow: '0 1px 3px rgba(0,0,0,0.3)' }}>{i + 1}</div>;
+                    })}
+                  </div>
+                </div>
+              )}
+              {viewFullFapiao && fapiaoSrc && <ImageViewer src={fapiaoSrc} onClose={() => setViewFullFapiao(false)} />}
+            </div>
+          );
+        };
+        return <BatchEditInner />;
+      })()}
       {showMileageModal && currentUser.mileageRate && (() => {
         const MileageModalInner = () => {
           const [from, setFrom] = useState('');
@@ -5510,6 +5719,345 @@ export default function BerkeleyExpenseSystem() {
           );
         };
         return <MileageModalInner />;
+      })()}
+      {showBulkDiDi && (() => {
+        const BulkDiDiInner = () => {
+          const [step, setStep] = useState('upload'); // upload, annotate, details
+          const [xiaopiao, setXiaopiao] = useState(null);
+          const [fapiao, setFapiao] = useState(null);
+          const [uploading, setUploading] = useState(false);
+          const [tripAnnotations, setTripAnnotations] = useState([]); // [{xPct, yPct, widthPct, heightPct, label}]
+          const [tripDetails, setTripDetails] = useState([]); // [{date, from, to, amount, description, merchant}]
+          const [saving, setSaving] = useState(false);
+          const [viewingAnnotatedXiaopiao, setViewingAnnotatedXiaopiao] = useState(false);
+          const [showFullImage, setShowFullImage] = useState(null);
+          
+          // Annotation state - tap markers instead of boxes
+          const canvasRef = useRef(null);
+          const [baseImage, setBaseImage] = useState(null);
+          const [imgDims, setImgDims] = useState({ width: 0, height: 0 });
+          const [markers, setMarkers] = useState([]); // [{x, y}] in image pixels
+          const [imageLoaded, setImageLoaded] = useState(false);
+          const [draggingIdx, setDraggingIdx] = useState(null); // index of marker being dragged
+          
+          // Upload handlers
+          const handleUpload = async (file, type) => {
+            setUploading(true);
+            const reader = new FileReader();
+            reader.onload = async (e) => {
+              try {
+                const url = await uploadImageToStorage(e.target.result, currentUser.id, type === 'xiaopiao' ? 'receipt' : 'statement');
+                if (type === 'xiaopiao') setXiaopiao(url);
+                else setFapiao(url);
+              } catch (err) {
+                if (type === 'xiaopiao') setXiaopiao(e.target.result);
+                else setFapiao(e.target.result);
+              }
+              setUploading(false);
+            };
+            reader.readAsDataURL(file);
+          };
+          
+          // Load xiaopiao for annotation
+          useEffect(() => {
+            if (step !== 'annotate' || !xiaopiao) return;
+            const img = new Image();
+            img.crossOrigin = 'anonymous';
+            img.onload = () => {
+              setBaseImage(img);
+              setImgDims({ width: img.naturalWidth, height: img.naturalHeight });
+              setImageLoaded(true);
+            };
+            img.src = xiaopiao;
+          }, [step, xiaopiao]);
+          
+          // Draw canvas with markers
+          useEffect(() => {
+            if (!imageLoaded || !canvasRef.current || !baseImage) return;
+            const canvas = canvasRef.current;
+            const container = canvas.parentElement;
+            const scale = container ? Math.min(container.clientWidth / imgDims.width, 1) : 0.5;
+            canvas.width = imgDims.width * scale;
+            canvas.height = imgDims.height * scale;
+            const ctx = canvas.getContext('2d');
+            ctx.drawImage(baseImage, 0, 0, canvas.width, canvas.height);
+            
+            markers.forEach((marker, i) => {
+              const x = marker.x * scale;
+              const y = marker.y * scale;
+              // Draw orange circle marker
+              const markerSize = 10;
+              // Circle
+              ctx.beginPath();
+              ctx.arc(x, y, markerSize, 0, Math.PI * 2);
+              ctx.fillStyle = '#ff6600';
+              ctx.fill();
+              ctx.strokeStyle = '#fff';
+              ctx.lineWidth = 2;
+              ctx.stroke();
+              // Number
+              ctx.fillStyle = '#fff';
+              ctx.font = 'bold ' + (markerSize + 1) + 'px Arial';
+              ctx.textAlign = 'center';
+              ctx.textBaseline = 'middle';
+              ctx.fillText(String(i + 1), x, y);
+              ctx.textAlign = 'start';
+              ctx.textBaseline = 'alphabetic';
+              // Horizontal guide line
+              ctx.strokeStyle = '#ff660060';
+              ctx.lineWidth = 1;
+              ctx.setLineDash([4, 4]);
+              ctx.beginPath();
+              ctx.moveTo(x + markerSize, y);
+              ctx.lineTo(canvas.width, y);
+              ctx.stroke();
+              ctx.setLineDash([]);
+            });
+          }, [imageLoaded, baseImage, markers, imgDims]);
+          
+          const getCanvasPos = (e) => {
+            const canvas = canvasRef.current;
+            if (!canvas) return { x: 0, y: 0 };
+            const rect = canvas.getBoundingClientRect();
+            const scaleX = imgDims.width / canvas.width;
+            const scaleY = imgDims.height / canvas.height;
+            const touch = e.touches?.[0] || e.changedTouches?.[0];
+            const clientX = touch ? touch.clientX : e.clientX;
+            const clientY = touch ? touch.clientY : e.clientY;
+            return { x: (clientX - rect.left) * scaleX, y: (clientY - rect.top) * scaleY };
+          };
+          
+          const handleTap = (e) => {
+            e.preventDefault();
+            const pos = getCanvasPos(e);
+            // Check if near an existing marker (within 20px in image coords)
+            const hitRadius = 20;
+            const hitIdx = markers.findIndex(m => Math.hypot(m.x - pos.x, m.y - pos.y) < hitRadius);
+            if (hitIdx >= 0) {
+              // Start dragging this marker
+              setDraggingIdx(hitIdx);
+            } else {
+              // Add new marker
+              setMarkers(prev => [...prev, { x: pos.x, y: pos.y }]);
+            }
+          };
+          
+          const handleDrag = (e) => {
+            if (draggingIdx === null) return;
+            e.preventDefault();
+            const pos = getCanvasPos(e);
+            setMarkers(prev => prev.map((m, i) => i === draggingIdx ? { x: pos.x, y: pos.y } : m));
+          };
+          
+          const handleDragEnd = (e) => {
+            if (draggingIdx !== null) {
+              e?.preventDefault();
+              setDraggingIdx(null);
+            }
+          };
+          
+          const handleRemoveMarker = (idx) => setMarkers(prev => prev.filter((_, i) => i !== idx));
+          
+          // Move from annotate → details
+          const handleAnnotateDone = () => {
+            if (markers.length === 0) { alert('Please tap on each trip row to mark it'); return; }
+            const anns = markers.map((m, i) => ({
+              label: `Trip ${i + 1}`,
+              xPct: m.x / imgDims.width,
+              yPct: m.y / imgDims.height
+            }));
+            setTripAnnotations(anns);
+            setTripDetails(anns.map((_, i) => ({ date: '', from: '', to: '', amount: '', description: '', merchant: 'DiDi' })));
+            setStep('details');
+          };
+          
+          // Save all trips
+          const handleSaveTrips = async () => {
+            // Validate
+            const invalid = tripDetails.some(t => !t.date || !t.amount || !t.from);
+            if (invalid) { alert('Please fill in Date, From, and Amount for all trips'); return; }
+            setSaving(true);
+            try {
+              const batchId = 'batch_' + Date.now();
+              const newExpenses = tripDetails.map((trip, i) => ({
+                id: Date.now() + i,
+                ref: 'temp',
+                category: 'C',
+                merchant: trip.merchant || 'DiDi',
+                date: trip.date,
+                amount: parseFloat(trip.amount) || 0,
+                reimbursementAmount: parseFloat(trip.amount) || 0,
+                currency: 'CNY',
+                description: (trip.from && trip.to ? `${trip.from} → ${trip.to}` : trip.from || '') + (trip.description ? `. ${trip.description}` : ''),
+                receiptPreview: xiaopiao,
+                receiptPreview2: fapiao,
+                isForeignCurrency: false,
+                status: 'draft',
+                createdAt: new Date().toISOString(),
+                bulkBatchId: batchId,
+                bulkTripAnnotation: tripAnnotations[i],
+                bulkTripIndex: i
+              }));
+              const oldExps = [...expenses];
+              const merged = sortAndReassignRefs([...expenses, ...newExpenses]);
+              const remapped = remapAnnotationsForRefChange(oldExps, merged, statementAnnotations);
+              setExpenses(merged);
+              setStatementAnnotations(remapped);
+              await saveToServer(merged, annotatedStatements, remapped, originalStatementImages);
+              setSaving(false);
+              setShowBulkDiDi(false);
+            } catch (err) {
+              console.error('Bulk save error:', err);
+              alert('❌ Failed to save trips');
+              setSaving(false);
+            }
+          };
+          
+          const updateTrip = (idx, field, value) => setTripDetails(prev => prev.map((t, i) => i === idx ? { ...t, [field]: value } : t));
+          const tripTotal = tripDetails.reduce((s, t) => s + (parseFloat(t.amount) || 0), 0);
+          
+          return (
+            <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50">
+              <div className="bg-white rounded-2xl max-w-2xl w-full shadow-2xl max-h-[90vh] overflow-hidden flex flex-col">
+                <div className="bg-amber-500 text-white p-5 shrink-0">
+                  <h2 className="text-lg font-bold">🚕 Bulk DiDi Upload</h2>
+                  <p className="text-amber-100 text-sm">{step === 'upload' ? 'Step 1: Upload 小票 & 发票' : step === 'annotate' ? 'Step 2: Annotate trips on 小票' : `Step 3: Enter trip details (${tripDetails.length} trips)`}</p>
+                </div>
+                
+                <div className="flex-1 overflow-y-auto p-5">
+                  {step === 'upload' && (
+                    <div className="space-y-4">
+                      <div>
+                        <label className="block text-sm font-bold text-slate-700 mb-2">小票 Xiaopiao (Trip List) *</label>
+                        {xiaopiao ? (
+                          <div className="relative inline-block"><img src={xiaopiao} alt="Xiaopiao" className="h-32 rounded-lg border-2 border-green-400" /><button onClick={() => setXiaopiao(null)} className="absolute -top-2 -right-2 bg-red-500 text-white w-6 h-6 rounded-full text-xs">✕</button></div>
+                        ) : (
+                          <label className="block border-2 border-dashed border-slate-300 rounded-xl p-8 text-center cursor-pointer hover:border-amber-400">
+                            <span className="text-3xl">📄</span><p className="text-sm text-slate-500 mt-2">Upload trip detail sheet</p>
+                            <input type="file" accept="image/*" className="hidden" onChange={e => e.target.files[0] && handleUpload(e.target.files[0], 'xiaopiao')} />
+                          </label>
+                        )}
+                      </div>
+                      <div>
+                        <label className="block text-sm font-bold text-slate-700 mb-2">发票 Fapiao (Tax Invoice) *</label>
+                        {fapiao ? (
+                          <div className="relative inline-block"><img src={fapiao} alt="Fapiao" className="h-32 rounded-lg border-2 border-green-400" /><button onClick={() => setFapiao(null)} className="absolute -top-2 -right-2 bg-red-500 text-white w-6 h-6 rounded-full text-xs">✕</button></div>
+                        ) : (
+                          <label className="block border-2 border-dashed border-slate-300 rounded-xl p-8 text-center cursor-pointer hover:border-amber-400">
+                            <span className="text-3xl">🧾</span><p className="text-sm text-slate-500 mt-2">Upload tax invoice</p>
+                            <input type="file" accept="image/*" className="hidden" onChange={e => e.target.files[0] && handleUpload(e.target.files[0], 'fapiao')} />
+                          </label>
+                        )}
+                      </div>
+                      {uploading && <p className="text-amber-600 text-sm animate-pulse">⏳ Uploading...</p>}
+                    </div>
+                  )}
+                  
+                  {step === 'annotate' && imageLoaded && (
+                    <div>
+                      <p className="text-sm text-slate-600 mb-3">Tap on each trip row to place a marker. Hold and drag a marker to reposition it.</p>
+                      <div className="flex flex-wrap gap-2 mb-3">
+                        {markers.map((_, i) => (
+                          <span key={i} className="bg-orange-100 text-orange-700 px-3 py-1 rounded-full text-xs font-bold flex items-center gap-1">
+                            Trip {i + 1} <button onClick={() => handleRemoveMarker(i)} className="text-red-500 font-bold">✕</button>
+                          </span>
+                        ))}
+                        {markers.length === 0 && <span className="text-slate-400 text-sm">No trips marked yet</span>}
+                      </div>
+                      <div className="overflow-auto bg-slate-100 rounded-lg" style={{ maxHeight: '50vh' }}>
+                        <canvas ref={canvasRef}
+                          onMouseDown={handleTap}
+                          onMouseMove={handleDrag}
+                          onMouseUp={handleDragEnd}
+                          onMouseLeave={handleDragEnd}
+                          onTouchStart={(e) => { e.preventDefault(); handleTap(e); }}
+                          onTouchMove={(e) => { e.preventDefault(); handleDrag(e); }}
+                          onTouchEnd={(e) => { e.preventDefault(); handleDragEnd(e); }}
+                          className={draggingIdx !== null ? 'cursor-grabbing' : 'cursor-pointer'} style={{ touchAction: 'none' }} />
+                      </div>
+                    </div>
+                  )}
+                  
+                  {step === 'details' && (
+                    <div className="space-y-4">
+                      {/* Reference images - collapsible */}
+                      <details open className="bg-slate-50 border border-slate-200 rounded-xl">
+                        <summary className="p-3 font-semibold text-sm text-slate-700 cursor-pointer">📄 Reference Images (Xiaopiao & Fapiao)</summary>
+                        <div className="p-3 pt-0 grid grid-cols-2 gap-3">
+                          {xiaopiao && <div>
+                            <p className="text-xs font-bold text-amber-700 mb-1">小票 Xiaopiao</p>
+                            <div className="relative bg-white rounded-lg border overflow-hidden cursor-pointer" onClick={() => setViewingAnnotatedXiaopiao(true)}>
+                              <img src={xiaopiao} alt="Xiaopiao" className="w-full object-contain" style={{ maxHeight: '200px' }} />
+                              {/* Draw annotation markers as overlays */}
+                              {markers.map((m, i) => (
+                                <div key={i} style={{ position: 'absolute', left: `${(m.x / imgDims.width) * 100}%`, top: `${(m.y / imgDims.height) * 100}%`, transform: 'translate(-50%, -50%)', width: '18px', height: '18px', background: '#ff6600', borderRadius: '50%', border: '2px solid #fff', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', fontWeight: 'bold', fontSize: '10px', boxShadow: '0 1px 3px rgba(0,0,0,0.3)', pointerEvents: 'none' }}>{i + 1}</div>
+                              ))}
+                            </div>
+                          </div>}
+                          {fapiao && <div>
+                            <p className="text-xs font-bold text-amber-700 mb-1">发票 Fapiao</p>
+                            <img src={fapiao} alt="Fapiao" className="w-full object-contain bg-white rounded-lg border cursor-pointer" style={{ maxHeight: '200px' }} onClick={() => setShowFullImage(fapiao)} />
+                          </div>}
+                        </div>
+                      </details>
+                      {tripDetails.map((trip, i) => (
+                        <div key={i} className="border-2 border-slate-200 rounded-xl p-4">
+                          <h4 className="font-bold text-amber-700 mb-3">Trip {i + 1}</h4>
+                          <div className="grid grid-cols-2 gap-3">
+                            <div>
+                              <label className="text-xs font-semibold text-slate-500">Date *</label>
+                              <input type="date" className="w-full p-2 border rounded-lg text-sm" value={trip.date} onChange={e => updateTrip(i, 'date', e.target.value)} />
+                            </div>
+                            <div>
+                              <label className="text-xs font-semibold text-slate-500">Amount (CNY) *</label>
+                              <input type="number" step="0.01" className="w-full p-2 border rounded-lg text-sm" placeholder="54.10" value={trip.amount} onChange={e => updateTrip(i, 'amount', e.target.value)} />
+                            </div>
+                            <div>
+                              <label className="text-xs font-semibold text-slate-500">From *</label>
+                              <input className="w-full p-2 border rounded-lg text-sm" placeholder="Office" value={trip.from} onChange={e => updateTrip(i, 'from', e.target.value)} />
+                            </div>
+                            <div>
+                              <label className="text-xs font-semibold text-slate-500">To</label>
+                              <input className="w-full p-2 border rounded-lg text-sm" placeholder="Airport" value={trip.to} onChange={e => updateTrip(i, 'to', e.target.value)} />
+                            </div>
+                          </div>
+                          <div className="mt-2">
+                            <label className="text-xs font-semibold text-slate-500">Description</label>
+                            <input className="w-full p-2 border rounded-lg text-sm" placeholder="Purpose of trip" value={trip.description} onChange={e => updateTrip(i, 'description', e.target.value)} />
+                          </div>
+                        </div>
+                      ))}
+                      <div className="bg-amber-50 border border-amber-300 rounded-xl p-3 text-sm">
+                        <strong>Total: CNY {tripTotal.toFixed(2)}</strong> — Please verify this matches your 发票 amount
+                      </div>
+                    </div>
+                  )}
+                </div>
+                
+                <div className="p-4 border-t flex gap-3 shrink-0">
+                  <button onClick={() => { if (step === 'details') setStep('annotate'); else if (step === 'annotate') setStep('upload'); else setShowBulkDiDi(false); }} className="flex-1 py-3 rounded-xl border-2 font-semibold">{step === 'upload' ? 'Cancel' : '← Back'}</button>
+                  {step === 'upload' && <button onClick={() => setStep('annotate')} disabled={!xiaopiao || !fapiao || uploading} className="flex-[2] py-3 rounded-xl bg-amber-500 text-white font-semibold disabled:opacity-50">Next: Annotate →</button>}
+                  {step === 'annotate' && <button onClick={handleAnnotateDone} disabled={markers.length === 0} className="flex-[2] py-3 rounded-xl bg-amber-500 text-white font-semibold disabled:opacity-50">Next: Trip Details ({markers.length}) →</button>}
+                  {step === 'details' && <button onClick={handleSaveTrips} disabled={saving || tripDetails.some(t => !t.date || !t.amount || !t.from)} className="flex-[2] py-3 rounded-xl bg-green-600 text-white font-semibold disabled:opacity-50">{saving ? '⏳ Saving...' : `💾 Save ${tripDetails.length} Trips`}</button>}
+                </div>
+              </div>
+              {/* Full-size annotated xiaopiao viewer */}
+              {viewingAnnotatedXiaopiao && xiaopiao && (
+                <div className="fixed inset-0 bg-black/90 flex items-center justify-center z-[100] p-4" onClick={() => setViewingAnnotatedXiaopiao(false)}>
+                  <button onClick={() => setViewingAnnotatedXiaopiao(false)} className="absolute top-4 right-4 bg-white/20 hover:bg-white/40 text-white w-12 h-12 rounded-full text-2xl z-10">✕</button>
+                  <div className="relative max-w-full max-h-full" onClick={e => e.stopPropagation()}>
+                    <img src={xiaopiao} alt="Xiaopiao" className="max-w-full max-h-[90vh] object-contain" />
+                    {markers.map((m, i) => (
+                      <div key={i} style={{ position: 'absolute', left: `${(m.x / imgDims.width) * 100}%`, top: `${(m.y / imgDims.height) * 100}%`, transform: 'translate(-50%, -50%)', width: '22px', height: '22px', background: '#ff6600', borderRadius: '50%', border: '2px solid #fff', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', fontWeight: 'bold', fontSize: '12px', boxShadow: '0 1px 3px rgba(0,0,0,0.3)' }}>{i + 1}</div>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {showFullImage && <ImageViewer src={showFullImage} onClose={() => setShowFullImage(null)} />}
+            </div>
+          );
+        };
+        return <BulkDiDiInner />;
       })()}
       {showPreview && <PreviewClaimModal />}
       {showStatementUpload && (
