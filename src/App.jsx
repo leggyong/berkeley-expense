@@ -1552,6 +1552,7 @@ export default function BerkeleyExpenseSystem() {
     if (!printWindow) { alert('Please allow popups'); return; }
     const office = OFFICES.find(o => o.code === officeCode);
     const companyName = office?.companyName || 'Berkeley';
+    const isChinaOffice = ['BEJ','CHE','SHA','SHE'].includes(officeCode);
     
     // Sort expenses by date and assign sequential refs
     const sortedExpenses = [...expenseList].sort((a, b) => new Date(a.date) - new Date(b.date));
@@ -1693,7 +1694,9 @@ export default function BerkeleyExpenseSystem() {
       const notesLen = (exp.adminNotes || '').length;
       const attendeesLen = (exp.attendees || '').length;
       const heightPenalty = Math.min(30, Math.floor(notesLen / 80) * 8 + Math.floor(attendeesLen / 150) * 8 + (exp.hasBackcharge ? 8 : 0));
-      const receipts = [exp.receiptPreview, exp.receiptPreview2, exp.receiptPreview3, exp.receiptPreview4].filter(Boolean);
+      const receipts = isChinaOffice && exp.receiptPreview2 
+        ? [exp.receiptPreview, exp.receiptPreview3, exp.receiptPreview4].filter(Boolean)
+        : [exp.receiptPreview, exp.receiptPreview2, exp.receiptPreview3, exp.receiptPreview4].filter(Boolean);
       const receiptCount = receipts.length;
       const baseHeight = matchStmtImg ? 200 : (receiptCount <= 1 ? 250 : 250);
       const availableHeight = baseHeight - heightPenalty;
@@ -1718,34 +1721,49 @@ export default function BerkeleyExpenseSystem() {
       const headerLines = batchExps.map(exp => '<div style="padding:3px 0;border-bottom:1px solid rgba(255,255,255,0.2);"><strong>' + exp.seqRef + ':</strong> ' + (exp.merchant || 'DiDi') + ' | ' + formatDDMMYYYY(new Date(exp.date)) + ' | ' + exp.currency + ' ' + fmtAmt(exp.amount) + '<br><span style="font-size:11px;opacity:0.9;">' + (exp.description || '') + '</span></div>').join('');
       const totalAmt = batchExps.reduce((s, e) => s + parseFloat(e.reimbursementAmount || e.amount || 0), 0);
       const xiaopiaoImg = batchExps[0]?.receiptPreview;
-      const fapiaoImg = batchExps[0]?.receiptPreview2;
       // Build annotation markers for xiaopiao
       const annotationOverlays = batchExps.map(exp => {
         const ann = exp.bulkTripAnnotation;
         if (!ann) return '';
         return '<div style="position:absolute;left:' + Math.max(0, ann.xPct * 100 - 1) + '%;top:' + Math.max(0, ann.yPct * 100 - 1) + '%;width:22px;height:22px;background:#ff6600;border-radius:50%;border:2px solid #fff;display:flex;align-items:center;justify-content:center;color:#fff;font-weight:bold;font-size:11px;box-shadow:0 1px 3px rgba(0,0,0,0.3);">' + exp.seqRef + '</div>';
       }).join('');
-      const imgContent = '<div style="display:flex;gap:10px;align-items:flex-start;">' +
-        (xiaopiaoImg ? '<div style="flex:1;max-width:50%;"><div style="background:#ff9800;color:white;padding:4px 8px;font-weight:bold;font-size:9px;margin-bottom:4px;border-radius:3px;">📄 小票 Xiaopiao</div><div style="position:relative;display:inline-block;"><img src="' + xiaopiaoImg + '" style="max-width:100%;max-height:200mm;object-fit:contain;border:1px solid #ddd;display:block;" />' + annotationOverlays + '</div></div>' : '') +
-        (fapiaoImg ? '<div style="flex:1;max-width:50%;border-left:3px solid #ff9800;padding-left:8px;"><div style="background:#ff9800;color:white;padding:4px 8px;font-weight:bold;font-size:9px;margin-bottom:4px;border-radius:3px;">🧾 发票 Fapiao</div><img src="' + fapiaoImg + '" style="max-width:100%;max-height:200mm;object-fit:contain;border:1px solid #ddd;" /></div>' : '') +
-        '</div>';
+      // Xiaopiao full-width (fapiao moved to appendix)
+      const imgContent = xiaopiaoImg ? '<div><div style="background:#ff9800;color:white;padding:4px 8px;font-weight:bold;font-size:9px;margin-bottom:4px;border-radius:3px;">📄 小票 Xiaopiao</div><div style="position:relative;display:inline-block;width:100%;"><img src="' + xiaopiaoImg + '" style="max-width:100%;max-height:240mm;object-fit:contain;border:1px solid #ddd;display:block;" />' + annotationOverlays + '</div></div>' : '';
       return '<div class="page receipt-page"><div style="background:#1565c0;color:#fff;padding:10px;border-radius:4px;margin-bottom:6px;"><div style="font-size:14px;font-weight:bold;margin-bottom:6px;">🚕 DiDi Batch (' + batchExps.length + ' trips) — Total: ' + reimburseCurrency + ' ' + fmtAmt(totalAmt) + '</div><div style="font-size:11px;line-height:1.6;">' + headerLines + '</div></div>' + imgContent + '</div>';
     };
     
     // Build receiptsHTML: non-batch first (in order), then batch groups
     const allReceiptPages = [];
+    const fapiaoPages = []; // Fapiaos collected for appendix (Chinese offices)
     const processedBatches = new Set();
     expensesWithRefs.filter(exp => exp.category !== 'H').forEach(exp => {
       if (exp.bulkBatchId) {
         if (!processedBatches.has(exp.bulkBatchId)) {
           processedBatches.add(exp.bulkBatchId);
-          allReceiptPages.push(renderBatchReceipt(batchGroups[exp.bulkBatchId]));
+          const batchExps = batchGroups[exp.bulkBatchId];
+          allReceiptPages.push(renderBatchReceipt(batchExps));
+          // Collect fapiao for this batch
+          const fapiaoImg = batchExps[0]?.receiptPreview2;
+          if (fapiaoImg) {
+            const refs = batchExps.map(e => e.seqRef);
+            const refRange = refs.length > 1 ? '#' + refs[0] + '-' + refs[refs.length - 1] : '#' + refs[0];
+            fapiaoPages.push({ img: fapiaoImg, label: '发票 Fapiao — Expense ' + refRange + ' DiDi Trips (' + batchExps.length + ' trips)', totalAmt: batchExps.reduce((s, e) => s + parseFloat(e.reimbursementAmount || e.amount || 0), 0) });
+          }
         }
       } else {
         allReceiptPages.push(renderSingleReceipt(exp));
+        // Collect fapiao from regular Chinese expenses (receiptPreview2)
+        if (isChinaOffice && exp.receiptPreview2) {
+          fapiaoPages.push({ img: exp.receiptPreview2, label: '发票 Fapiao — Expense #' + exp.seqRef + ' ' + (exp.merchant || ''), totalAmt: parseFloat(exp.reimbursementAmount || exp.amount || 0) });
+        }
       }
     });
     const receiptsHTML = allReceiptPages.join('');
+    
+    // Fapiao appendix pages
+    const fapiaoHTML = fapiaoPages.length > 0 ? fapiaoPages.map(fp => 
+      '<div class="page receipt-page"><div style="background:#ff9800;color:#fff;padding:10px;border-radius:4px;margin-bottom:6px;"><div style="font-size:14px;font-weight:bold;">🧾 ' + fp.label + '</div><div style="font-size:12px;margin-top:4px;">' + reimburseCurrency + ' ' + fmtAmt(fp.totalAmt) + '</div></div><img src="' + fp.img + '" style="max-width:100%;max-height:250mm;object-fit:contain;display:block;border:1px solid #ddd;" /></div>'
+    ).join('') : '';
 
     // Statement pages - only include if there are foreign currency expenses without inline matched statements
     const foreignExps = expensesWithRefs.filter(e => e.isForeignCurrency);
@@ -1843,7 +1861,7 @@ export default function BerkeleyExpenseSystem() {
       '</tr></tbody>' +
       '</table></div>' : '') +
       
-      backchargeReportHTML + receiptsHTML + statementsHTML +
+      backchargeReportHTML + receiptsHTML + statementsHTML + fapiaoHTML +
       '</body></html>';
     
     printWindow.document.write(html);
@@ -2851,7 +2869,7 @@ export default function BerkeleyExpenseSystem() {
                 <div className="grid grid-cols-2 gap-3">
                   {[
                     { num: 1, preview: receiptPreview, setPreview: setReceiptPreview, label: 'Receipt 1', required: true },
-                    { num: 2, preview: receiptPreview2, setPreview: setReceiptPreview2, label: 'Receipt 2' },
+                    { num: 2, preview: receiptPreview2, setPreview: setReceiptPreview2, label: ['BEJ','CHE','SHA','SHE'].includes(currentUser?.office) ? '发票 Fapiao' : 'Receipt 2' },
                     { num: 3, preview: receiptPreview3, setPreview: setReceiptPreview3, label: 'Receipt 3' },
                     { num: 4, preview: receiptPreview4, setPreview: setReceiptPreview4, label: 'Receipt 4' },
                   ].map(({ num, preview, setPreview, label, required }) => (
@@ -3301,7 +3319,7 @@ export default function BerkeleyExpenseSystem() {
                   {(() => {
                     const receipts = [
                       { src: exp.receiptPreview, slot: 'receiptPreview', label: 'Receipt' },
-                      { src: exp.receiptPreview2, slot: 'receiptPreview2', label: 'Receipt 2' },
+                      { src: exp.receiptPreview2, slot: 'receiptPreview2', label: ['BEJ','CHE','SHA','SHE'].includes(claim.office_code) ? '发票 Fapiao' : 'Receipt 2' },
                       { src: exp.receiptPreview3, slot: 'receiptPreview3', label: 'Receipt 3' },
                       { src: exp.receiptPreview4, slot: 'receiptPreview4', label: 'Receipt 4' }
                     ].filter(r => r.src);
