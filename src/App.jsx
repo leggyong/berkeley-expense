@@ -1547,7 +1547,7 @@ export default function BerkeleyExpenseSystem() {
   };
   
 
-  const generatePDFFromHTML = async (expenseList, userName, officeCode, claimNumber, submittedDate, statementImgs, reimburseCurrency, level2ApprovedBy, level2ApprovedAt, annotations = [], useHD = true) => {
+  const generatePDFFromHTML = async (expenseList, userName, officeCode, claimNumber, submittedDate, statementImgs, reimburseCurrency, level2ApprovedBy, level2ApprovedAt, annotations = [], useHD = false) => {
     const printWindow = window.open('', '_blank');
     if (!printWindow) { alert('Please allow popups'); return; }
     const office = OFFICES.find(o => o.code === officeCode);
@@ -2873,7 +2873,7 @@ export default function BerkeleyExpenseSystem() {
                     { num: 3, preview: receiptPreview3, setPreview: setReceiptPreview3, label: 'Receipt 3' },
                     { num: 4, preview: receiptPreview4, setPreview: setReceiptPreview4, label: 'Receipt 4' },
                   ].map(({ num, preview, setPreview, label, required }) => (
-                    <div key={num}><p className="text-xs font-semibold text-slate-500 mb-1">{label} {!required && <span className="text-slate-400">Optional</span>}</p>
+                    <div key={num}><p className="text-xs font-semibold text-slate-500 mb-1">{label}</p>
                     {preview ? (<div className="relative"><img src={preview} alt={label} className="w-full h-28 object-cover bg-slate-100 rounded-lg cursor-pointer" onClick={() => setShowFullImage(preview)} /><button onClick={() => setPreview(null)} className="absolute top-1 right-1 bg-red-500 text-white w-6 h-6 rounded-full text-xs">✕</button></div>
                     ) : (<div className="flex gap-1"><label className="flex-1 border-2 border-dashed border-slate-300 rounded-lg p-3 text-center cursor-pointer hover:border-blue-400"><input type="file" accept="image/*" capture="environment" onChange={(e) => handleFileChange(e, num)} className="hidden" /><span className="text-lg">📷</span></label><label className="flex-1 border-2 border-dashed border-slate-300 rounded-lg p-3 text-center cursor-pointer hover:border-green-400"><input type="file" accept="image/*" onChange={(e) => handleFileChange(e, num)} className="hidden" /><span className="text-lg">📁</span></label></div>)}
                     </div>
