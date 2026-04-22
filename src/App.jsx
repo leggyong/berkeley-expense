@@ -1547,11 +1547,12 @@ export default function BerkeleyExpenseSystem() {
   };
   
 
-  const generatePDFFromHTML = async (expenseList, userName, officeCode, claimNumber, submittedDate, statementImgs, reimburseCurrency, level2ApprovedBy, level2ApprovedAt, annotations = []) => {
+  const generatePDFFromHTML = async (expenseList, userName, officeCode, claimNumber, submittedDate, statementImgs, reimburseCurrency, level2ApprovedBy, level2ApprovedAt, annotations = [], useHD = false) => {
     const printWindow = window.open('', '_blank');
     if (!printWindow) { alert('Please allow popups'); return; }
     const office = OFFICES.find(o => o.code === officeCode);
     const companyName = office?.companyName || 'Berkeley';
+    const isChinaOffice = ['BEJ','CHE','SHA','SHE'].includes(officeCode);
     
     // Sort expenses by date and assign sequential refs
     const sortedExpenses = [...expenseList].sort((a, b) => new Date(a.date) - new Date(b.date));
@@ -1693,9 +1694,11 @@ export default function BerkeleyExpenseSystem() {
       const notesLen = (exp.adminNotes || '').length;
       const attendeesLen = (exp.attendees || '').length;
       const heightPenalty = Math.min(30, Math.floor(notesLen / 80) * 8 + Math.floor(attendeesLen / 150) * 8 + (exp.hasBackcharge ? 8 : 0));
-      const receipts = [exp.receiptPreview, exp.receiptPreview2, exp.receiptPreview3, exp.receiptPreview4].filter(Boolean);
+      const receipts = isChinaOffice && exp.receiptPreview2 
+        ? [exp.receiptPreview, exp.receiptPreview3, exp.receiptPreview4].filter(Boolean)
+        : [exp.receiptPreview, exp.receiptPreview2, exp.receiptPreview3, exp.receiptPreview4].filter(Boolean);
       const receiptCount = receipts.length;
-      const baseHeight = matchStmtImg ? 200 : (receiptCount <= 1 ? 200 : 250);
+      const baseHeight = matchStmtImg ? 200 : (receiptCount <= 1 ? 250 : 250);
       const availableHeight = baseHeight - heightPenalty;
       let receiptContent = '';
       if (receiptCount === 0) {
@@ -1718,34 +1721,49 @@ export default function BerkeleyExpenseSystem() {
       const headerLines = batchExps.map(exp => '<div style="padding:3px 0;border-bottom:1px solid rgba(255,255,255,0.2);"><strong>' + exp.seqRef + ':</strong> ' + (exp.merchant || 'DiDi') + ' | ' + formatDDMMYYYY(new Date(exp.date)) + ' | ' + exp.currency + ' ' + fmtAmt(exp.amount) + '<br><span style="font-size:11px;opacity:0.9;">' + (exp.description || '') + '</span></div>').join('');
       const totalAmt = batchExps.reduce((s, e) => s + parseFloat(e.reimbursementAmount || e.amount || 0), 0);
       const xiaopiaoImg = batchExps[0]?.receiptPreview;
-      const fapiaoImg = batchExps[0]?.receiptPreview2;
       // Build annotation markers for xiaopiao
       const annotationOverlays = batchExps.map(exp => {
         const ann = exp.bulkTripAnnotation;
         if (!ann) return '';
         return '<div style="position:absolute;left:' + Math.max(0, ann.xPct * 100 - 1) + '%;top:' + Math.max(0, ann.yPct * 100 - 1) + '%;width:22px;height:22px;background:#ff6600;border-radius:50%;border:2px solid #fff;display:flex;align-items:center;justify-content:center;color:#fff;font-weight:bold;font-size:11px;box-shadow:0 1px 3px rgba(0,0,0,0.3);">' + exp.seqRef + '</div>';
       }).join('');
-      const imgContent = '<div style="display:flex;gap:10px;align-items:flex-start;">' +
-        (xiaopiaoImg ? '<div style="flex:1;max-width:50%;"><div style="background:#ff9800;color:white;padding:4px 8px;font-weight:bold;font-size:9px;margin-bottom:4px;border-radius:3px;">📄 小票 Xiaopiao</div><div style="position:relative;display:inline-block;"><img src="' + xiaopiaoImg + '" style="max-width:100%;max-height:200mm;object-fit:contain;border:1px solid #ddd;display:block;" />' + annotationOverlays + '</div></div>' : '') +
-        (fapiaoImg ? '<div style="flex:1;max-width:50%;border-left:3px solid #ff9800;padding-left:8px;"><div style="background:#ff9800;color:white;padding:4px 8px;font-weight:bold;font-size:9px;margin-bottom:4px;border-radius:3px;">🧾 发票 Fapiao</div><img src="' + fapiaoImg + '" style="max-width:100%;max-height:200mm;object-fit:contain;border:1px solid #ddd;" /></div>' : '') +
-        '</div>';
+      // Xiaopiao full-width (fapiao moved to appendix)
+      const imgContent = xiaopiaoImg ? '<div><div style="background:#ff9800;color:white;padding:4px 8px;font-weight:bold;font-size:9px;margin-bottom:4px;border-radius:3px;">📄 小票 Xiaopiao</div><div style="position:relative;display:inline-block;width:100%;"><img src="' + xiaopiaoImg + '" style="max-width:100%;max-height:240mm;object-fit:contain;border:1px solid #ddd;display:block;" />' + annotationOverlays + '</div></div>' : '';
       return '<div class="page receipt-page"><div style="background:#1565c0;color:#fff;padding:10px;border-radius:4px;margin-bottom:6px;"><div style="font-size:14px;font-weight:bold;margin-bottom:6px;">🚕 DiDi Batch (' + batchExps.length + ' trips) — Total: ' + reimburseCurrency + ' ' + fmtAmt(totalAmt) + '</div><div style="font-size:11px;line-height:1.6;">' + headerLines + '</div></div>' + imgContent + '</div>';
     };
     
     // Build receiptsHTML: non-batch first (in order), then batch groups
     const allReceiptPages = [];
+    const fapiaoPages = []; // Fapiaos collected for appendix (Chinese offices)
     const processedBatches = new Set();
     expensesWithRefs.filter(exp => exp.category !== 'H').forEach(exp => {
       if (exp.bulkBatchId) {
         if (!processedBatches.has(exp.bulkBatchId)) {
           processedBatches.add(exp.bulkBatchId);
-          allReceiptPages.push(renderBatchReceipt(batchGroups[exp.bulkBatchId]));
+          const batchExps = batchGroups[exp.bulkBatchId];
+          allReceiptPages.push(renderBatchReceipt(batchExps));
+          // Collect fapiao for this batch
+          const fapiaoImg = batchExps[0]?.receiptPreview2;
+          if (fapiaoImg) {
+            const refs = batchExps.map(e => e.seqRef);
+            const refList = refs.map(r => '#' + r).join(', ');
+            fapiaoPages.push({ img: fapiaoImg, label: '发票 Fapiao — Expense ' + refList + ' DiDi Trips (' + batchExps.length + ' trips)', totalAmt: batchExps.reduce((s, e) => s + parseFloat(e.reimbursementAmount || e.amount || 0), 0) });
+          }
         }
       } else {
         allReceiptPages.push(renderSingleReceipt(exp));
+        // Collect fapiao from regular Chinese expenses (receiptPreview2)
+        if (isChinaOffice && exp.receiptPreview2) {
+          fapiaoPages.push({ img: exp.receiptPreview2, label: '发票 Fapiao — Expense #' + exp.seqRef + ' ' + (exp.merchant || ''), totalAmt: parseFloat(exp.reimbursementAmount || exp.amount || 0) });
+        }
       }
     });
     const receiptsHTML = allReceiptPages.join('');
+    
+    // Fapiao appendix pages
+    const fapiaoHTML = fapiaoPages.length > 0 ? fapiaoPages.map(fp => 
+      '<div class="page receipt-page"><div style="background:#ff9800;color:#fff;padding:10px;border-radius:4px;margin-bottom:6px;"><div style="font-size:14px;font-weight:bold;">🧾 ' + fp.label + '</div><div style="font-size:12px;margin-top:4px;">' + reimburseCurrency + ' ' + fmtAmt(fp.totalAmt) + '</div></div><img src="' + fp.img + '" style="max-width:100%;max-height:250mm;object-fit:contain;display:block;border:1px solid #ddd;" /></div>'
+    ).join('') : '';
 
     // Statement pages - only include if there are foreign currency expenses without inline matched statements
     const foreignExps = expensesWithRefs.filter(e => e.isForeignCurrency);
@@ -1790,7 +1808,7 @@ export default function BerkeleyExpenseSystem() {
       '.statement-page{padding:5mm;}' +
       '.statement-header{background:#ff9800;color:#fff;padding:8px;text-align:center;font-weight:bold;}' +
       '.statement-img{max-width:100%;max-height:260mm;object-fit:contain;display:block;margin:0 auto;border:1px solid #ccc;}' +
-      '@media print{body{-webkit-print-color-adjust:exact;print-color-adjust:exact;}}' +
+      '@media print{body{-webkit-print-color-adjust:exact;print-color-adjust:exact;}img{image-rendering:high-quality;-webkit-print-color-adjust:exact;}}' +
       '</style></head><body>' +
       
       // PAGE 1: Summary - FIXED: removed e-signature, compact to fit 1 page
@@ -1843,17 +1861,60 @@ export default function BerkeleyExpenseSystem() {
       '</tr></tbody>' +
       '</table></div>' : '') +
       
-      backchargeReportHTML + receiptsHTML + statementsHTML +
+      backchargeReportHTML + receiptsHTML + statementsHTML + fapiaoHTML +
       '</body></html>';
     
     printWindow.document.write(html);
     printWindow.document.close();
     printWindow.document.title = claimNumber || (userName + ' - Expense Claim');
     printWindow.focus();
-    // Wait for all images to load before printing
+    
+    // Wait for all images to load
     const imgs = printWindow.document.querySelectorAll('img');
     const loaded = Array.from(imgs).map(img => img.complete ? Promise.resolve() : new Promise(r => { img.onload = r; img.onerror = r; }));
-    Promise.all(loaded).then(() => { setTimeout(() => { printWindow.print(); setTimeout(() => { try { printWindow.close(); } catch(e) {} }, 1000); }, 200); });
+    await Promise.all(loaded);
+    
+    if (useHD) {
+      // HD mode: load html2pdf.js in the print window, render at 2x scale
+      try {
+        const status = printWindow.document.createElement('div');
+        status.style.cssText = 'position:fixed;top:0;left:0;right:0;background:#1565c0;color:white;padding:15px;text-align:center;font-family:Arial;font-size:14px;z-index:9999;box-shadow:0 2px 10px rgba(0,0,0,0.3);';
+        status.textContent = '⏳ Rendering HD PDF... Please wait 30-60 seconds';
+        printWindow.document.body.prepend(status);
+        
+        await new Promise((resolve, reject) => {
+          const s = printWindow.document.createElement('script');
+          s.src = 'https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js';
+          s.onload = resolve;
+          s.onerror = () => reject(new Error('Could not load html2pdf library'));
+          printWindow.document.head.appendChild(s);
+        });
+        
+        // Remove status overlay before capture
+        await new Promise(r => setTimeout(r, 300));
+        status.remove();
+        
+        const opt = {
+          margin: 0,
+          filename: (claimNumber || 'Expense_Claim').replace(/[^a-zA-Z0-9\-_ ]/g, '') + '.pdf',
+          image: { type: 'jpeg', quality: 0.98 },
+          html2canvas: { scale: 2, useCORS: true, letterRendering: true, logging: false },
+          jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' },
+          pagebreak: { mode: ['css', 'legacy'], before: '.page' }
+        };
+        
+        await printWindow.html2pdf().set(opt).from(printWindow.document.body).save();
+        setTimeout(() => { try { printWindow.close(); } catch(e) {} }, 2000);
+      } catch (err) {
+        console.error('HD PDF error:', err);
+        alert('HD PDF failed: ' + err.message + '\nFalling back to standard print.');
+        printWindow.print();
+        setTimeout(() => { try { printWindow.close(); } catch(e) {} }, 1000);
+      }
+    } else {
+      // Standard mode: browser print dialog
+      setTimeout(() => { printWindow.print(); setTimeout(() => { try { printWindow.close(); } catch(e) {} }, 1000); }, 200);
+    }
   };
 
 
@@ -2808,11 +2869,11 @@ export default function BerkeleyExpenseSystem() {
                 <div className="grid grid-cols-2 gap-3">
                   {[
                     { num: 1, preview: receiptPreview, setPreview: setReceiptPreview, label: 'Receipt 1', required: true },
-                    { num: 2, preview: receiptPreview2, setPreview: setReceiptPreview2, label: 'Receipt 2' },
+                    { num: 2, preview: receiptPreview2, setPreview: setReceiptPreview2, label: ['BEJ','CHE','SHA','SHE'].includes(currentUser?.office) ? '发票 Fapiao' : 'Receipt 2' },
                     { num: 3, preview: receiptPreview3, setPreview: setReceiptPreview3, label: 'Receipt 3' },
                     { num: 4, preview: receiptPreview4, setPreview: setReceiptPreview4, label: 'Receipt 4' },
                   ].map(({ num, preview, setPreview, label, required }) => (
-                    <div key={num}><p className="text-xs font-semibold text-slate-500 mb-1">{label} {!required && <span className="text-slate-400">Optional</span>}</p>
+                    <div key={num}><p className="text-xs font-semibold text-slate-500 mb-1">{label}</p>
                     {preview ? (<div className="relative"><img src={preview} alt={label} className="w-full h-28 object-cover bg-slate-100 rounded-lg cursor-pointer" onClick={() => setShowFullImage(preview)} /><button onClick={() => setPreview(null)} className="absolute top-1 right-1 bg-red-500 text-white w-6 h-6 rounded-full text-xs">✕</button></div>
                     ) : (<div className="flex gap-1"><label className="flex-1 border-2 border-dashed border-slate-300 rounded-lg p-3 text-center cursor-pointer hover:border-blue-400"><input type="file" accept="image/*" capture="environment" onChange={(e) => handleFileChange(e, num)} className="hidden" /><span className="text-lg">📷</span></label><label className="flex-1 border-2 border-dashed border-slate-300 rounded-lg p-3 text-center cursor-pointer hover:border-green-400"><input type="file" accept="image/*" onChange={(e) => handleFileChange(e, num)} className="hidden" /><span className="text-lg">📁</span></label></div>)}
                     </div>
@@ -2935,7 +2996,7 @@ export default function BerkeleyExpenseSystem() {
     return (
       <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-50">
         <div className="bg-white rounded-2xl max-w-4xl w-full max-h-[95vh] overflow-hidden shadow-2xl flex flex-col">
-          <div className="bg-gradient-to-r from-blue-900 to-indigo-900 text-white p-4 flex justify-between items-center shrink-0"><div><h2 className="text-lg font-bold">📋 Preview</h2><p className="text-blue-200 text-sm">{userReimburseCurrency}</p></div><div className="flex items-center gap-2"><button onClick={handleDownloadPreviewPDF} disabled={downloading} className="bg-green-500 text-white px-4 py-2 rounded-lg font-semibold text-sm">📥 PDF</button><button onClick={handleClosePreview} className="w-8 h-8 rounded-full bg-white/20">✕</button></div></div>
+          <div className="bg-gradient-to-r from-blue-900 to-indigo-900 text-white p-4 flex justify-between items-center shrink-0"><div><h2 className="text-lg font-bold">📋 Preview</h2><p className="text-blue-200 text-sm">{userReimburseCurrency}</p></div><div className="flex items-center gap-2"><button onClick={handleDownloadPreviewPDF} disabled={downloading} className="bg-green-500 text-white px-4 py-2 rounded-lg font-semibold text-sm">{downloading ? '⏳...' : '📥 PDF'}</button><button onClick={handleClosePreview} className="w-8 h-8 rounded-full bg-white/20">✕</button></div></div>
           <div className="flex-1 overflow-y-auto p-6">
             <div className="max-w-3xl mx-auto border-2 border-slate-300 rounded-xl p-6">
               <div className="text-center mb-6"><h1 className="text-xl font-bold">Berkeley International Expense Claim Form</h1><p className="text-sm text-slate-500">{getCompanyName(currentUser.office)}</p></div>
@@ -3175,7 +3236,103 @@ export default function BerkeleyExpenseSystem() {
                 </div>
               );
             })()}
-            {sortedExpenses.map((exp, idx) => {
+            {(() => {
+              // Pre-compute batch groups for DiDi
+              const renderedBatches = new Set();
+              const getBatchMembers = (batchId) => sortedExpenses.map((e, i) => ({ exp: e, idx: i })).filter(x => x.exp.bulkBatchId === batchId);
+              const isChinaClaim = ['BEJ','CHE','SHA','SHE'].includes(claim.office_code);
+              
+              return sortedExpenses.map((exp, idx) => {
+              // Skip if this expense is part of a batch that's already been rendered
+              if (exp.bulkBatchId && renderedBatches.has(exp.bulkBatchId)) return null;
+              
+              // If this is the first expense of a DiDi batch, render the batch group
+              if (exp.bulkBatchId) {
+                renderedBatches.add(exp.bulkBatchId);
+                const members = getBatchMembers(exp.bulkBatchId);
+                const batchTotal = members.reduce((s, m) => s + parseFloat(m.exp.reimbursementAmount || m.exp.amount || 0), 0);
+                const fapiaoImg = members[0]?.exp.receiptPreview2;
+                const xiaopiaoImg = members[0]?.exp.receiptPreview;
+                const refList = members.map(m => m.exp.ref).join(', ');
+                
+                return (
+                  <div key={'batch_' + exp.bulkBatchId} className="border-2 border-amber-400 bg-amber-50 rounded-xl mb-3 overflow-hidden">
+                    {/* Batch header */}
+                    <div className="bg-amber-500 text-white p-3">
+                      <div className="flex justify-between items-center">
+                        <div><span className="font-bold text-base">🚕 DiDi Batch ({members.length} trips)</span><span className="text-amber-100 text-sm ml-2">Refs: {refList}</span></div>
+                        <span className="font-bold text-lg">{formatCurrency(batchTotal, claim.currency)}</span>
+                      </div>
+                    </div>
+                    
+                    {/* Xiaopiao + Fapiao thumbnails */}
+                    <div className="p-3 flex gap-3 border-b border-amber-200">
+                      {xiaopiaoImg && (
+                        <div className="flex-shrink-0 cursor-pointer" onClick={() => { const batchSiblings = members.map(m => m.exp).sort((a, b) => (a.bulkTripIndex ?? 0) - (b.bulkTripIndex ?? 0)); setReviewViewImg({ src: xiaopiaoImg, bulkAnnotations: batchSiblings.map((e, i) => e.bulkTripAnnotation ? { ...e.bulkTripAnnotation, label: e.ref || (i + 1) } : null) }); }}>
+                          <p className="text-xs font-bold text-amber-700 mb-1">📄 小票 Xiaopiao</p>
+                          <img src={xiaopiaoImg} alt="Xiaopiao" className="h-20 rounded-lg border-2 border-amber-300 object-cover" />
+                        </div>
+                      )}
+                      {fapiaoImg && (
+                        <div className="flex-shrink-0 cursor-pointer" onClick={() => setReviewViewImg({ src: fapiaoImg, type: 'receipt' })}>
+                          <p className="text-xs font-bold text-amber-700 mb-1">🧾 发票 Fapiao</p>
+                          <img src={fapiaoImg} alt="Fapiao" className="h-20 rounded-lg border-2 border-amber-300 object-cover" />
+                        </div>
+                      )}
+                      {fapiaoImg && <div className="flex items-end text-xs text-amber-600 font-semibold">Fapiao total should match batch total: {formatCurrency(batchTotal, claim.currency)}</div>}
+                    </div>
+                    
+                    {/* Individual trips */}
+                    <div className="divide-y divide-amber-200">
+                      {members.map(({ exp: tripExp, idx: tripIdx }) => {
+                        const tripCat = EXPENSE_CATEGORIES[tripExp.category] || {};
+                        return (
+                          <div key={tripIdx} className={`p-3 ${deletedExpenses.has(tripIdx) ? 'opacity-50 bg-red-100' : ''}`}>
+                            {deletedExpenses.has(tripIdx) ? (
+                              <div className="flex justify-between items-center">
+                                <span className="line-through text-red-600 text-sm">{tripExp.ref} — {tripExp.merchant} — {formatCurrency(tripExp.reimbursementAmount || tripExp.amount, claim.currency)}</span>
+                                <button onClick={() => setDeletedExpenses(prev => { const n = new Set(prev); n.delete(tripIdx); return n; })} className="bg-white text-blue-600 px-2 py-0.5 rounded text-xs font-semibold border border-blue-300">↩ Undo</button>
+                              </div>
+                            ) : (<>
+                              <div className="flex justify-between items-start mb-1">
+                                <div className="flex items-center gap-2 flex-wrap">
+                                  <span className="bg-blue-600 text-white font-bold px-2 py-0.5 rounded text-xs">{tripExp.ref}</span>
+                                  <span className="font-semibold text-sm">{tripExp.merchant}</span>
+                                  <span className="text-slate-500 text-xs">{formatShortDate(tripExp.date)}</span>
+                                </div>
+                                <span className="font-bold text-green-700 text-sm">{formatCurrency(tripExp.reimbursementAmount || tripExp.amount, claim.currency)}</span>
+                              </div>
+                              <p className="text-xs text-slate-500 mb-2">{tripCat.icon} {tripCat.name} • {tripExp.description || '—'}</p>
+                              {/* Previous notes */}
+                              {tripExp.adminNotes && (
+                                <div className="bg-blue-50 border border-blue-200 rounded p-1.5 mb-1 text-xs text-blue-700">
+                                  <span className="font-semibold">📝</span> <span dangerouslySetInnerHTML={{ __html: formatAdminNotesReact(tripExp.adminNotes) }} />
+                                </div>
+                              )}
+                              {/* Notes + Return for this trip */}
+                              <div className="flex gap-2 items-start mb-1">
+                                <span className="text-xs font-semibold text-blue-600 whitespace-nowrap pt-2 w-20">📝 Notes:</span>
+                                <input className="flex-1 p-2 border-2 border-blue-200 bg-blue-50 rounded-lg text-sm" placeholder="Internal note for audit trail..." value={notes[tripIdx] || ''} onChange={e => setNotes(prev => ({ ...prev, [tripIdx]: e.target.value }))} />
+                              </div>
+                              <div className="flex gap-2 items-start">
+                                <span className="text-xs font-semibold text-red-600 whitespace-nowrap pt-2 w-20">🔄 Return:</span>
+                                <input className={`flex-1 p-2 border-2 rounded-lg text-sm ${returnReasons[tripIdx]?.trim() ? 'border-red-400 bg-red-50' : 'border-slate-200 bg-white'}`} placeholder="Return reason (e.g. wrong date, missing receipt)..." value={returnReasons[tripIdx] || ''} onChange={e => setReturnReasons(prev => ({ ...prev, [tripIdx]: e.target.value }))} />
+                              </div>
+                              {isEditable && (
+                                <div className="mt-1 pt-1 border-t border-slate-200">
+                                  <button onClick={() => setDeletedExpenses(prev => new Set([...prev, tripIdx]))} className="text-xs text-red-500 hover:text-red-700 font-semibold">🗑️ Remove this expense</button>
+                                </div>
+                              )}
+                            </>)}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                );
+              }
+              
+              // Regular (non-batch) expense — original rendering
               const cat = EXPENSE_CATEGORIES[exp.category] || {};
               const isOld = isOlderThan2Months(exp.date, claim.level2_approved_at || claim.submitted_at);
               const isApproaching = isApproaching2Months(exp.date);
@@ -3258,7 +3415,7 @@ export default function BerkeleyExpenseSystem() {
                   {(() => {
                     const receipts = [
                       { src: exp.receiptPreview, slot: 'receiptPreview', label: 'Receipt' },
-                      { src: exp.receiptPreview2, slot: 'receiptPreview2', label: 'Receipt 2' },
+                      { src: exp.receiptPreview2, slot: 'receiptPreview2', label: ['BEJ','CHE','SHA','SHE'].includes(claim.office_code) ? '发票 Fapiao' : 'Receipt 2' },
                       { src: exp.receiptPreview3, slot: 'receiptPreview3', label: 'Receipt 3' },
                       { src: exp.receiptPreview4, slot: 'receiptPreview4', label: 'Receipt 4' }
                     ].filter(r => r.src);
@@ -3374,7 +3531,8 @@ export default function BerkeleyExpenseSystem() {
                 </>)}
                 </div>
               );
-            })}
+            });
+            })()}
           </div>
           
           {/* Bottom buttons */}
@@ -5830,8 +5988,11 @@ export default function BerkeleyExpenseSystem() {
           const handleTap = (e) => {
             e.preventDefault();
             const pos = getCanvasPos(e);
-            // Check if near an existing marker (within 20px in image coords)
-            const hitRadius = 20;
+            // Hit radius: 30px in SCREEN space, converted to image coords
+            const canvas = canvasRef.current;
+            const screenHitRadius = 30;
+            const scale = canvas ? imgDims.width / canvas.width : 1;
+            const hitRadius = screenHitRadius * scale;
             const hitIdx = markers.findIndex(m => Math.hypot(m.x - pos.x, m.y - pos.y) < hitRadius);
             if (hitIdx >= 0) {
               // Start dragging this marker
