@@ -1746,8 +1746,8 @@ export default function BerkeleyExpenseSystem() {
           const fapiaoImg = batchExps[0]?.receiptPreview2;
           if (fapiaoImg) {
             const refs = batchExps.map(e => e.seqRef);
-            const refRange = refs.length > 1 ? '#' + refs[0] + '-' + refs[refs.length - 1] : '#' + refs[0];
-            fapiaoPages.push({ img: fapiaoImg, label: '发票 Fapiao — Expense ' + refRange + ' DiDi Trips (' + batchExps.length + ' trips)', totalAmt: batchExps.reduce((s, e) => s + parseFloat(e.reimbursementAmount || e.amount || 0), 0) });
+            const refList = refs.map(r => '#' + r).join(', ');
+            fapiaoPages.push({ img: fapiaoImg, label: '发票 Fapiao — Expense ' + refList + ' DiDi Trips (' + batchExps.length + ' trips)', totalAmt: batchExps.reduce((s, e) => s + parseFloat(e.reimbursementAmount || e.amount || 0), 0) });
           }
         }
       } else {
@@ -3236,7 +3236,95 @@ export default function BerkeleyExpenseSystem() {
                 </div>
               );
             })()}
-            {sortedExpenses.map((exp, idx) => {
+            {(() => {
+              // Pre-compute batch groups for DiDi
+              const renderedBatches = new Set();
+              const getBatchMembers = (batchId) => sortedExpenses.map((e, i) => ({ exp: e, idx: i })).filter(x => x.exp.bulkBatchId === batchId);
+              const isChinaClaim = ['BEJ','CHE','SHA','SHE'].includes(claim.office_code);
+              
+              return sortedExpenses.map((exp, idx) => {
+              // Skip if this expense is part of a batch that's already been rendered
+              if (exp.bulkBatchId && renderedBatches.has(exp.bulkBatchId)) return null;
+              
+              // If this is the first expense of a DiDi batch, render the batch group
+              if (exp.bulkBatchId) {
+                renderedBatches.add(exp.bulkBatchId);
+                const members = getBatchMembers(exp.bulkBatchId);
+                const batchTotal = members.reduce((s, m) => s + parseFloat(m.exp.reimbursementAmount || m.exp.amount || 0), 0);
+                const fapiaoImg = members[0]?.exp.receiptPreview2;
+                const xiaopiaoImg = members[0]?.exp.receiptPreview;
+                const refList = members.map(m => m.exp.ref).join(', ');
+                
+                return (
+                  <div key={'batch_' + exp.bulkBatchId} className="border-2 border-amber-400 bg-amber-50 rounded-xl mb-3 overflow-hidden">
+                    {/* Batch header */}
+                    <div className="bg-amber-500 text-white p-3">
+                      <div className="flex justify-between items-center">
+                        <div><span className="font-bold text-base">🚕 DiDi Batch ({members.length} trips)</span><span className="text-amber-100 text-sm ml-2">Refs: {refList}</span></div>
+                        <span className="font-bold text-lg">{formatCurrency(batchTotal, claim.currency)}</span>
+                      </div>
+                    </div>
+                    
+                    {/* Xiaopiao + Fapiao thumbnails */}
+                    <div className="p-3 flex gap-3 border-b border-amber-200">
+                      {xiaopiaoImg && (
+                        <div className="flex-shrink-0 cursor-pointer" onClick={() => { const batchSiblings = members.map(m => m.exp).sort((a, b) => (a.bulkTripIndex ?? 0) - (b.bulkTripIndex ?? 0)); setReviewViewImg({ src: xiaopiaoImg, bulkAnnotations: batchSiblings.map((e, i) => e.bulkTripAnnotation ? { ...e.bulkTripAnnotation, label: e.ref || (i + 1) } : null) }); }}>
+                          <p className="text-xs font-bold text-amber-700 mb-1">📄 小票 Xiaopiao</p>
+                          <img src={xiaopiaoImg} alt="Xiaopiao" className="h-20 rounded-lg border-2 border-amber-300 object-cover" />
+                        </div>
+                      )}
+                      {fapiaoImg && (
+                        <div className="flex-shrink-0 cursor-pointer" onClick={() => setReviewViewImg({ src: fapiaoImg, type: 'receipt' })}>
+                          <p className="text-xs font-bold text-amber-700 mb-1">🧾 发票 Fapiao</p>
+                          <img src={fapiaoImg} alt="Fapiao" className="h-20 rounded-lg border-2 border-amber-300 object-cover" />
+                        </div>
+                      )}
+                      {fapiaoImg && <div className="flex items-end text-xs text-amber-600 font-semibold">Fapiao total should match batch total: {formatCurrency(batchTotal, claim.currency)}</div>}
+                    </div>
+                    
+                    {/* Individual trips */}
+                    <div className="divide-y divide-amber-200">
+                      {members.map(({ exp: tripExp, idx: tripIdx }) => {
+                        const tripCat = EXPENSE_CATEGORIES[tripExp.category] || {};
+                        return (
+                          <div key={tripIdx} className={`p-3 ${deletedExpenses.has(tripIdx) ? 'opacity-50 bg-red-100' : ''}`}>
+                            {deletedExpenses.has(tripIdx) ? (
+                              <div className="flex justify-between items-center">
+                                <span className="line-through text-red-600 text-sm">{tripExp.ref} — {tripExp.merchant} — {formatCurrency(tripExp.reimbursementAmount || tripExp.amount, claim.currency)}</span>
+                                <button onClick={() => setDeletedExpenses(prev => { const n = new Set(prev); n.delete(tripIdx); return n; })} className="bg-white text-blue-600 px-2 py-0.5 rounded text-xs font-semibold border border-blue-300">↩ Undo</button>
+                              </div>
+                            ) : (<>
+                              <div className="flex justify-between items-start mb-1">
+                                <div className="flex items-center gap-2 flex-wrap">
+                                  <span className="bg-blue-600 text-white font-bold px-2 py-0.5 rounded text-xs">{tripExp.ref}</span>
+                                  <span className="font-semibold text-sm">{tripExp.merchant}</span>
+                                  <span className="text-slate-500 text-xs">{formatShortDate(tripExp.date)}</span>
+                                </div>
+                                <span className="font-bold text-green-700 text-sm">{formatCurrency(tripExp.reimbursementAmount || tripExp.amount, claim.currency)}</span>
+                              </div>
+                              <p className="text-xs text-slate-500 mb-2">{tripCat.icon} {tripCat.name} • {tripExp.description || '—'}</p>
+                              {/* Previous notes */}
+                              {tripExp.adminNotes && (
+                                <div className="bg-blue-50 border border-blue-200 rounded p-1.5 mb-1 text-xs text-blue-700">
+                                  <span className="font-semibold">📝</span> <span dangerouslySetInnerHTML={{ __html: formatAdminNotesReact(tripExp.adminNotes) }} />
+                                </div>
+                              )}
+                              {/* Notes + Return for this trip */}
+                              <div className="flex gap-2 items-center">
+                                <input className="flex-1 p-1.5 border border-blue-200 bg-blue-50 rounded text-xs" placeholder="Note..." value={notes[tripIdx] || ''} onChange={e => setNotes(prev => ({ ...prev, [tripIdx]: e.target.value }))} />
+                                <input className={`flex-1 p-1.5 border rounded text-xs ${returnReasons[tripIdx]?.trim() ? 'border-red-400 bg-red-50' : 'border-slate-200'}`} placeholder="Return reason..." value={returnReasons[tripIdx] || ''} onChange={e => setReturnReasons(prev => ({ ...prev, [tripIdx]: e.target.value }))} />
+                                {isEditable && <button onClick={() => setDeletedExpenses(prev => new Set([...prev, tripIdx]))} className="text-red-400 text-xs">🗑️</button>}
+                              </div>
+                            </>)}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                );
+              }
+              
+              // Regular (non-batch) expense — original rendering
               const cat = EXPENSE_CATEGORIES[exp.category] || {};
               const isOld = isOlderThan2Months(exp.date, claim.level2_approved_at || claim.submitted_at);
               const isApproaching = isApproaching2Months(exp.date);
@@ -3435,7 +3523,8 @@ export default function BerkeleyExpenseSystem() {
                 </>)}
                 </div>
               );
-            })}
+            });
+            })()}
           </div>
           
           {/* Bottom buttons */}
