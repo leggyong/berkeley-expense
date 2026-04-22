@@ -3310,11 +3310,19 @@ export default function BerkeleyExpenseSystem() {
                                 </div>
                               )}
                               {/* Notes + Return for this trip */}
-                              <div className="flex gap-2 items-center">
-                                <input className="flex-1 p-1.5 border border-blue-200 bg-blue-50 rounded text-xs" placeholder="Note..." value={notes[tripIdx] || ''} onChange={e => setNotes(prev => ({ ...prev, [tripIdx]: e.target.value }))} />
-                                <input className={`flex-1 p-1.5 border rounded text-xs ${returnReasons[tripIdx]?.trim() ? 'border-red-400 bg-red-50' : 'border-slate-200'}`} placeholder="Return reason..." value={returnReasons[tripIdx] || ''} onChange={e => setReturnReasons(prev => ({ ...prev, [tripIdx]: e.target.value }))} />
-                                {isEditable && <button onClick={() => setDeletedExpenses(prev => new Set([...prev, tripIdx]))} className="text-red-400 text-xs">🗑️</button>}
+                              <div className="flex gap-2 items-start mb-1">
+                                <span className="text-xs font-semibold text-blue-600 whitespace-nowrap pt-2 w-20">📝 Notes:</span>
+                                <input className="flex-1 p-2 border-2 border-blue-200 bg-blue-50 rounded-lg text-sm" placeholder="Internal note for audit trail..." value={notes[tripIdx] || ''} onChange={e => setNotes(prev => ({ ...prev, [tripIdx]: e.target.value }))} />
                               </div>
+                              <div className="flex gap-2 items-start">
+                                <span className="text-xs font-semibold text-red-600 whitespace-nowrap pt-2 w-20">🔄 Return:</span>
+                                <input className={`flex-1 p-2 border-2 rounded-lg text-sm ${returnReasons[tripIdx]?.trim() ? 'border-red-400 bg-red-50' : 'border-slate-200 bg-white'}`} placeholder="Return reason (e.g. wrong date, missing receipt)..." value={returnReasons[tripIdx] || ''} onChange={e => setReturnReasons(prev => ({ ...prev, [tripIdx]: e.target.value }))} />
+                              </div>
+                              {isEditable && (
+                                <div className="mt-1 pt-1 border-t border-slate-200">
+                                  <button onClick={() => setDeletedExpenses(prev => new Set([...prev, tripIdx]))} className="text-xs text-red-500 hover:text-red-700 font-semibold">🗑️ Remove this expense</button>
+                                </div>
+                              )}
                             </>)}
                           </div>
                         );
